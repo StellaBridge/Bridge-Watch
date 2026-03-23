@@ -8,8 +8,11 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+testutils = ["soroban-sdk/testutils"]
+
 [dependencies]
-soroban-sdk = "21.7.1"
+soroban-sdk = { version = "21.7.1" }
 
 [dev-dependencies]
 soroban-sdk = { version = "21.7.1", features = ["testutils"] }

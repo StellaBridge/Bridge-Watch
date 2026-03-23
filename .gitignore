@@ -38,6 +38,10 @@ docker-compose.override.yml
 # Rust / Soroban
 contracts/soroban/target/
 contracts/soroban/Cargo.lock
+contracts/soroban/test_snapshots/
+
+# Editor-specific
+.marscode/
 
 # Misc
 *.pem

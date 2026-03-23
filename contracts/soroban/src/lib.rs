@@ -1,5 +1,8 @@
 #![no_std]
 
+pub mod bridge_reserve_verifier;
+pub use bridge_reserve_verifier::BridgeReserveVerifier;
+
 use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Vec};
 
 #[contracttype]
@@ -136,7 +139,7 @@ mod tests {
     fn test_initialize() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(BridgeWatchContract, ());
+        let contract_id = env.register_contract(None, BridgeWatchContract);
         let client = BridgeWatchContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
@@ -150,7 +153,7 @@ mod tests {
     fn test_register_and_get_assets() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(BridgeWatchContract, ());
+        let contract_id = env.register_contract(None, BridgeWatchContract);
         let client = BridgeWatchContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
@@ -167,7 +170,7 @@ mod tests {
     fn test_submit_and_get_health() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(BridgeWatchContract, ());
+        let contract_id = env.register_contract(None, BridgeWatchContract);
         let client = BridgeWatchContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
