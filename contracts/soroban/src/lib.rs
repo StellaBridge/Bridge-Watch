@@ -3,7 +3,7 @@
 pub mod liquidity_pool;
 pub mod insurance_pool;
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
 
 use liquidity_pool::{
     DailyBucket, ImpermanentLossResult, LiquidityDepth, PoolMetrics, PoolSnapshot, PoolType,
@@ -18,6 +18,17 @@ pub struct AssetHealth {
     pub price_stability_score: u32,
     pub bridge_uptime_score: u32,
     pub timestamp: u64,
+}
+
+/// Represents a single entry in a batch health score submission.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HealthScoreBatch {
+    pub asset_code: String,
+    pub health_score: u32,
+    pub liquidity_score: u32,
+    pub price_stability_score: u32,
+    pub bridge_uptime_score: u32,
 }
 
 #[contracttype]
@@ -74,6 +85,42 @@ impl BridgeWatchContract {
         env.storage()
             .persistent()
             .set(&DataKey::AssetHealth(asset_code), &record);
+    }
+
+    /// Submit health scores for multiple assets in a single transaction (admin only).
+    ///
+    /// Accepts a vector of [`HealthScoreBatch`] records and stores each as an
+    /// [`AssetHealth`] entry with a consistent ledger timestamp. A `health_up`
+    /// event is emitted for every updated asset. Maximum batch size is 20 records.
+    pub fn submit_health_batch(env: Env, records: Vec<HealthScoreBatch>) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        if records.len() > 20 {
+            panic!("batch size exceeds the maximum of 20 records");
+        }
+
+        let timestamp = env.ledger().timestamp();
+
+        for item in records.iter() {
+            let record = AssetHealth {
+                asset_code: item.asset_code.clone(),
+                health_score: item.health_score,
+                liquidity_score: item.liquidity_score,
+                price_stability_score: item.price_stability_score,
+                bridge_uptime_score: item.bridge_uptime_score,
+                timestamp,
+            };
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::AssetHealth(item.asset_code.clone()), &record);
+
+            env.events().publish(
+                (symbol_short!("health_up"), item.asset_code.clone()),
+                item.health_score,
+            );
+        }
     }
 
     /// Submit a price record for an asset (admin only)
@@ -300,6 +347,83 @@ mod tests {
         let health = client.get_health(&usdc);
         assert!(health.is_some());
         assert_eq!(health.unwrap().health_score, 85);
+    }
+
+    // -----------------------------------------------------------------------
+    // Batch health submission tests (issue #21)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_submit_health_batch_stores_all_records() {
+        let (env, client, _admin) = setup();
+        env.ledger().set_timestamp(1_000_000);
+
+        let assets = ["USDC", "EURC", "PYUSD"];
+        let mut batch = Vec::new(&env);
+        for (i, code) in assets.iter().enumerate() {
+            batch.push_back(HealthScoreBatch {
+                asset_code: String::from_str(&env, code),
+                health_score: 80 + i as u32,
+                liquidity_score: 75,
+                price_stability_score: 78,
+                bridge_uptime_score: 82,
+            });
+        }
+
+        client.submit_health_batch(&batch);
+
+        for (i, code) in assets.iter().enumerate() {
+            let health = client.get_health(&String::from_str(&env, code)).unwrap();
+            assert_eq!(health.health_score, 80 + i as u32);
+            assert_eq!(health.timestamp, 1_000_000);
+        }
+    }
+
+    #[test]
+    fn test_submit_health_batch_consistent_timestamps() {
+        let (env, client, _admin) = setup();
+        env.ledger().set_timestamp(5_000_000);
+
+        let mut batch = Vec::new(&env);
+        batch.push_back(HealthScoreBatch {
+            asset_code: String::from_str(&env, "USDC"),
+            health_score: 90,
+            liquidity_score: 90,
+            price_stability_score: 90,
+            bridge_uptime_score: 90,
+        });
+        batch.push_back(HealthScoreBatch {
+            asset_code: String::from_str(&env, "EURC"),
+            health_score: 70,
+            liquidity_score: 70,
+            price_stability_score: 70,
+            bridge_uptime_score: 70,
+        });
+
+        client.submit_health_batch(&batch);
+
+        let usdc = client.get_health(&String::from_str(&env, "USDC")).unwrap();
+        let eurc = client.get_health(&String::from_str(&env, "EURC")).unwrap();
+        assert_eq!(usdc.timestamp, eurc.timestamp);
+        assert_eq!(usdc.timestamp, 5_000_000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_submit_health_batch_exceeds_limit() {
+        let (env, client, _admin) = setup();
+
+        let mut batch = Vec::new(&env);
+        for _ in 0..21u32 {
+            batch.push_back(HealthScoreBatch {
+                asset_code: String::from_str(&env, "USDC"),
+                health_score: 85,
+                liquidity_score: 85,
+                price_stability_score: 85,
+                bridge_uptime_score: 85,
+            });
+        }
+        client.submit_health_batch(&batch);
     }
 
     // -----------------------------------------------------------------------
