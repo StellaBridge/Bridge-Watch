@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #1e233d 0%, #2e3a64 30%, #1e233d 100%);
+  background-size: 200% 100%;
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s infinite linear;
+}
+
 body {
   margin: 0;
   font-family:
@@ -15,3 +33,4 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+

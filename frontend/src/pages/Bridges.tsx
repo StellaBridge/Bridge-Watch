@@ -1,5 +1,8 @@
 import { useBridges } from "../hooks/useBridges";
 import BridgeStatusCard from "../components/BridgeStatusCard";
+import SkeletonCard from "../components/Skeleton/SkeletonCard";
+import SkeletonTable from "../components/Skeleton/SkeletonTable";
+import LoadingSpinner from "../components/Skeleton/LoadingSpinner";
 
 export default function Bridges() {
   const { data, isLoading } = useBridges();
@@ -16,7 +19,15 @@ export default function Bridges() {
 
       {/* Bridge Cards */}
       {isLoading ? (
-        <p className="text-stellar-text-secondary">Loading bridge data...</p>
+        <div className="space-y-4">
+          <LoadingSpinner message="Loading bridge overview..." showProgress />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[1, 2, 3].map((i) => (
+              <SkeletonCard key={i} variant="bridge" />
+            ))}
+          </div>
+          <SkeletonTable rowCount={3} colCount={5} />
+        </div>
       ) : data && data.bridges.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {data.bridges.map(

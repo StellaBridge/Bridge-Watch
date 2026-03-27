@@ -4,6 +4,10 @@ import { usePrices } from "../hooks/usePrices";
 import HealthScoreCard from "../components/HealthScoreCard";
 import PriceChart from "../components/PriceChart";
 import LiquidityDepthChart from "../components/LiquidityDepthChart";
+import SkeletonCard from "../components/Skeleton/SkeletonCard";
+import SkeletonChart from "../components/Skeleton/SkeletonChart";
+import SkeletonTable from "../components/Skeleton/SkeletonTable";
+import LoadingSpinner from "../components/Skeleton/LoadingSpinner";
 
 export default function AssetDetail() {
   const { symbol } = useParams<{ symbol: string }>();
@@ -14,6 +18,35 @@ export default function AssetDetail() {
     return (
       <div className="text-stellar-text-secondary">
         No asset symbol provided.
+      </div>
+    );
+  }
+
+  const isPageLoading = !healthData || priceLoading;
+
+  if (isPageLoading) {
+    return (
+      <div className="space-y-8">
+        <header>
+          <h1 className="text-3xl font-bold text-white">{symbol}</h1>
+          <p className="mt-2 text-stellar-text-secondary">
+            Detailed monitoring for {symbol} on the Stellar network
+          </p>
+        </header>
+        <LoadingSpinner
+          message="Loading asset detail..."
+          showProgress
+          progress={healthData ? 65 : 25}
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <SkeletonCard variant="dashboard" />
+          <SkeletonChart title="Price" />
+        </div>
+
+        <SkeletonChart title="Liquidity depth" />
+
+        <SkeletonTable rowCount={4} colCount={4} />
       </div>
     );
   }

@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 import { useAssetsWithHealth, useHealthUpdater } from "../hooks/useAssets";
 import { useBridges } from "../hooks/useBridges";
 import { useWebSocket } from "../hooks/useWebSocket";
-import HealthScoreCard, {
-  HealthScoreCardSkeleton,
-} from "../components/HealthScoreCard";
+import HealthScoreCard from "../components/HealthScoreCard";
 import BridgeStatusCard from "../components/BridgeStatusCard";
+import SkeletonCard from "../components/Skeleton/SkeletonCard";
+import LoadingSpinner, {
+  LoadingProgress,
+} from "../components/Skeleton/LoadingSpinner";
 import type {
   AssetWithHealth,
   SortField,
@@ -60,6 +62,8 @@ export default function Dashboard() {
   const { data: bridgesData, isLoading: bridgesLoading } = useBridges();
   const { updateHealth } = useHealthUpdater();
 
+  const isPageLoading = assetsLoading || bridgesLoading;
+
   const [sortField, setSortField] = useState<SortField>("score");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
@@ -104,6 +108,13 @@ export default function Dashboard() {
           Real-time monitoring of bridged assets on the Stellar network
         </p>
       </header>
+
+      {isPageLoading && (
+        <div className="rounded-lg border border-stellar-border bg-stellar-card p-4">
+          <LoadingSpinner message="Loading dashboard data..." showProgress progress={assetsLoading ? 35 : 65} />
+          <LoadingProgress value={assetsLoading ? 40 : 70} />
+        </div>
+      )}
 
       <section aria-labelledby="asset-health-heading">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
@@ -168,7 +179,7 @@ export default function Dashboard() {
         ) : assetsLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3, 4, 5].map((i) => (
-              <HealthScoreCardSkeleton key={i} symbol={`Asset ${i}`} />
+              <SkeletonCard key={i} variant="dashboard" headerLines={2} bodyLines={4} />
             ))}
           </div>
         ) : processedAssets.length > 0 ? (
@@ -227,17 +238,7 @@ export default function Dashboard() {
         {bridgesLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-stellar-card border border-stellar-border rounded-lg p-6"
-              >
-                <div className="h-6 w-32 bg-stellar-border rounded animate-pulse mb-4" />
-                <div className="space-y-3">
-                  {[1, 2, 3, 4].map((j) => (
-                    <div key={j} className="h-4 bg-stellar-border rounded animate-pulse" />
-                  ))}
-                </div>
-              </div>
+              <SkeletonCard key={i} variant="bridge" headerLines={1} bodyLines={4} />
             ))}
           </div>
         ) : bridgesData && bridgesData.bridges.length > 0 ? (
