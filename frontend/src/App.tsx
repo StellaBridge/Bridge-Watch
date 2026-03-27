@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import AssetDetail from "./pages/AssetDetail";
 import Bridges from "./pages/Bridges";
 import Analytics from "./pages/Analytics";
+import ApiDocs from "./pages/ApiDocs";
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <Route path="/assets/:symbol" element={<AssetDetail />} />
         <Route path="/bridges" element={<Bridges />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/api-docs" element={<ApiDocs />} />
       </Route>
     </Routes>
   );

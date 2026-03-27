@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "lint": "eslint src/ --ext .ts",
     "lint:fix": "eslint src/ --ext .ts --fix",
-    "migrate": "tsx src/database/migrate.ts"
+    "migrate": "tsx src/database/migrate.ts",
+    "seed": "tsx src/database/seed.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
