@@ -1,4 +1,17 @@
-import type { Asset, HealthScore, AssetWithHealth } from "../types";
+import type {
+  Asset,
+  HealthScore,
+  AssetWithHealth,
+  AssetInfo,
+  PriceDataPoint,
+  PriceSource,
+  LiquiditySource,
+  VolumeData,
+  SupplyVerification,
+  HealthHistoryPoint,
+  AlertConfig,
+  PriceTimeframe,
+} from "../types";
 
 const API_BASE_URL = "/api/v1";
 
@@ -85,4 +98,39 @@ export function getBridgeStats(bridge: string) {
     averageTransferTime: number;
     uptime30d: number;
   } | null>(`/bridges/${bridge}/stats`);
+}
+
+// Asset Detail
+export function getAssetInfo(symbol: string) {
+  return fetchApi<AssetInfo>(`/assets/${symbol}/info`);
+}
+
+export function getAssetPriceHistory(symbol: string, timeframe: PriceTimeframe) {
+  return fetchApi<PriceDataPoint[]>(
+    `/assets/${symbol}/price/history?timeframe=${timeframe}`
+  );
+}
+
+export function getAssetPriceSources(symbol: string) {
+  return fetchApi<PriceSource[]>(`/assets/${symbol}/price/sources`);
+}
+
+export function getAssetLiquiditySources(symbol: string) {
+  return fetchApi<LiquiditySource[]>(`/assets/${symbol}/liquidity/sources`);
+}
+
+export function getAssetVolume(symbol: string) {
+  return fetchApi<VolumeData[]>(`/assets/${symbol}/volume`);
+}
+
+export function getAssetSupplyVerification(symbol: string) {
+  return fetchApi<SupplyVerification>(`/assets/${symbol}/supply`);
+}
+
+export function getAssetHealthHistory(symbol: string) {
+  return fetchApi<HealthHistoryPoint[]>(`/assets/${symbol}/health/history`);
+}
+
+export function getAssetAlerts(symbol: string) {
+  return fetchApi<AlertConfig[]>(`/assets/${symbol}/alerts`);
 }
