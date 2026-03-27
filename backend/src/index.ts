@@ -1,10 +1,10 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import { config } from "./config/index.js";
 import { logger } from "./utils/logger.js";
 import { registerRoutes } from "./api/routes/index.js";
+import { registerRateLimiting } from "./api/middleware/rateLimit.middleware.js";
 import { initJobSystem } from "./workers/index.js";
 import { JobQueue } from "./workers/queue.js";
 
@@ -19,10 +19,7 @@ export async function buildServer() {
     credentials: true,
   });
 
-  await server.register(rateLimit, {
-    max: config.RATE_LIMIT_MAX,
-    timeWindow: config.RATE_LIMIT_WINDOW_MS,
-  });
+  await registerRateLimiting(server);
 
   await server.register(websocket);
 

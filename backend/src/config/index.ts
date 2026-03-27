@@ -58,6 +58,12 @@ const envSchema = z.object({
   // Rate Limiting
   RATE_LIMIT_MAX: z.coerce.number().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
+  // Comma-separated list of IPs exempt from rate limiting
+  RATE_LIMIT_WHITELIST_IPS: z.string().optional(),
+  // Comma-separated list of API keys granted "trusted" tier (unlimited)
+  RATE_LIMIT_WHITELIST_KEYS: z.string().optional(),
+  // JSON object mapping API key → tier ("standard" | "premium")
+  RATE_LIMIT_KEY_TIERS: z.string().optional(),
 
   // Alert Thresholds
   PRICE_DEVIATION_THRESHOLD: z.coerce.number().default(0.02),
