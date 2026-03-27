@@ -4,6 +4,7 @@ const navLinks = [
   { to: "/", label: "Dashboard" },
   { to: "/bridges", label: "Bridges" },
   { to: "/analytics", label: "Analytics" },
+  { to: "/api-docs", label: "API Docs" },
 ];
 
 export default function Navbar() {
