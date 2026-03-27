@@ -3,167 +3,222 @@ import { redis } from "../../utils/redis.js";
 import { logger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
 
-export type RateLimitTier = "free" | "standard" | "premium" | "trusted";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-export interface TierConfig {
-  requests: number;
+export type RateLimitTier = "free" | "basic" | "premium" | "trusted";
+export type EndpointCategory = "read" | "write" | "admin" | "websocket";
+
+export interface TierLimits {
+  requestsPerWindow: number;
   windowMs: number;
-  burst: number;
+  burstAllowance: number;
 }
 
-// Per-tier request budgets
-export const RATE_LIMIT_TIERS: Record<RateLimitTier, TierConfig> = {
-  free:    { requests: 60,       windowMs: 60_000, burst: 10  },
-  standard:{ requests: 300,      windowMs: 60_000, burst: 30  },
-  premium: { requests: 1_000,    windowMs: 60_000, burst: 100 },
-  trusted: { requests: Infinity, windowMs: 60_000, burst: 0   },
-};
-
-// Stricter per-endpoint overrides — most restrictive value wins vs. tier limit
-const ENDPOINT_OVERRIDES: Record<string, Pick<TierConfig, "requests" | "windowMs">> = {
-  "/api/v1/circuit-breaker": { requests: 30,  windowMs: 60_000 },
-  "/api/v1/alerts":          { requests: 50,  windowMs: 60_000 },
-  "/api/v1/jobs":            { requests: 20,  windowMs: 60_000 },
-  "/api/v1/bridges":         { requests: 100, windowMs: 60_000 },
-  "/api/v1/assets":          { requests: 120, windowMs: 60_000 },
-};
-
-// Paths exempt from rate limiting
-const EXCLUDED_PATHS = new Set(["/health"]);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getIdentifier(request: FastifyRequest): { id: string; isApiKey: boolean } {
-  const apiKey = request.headers["x-api-key"];
-  if (apiKey && typeof apiKey === "string" && apiKey.length > 0) {
-    return { id: `key:${apiKey}`, isApiKey: true };
-  }
-  const forwarded = request.headers["x-forwarded-for"];
-  const ip =
-    typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip;
-  return { id: `ip:${ip}`, isApiKey: false };
-}
-
-function parseKeyTiers(raw: string): Record<string, string> {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function getTier(identifier: string, isApiKey: boolean): RateLimitTier {
-  if (!isApiKey) return "free";
-
-  const apiKey = identifier.slice("key:".length);
-
-  const whitelistedKeys = config.RATE_LIMIT_WHITELIST_KEYS
-    ? config.RATE_LIMIT_WHITELIST_KEYS.split(",").map((k) => k.trim())
-    : [];
-  if (whitelistedKeys.includes(apiKey)) return "trusted";
-
-  const tierMap = config.RATE_LIMIT_KEY_TIERS
-    ? parseKeyTiers(config.RATE_LIMIT_KEY_TIERS)
-    : {};
-  const assigned = tierMap[apiKey] as RateLimitTier | undefined;
-  return assigned && assigned in RATE_LIMIT_TIERS ? assigned : "standard";
-}
-
-function isWhitelistedIp(request: FastifyRequest): boolean {
-  if (!config.RATE_LIMIT_WHITELIST_IPS) return false;
-  const allowed = config.RATE_LIMIT_WHITELIST_IPS.split(",").map((s) => s.trim());
-  const forwarded = request.headers["x-forwarded-for"];
-  const ip =
-    typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip;
-  return allowed.includes(ip);
-}
-
-function matchEndpoint(url: string): string | null {
-  for (const prefix of Object.keys(ENDPOINT_OVERRIDES)) {
-    if (url.startsWith(prefix)) return prefix;
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Sliding window (Redis sorted-set)
-// ---------------------------------------------------------------------------
-
-interface WindowResult {
+export interface RateLimitResult {
   allowed: boolean;
   current: number;
+  limit: number;
+  remaining: number;
+  resetMs: number;
+  retryAfterMs?: number;
 }
 
-async function slidingWindow(
+export interface RateLimitMetrics {
+  totalRequests: number;
+  blockedRequests: number;
+  whitelistedRequests: number;
+  byTier: Record<RateLimitTier, number>;
+  byRouteGroup: Record<string, number>;
+}
+
+// ---------------------------------------------------------------------------
+// Tier configuration
+// Burst allowance = additional requests beyond the window limit before hard
+// blocking, giving clients a short grace buffer for bursty traffic.
+// ---------------------------------------------------------------------------
+
+export const TIER_LIMITS: Record<Exclude<RateLimitTier, "trusted">, TierLimits> = {
+  free: {
+    requestsPerWindow: config.RATE_LIMIT_MAX,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_MAX * config.RATE_LIMIT_BURST_MULTIPLIER),
+  },
+  basic: {
+    requestsPerWindow: config.RATE_LIMIT_MAX * 3,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_MAX * 3 * config.RATE_LIMIT_BURST_MULTIPLIER),
+  },
+  premium: {
+    requestsPerWindow: config.RATE_LIMIT_MAX * 10,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_MAX * 10 * config.RATE_LIMIT_BURST_MULTIPLIER),
+  },
+};
+
+// Per-endpoint-category multiplier applied to tier limits.
+// Values < 1 make that category stricter relative to the tier baseline.
+const ENDPOINT_MULTIPLIERS: Record<EndpointCategory, number> = {
+  read: 1.0,
+  write: 0.3,      // mutating endpoints are more restrictive
+  admin: 0.1,      // admin/circuit-breaker operations are very restrictive
+  websocket: 0.5,  // WebSocket handshake / upgrade limit
+};
+
+// ---------------------------------------------------------------------------
+// Redis sliding-window Lua script
+//
+// Uses a sorted set keyed by `key` where each member is a unique token and
+// its score is the request timestamp in milliseconds.
+//
+// Returns a 4-element array:  {allowed, current_count, reset_ms, effective_limit}
+//   allowed  – 1 if the request is permitted, 0 if it should be rejected
+// ---------------------------------------------------------------------------
+
+const SLIDING_WINDOW_SCRIPT = `
+local key     = KEYS[1]
+local now     = tonumber(ARGV[1])
+local window  = tonumber(ARGV[2])
+local limit   = tonumber(ARGV[3])
+local burst   = tonumber(ARGV[4])
+
+-- Evict entries that have left the sliding window
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+
+local current        = tonumber(redis.call('ZCARD', key))
+local effective_limit = limit + burst
+
+if current >= effective_limit then
+  -- Tell the client when the oldest request will expire (≈ next slot opens)
+  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  local reset_ms = now + window
+  if oldest and oldest[2] then
+    reset_ms = tonumber(oldest[2]) + window
+  end
+  return {0, current, reset_ms, limit}
+end
+
+-- Use Redis server time for a microsecond-granularity unique member
+local t      = redis.call('TIME')
+local member = tostring(now) .. ':' .. tostring(t[2])
+
+redis.call('ZADD', key, now, member)
+-- Keep the key alive slightly longer than the window so stragglers don't
+-- find a missing key and reset their counters prematurely.
+redis.call('PEXPIRE', key, window + 1000)
+
+return {1, current + 1, now + window, limit}
+`;
+
+// ---------------------------------------------------------------------------
+// In-memory metrics
+// ---------------------------------------------------------------------------
+
+const metrics: RateLimitMetrics = {
+  totalRequests: 0,
+  blockedRequests: 0,
+  whitelistedRequests: 0,
+  byTier: { free: 0, basic: 0, premium: 0, trusted: 0 },
+  byRouteGroup: {},
+};
+
+export function getRateLimitMetrics(): Readonly<RateLimitMetrics> {
+  return {
+    ...metrics,
+    byTier: { ...metrics.byTier },
+    byRouteGroup: { ...metrics.byRouteGroup },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Whitelist helpers
+// ---------------------------------------------------------------------------
+
+function buildWhitelist(): { ips: Set<string>; keys: Set<string> } {
+  const split = (raw: string | undefined): string[] =>
+    raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  return {
+    ips: new Set(split(config.RATE_LIMIT_WHITELIST_IPS)),
+    keys: new Set(split(config.RATE_LIMIT_WHITELIST_KEYS)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Request classification helpers
+// ---------------------------------------------------------------------------
+
+function getEndpointCategory(method: string, url: string): EndpointCategory {
+  const path = url.split("?")[0];
+
+  if (path.startsWith("/api/v1/ws")) return "websocket";
+
+  if (/\/api\/v1\/circuit-breaker\/(pause|recovery)/.test(path)) return "admin";
+
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) return "write";
+
+  return "read";
+}
+
+function getRouteGroup(url: string): string {
+  const path = url.split("?")[0];
+  const match = /^\/api\/v1\/([^/]+)/.exec(path);
+  return match ? match[1] : "default";
+}
+
+function getTierFromApiKey(apiKey: string | undefined): RateLimitTier {
+  if (!apiKey) return "free";
+  // Convention: API keys are prefixed with their tier name
+  if (apiKey.startsWith("premium_")) return "premium";
+  if (apiKey.startsWith("basic_")) return "basic";
+  return "free";
+}
+
+// ---------------------------------------------------------------------------
+// Core sliding-window check (wraps the Lua eval call)
+// ---------------------------------------------------------------------------
+
+async function checkSlidingWindow(
   key: string,
   limit: number,
-  windowMs: number,
-  burst: number
-): Promise<WindowResult | null> {
+  burstAllowance: number,
+  windowMs: number
+): Promise<RateLimitResult> {
   const now = Date.now();
-  const windowStart = now - windowMs;
-  const effectiveLimit = limit + burst;
-  // Unique member so concurrent requests don't collide on the same timestamp
-  const member = `${now}:${Math.random().toString(36).slice(2)}`;
 
   try {
-    const pipeline = redis.pipeline();
-    pipeline.zremrangebyscore(key, 0, windowStart);
-    pipeline.zadd(key, now, member);
-    pipeline.zcard(key);
-    pipeline.expire(key, Math.ceil(windowMs / 1000) + 1);
-    const results = await pipeline.exec();
+    const raw = (await redis.eval(
+      SLIDING_WINDOW_SCRIPT,
+      1,
+      key,
+      String(now),
+      String(windowMs),
+      String(limit),
+      String(burstAllowance)
+    )) as [number, number, number, number];
 
-    const current = (results?.[2]?.[1] as number) ?? 0;
-    return { allowed: current <= effectiveLimit, current };
+    const [allowed, current, resetMs, effectiveLimit] = raw;
+    const remaining = Math.max(0, effectiveLimit - current);
+
+    return {
+      allowed: allowed === 1,
+      current,
+      limit: effectiveLimit,
+      remaining,
+      resetMs,
+      retryAfterMs: allowed === 0 ? Math.max(0, resetMs - now) : undefined,
+    };
   } catch (err) {
-    logger.warn({ err }, "Redis unavailable for rate limiting — degrading gracefully");
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Metrics (best-effort, non-blocking)
-// ---------------------------------------------------------------------------
-
-async function recordMetrics(
-  identifier: string,
-  endpoint: string,
-  limited: boolean
-): Promise<void> {
-  const day = new Date().toISOString().slice(0, 10);
-  const ttl = 86_400 * 7; // 7-day retention
-  try {
-    const p = redis.pipeline();
-    p.incr(`metrics:rl:total:${day}`);
-    p.expire(`metrics:rl:total:${day}`, ttl);
-    p.incr(`metrics:rl:endpoint:${endpoint}:${day}`);
-    p.expire(`metrics:rl:endpoint:${endpoint}:${day}`, ttl);
-    if (limited) {
-      p.incr(`metrics:rl:limited:${day}`);
-      p.expire(`metrics:rl:limited:${day}`, ttl);
-      p.incr(`metrics:rl:limited_by:${identifier}:${day}`);
-      p.expire(`metrics:rl:limited_by:${identifier}:${day}`, ttl);
-    }
-    await p.exec();
-  } catch {
-    // metrics are non-critical
-  }
-}
-
-export async function getRateLimitMetrics(): Promise<Record<string, number>> {
-  const day = new Date().toISOString().slice(0, 10);
-  try {
-    const keys = await redis.keys(`metrics:rl:*:${day}`);
-    if (!keys.length) return {};
-    const values = await redis.mget(...keys);
-    return Object.fromEntries(
-      keys.map((k, i) => [k.replace(`:${day}`, ""), Number(values[i] ?? 0)])
-    );
-  } catch {
-    return {};
+    // Fail-open on Redis errors: log the issue but do not block legitimate traffic.
+    logger.warn({ err, key }, "Rate limit Redis error — failing open");
+    return {
+      allowed: true,
+      current: 0,
+      limit,
+      remaining: limit,
+      resetMs: now + windowMs,
+    };
   }
 }
 
@@ -172,64 +227,114 @@ export async function getRateLimitMetrics(): Promise<Record<string, number>> {
 // ---------------------------------------------------------------------------
 
 export async function registerRateLimiting(server: FastifyInstance): Promise<void> {
-  server.addHook(
-    "preHandler",
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const url = request.url.split("?")[0];
+  const whitelist = buildWhitelist();
 
-      if (EXCLUDED_PATHS.has(url)) return;
-      if (isWhitelistedIp(request)) return;
+  server.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {
+    const ip = request.ip;
+    const apiKey = request.headers["x-api-key"] as string | undefined;
 
-      const { id: identifier, isApiKey } = getIdentifier(request);
-      const tier = getTier(identifier, isApiKey);
+    metrics.totalRequests++;
 
-      if (tier === "trusted") return;
-
-      const tierConfig = RATE_LIMIT_TIERS[tier];
-      const endpointKey = matchEndpoint(url);
-      const override = endpointKey ? ENDPOINT_OVERRIDES[endpointKey] : null;
-
-      // Most restrictive limit wins
-      const limit = override
-        ? Math.min(tierConfig.requests, override.requests)
-        : tierConfig.requests;
-      const windowMs = override?.windowMs ?? tierConfig.windowMs;
-      const burst = tierConfig.burst;
-      const effectiveLimit = limit + burst;
-      const resetAt = Math.ceil((Date.now() + windowMs) / 1000);
-
-      reply.header("X-RateLimit-Limit", limit);
-      reply.header("X-RateLimit-Burst", burst);
-      reply.header("X-RateLimit-Reset", resetAt);
-      reply.header("X-RateLimit-Policy", `${limit};w=${windowMs / 1000};burst=${burst}`);
-
-      const redisKey = `rl:${identifier}:${endpointKey ?? "global"}`;
-      const result = await slidingWindow(redisKey, limit, windowMs, burst);
-
-      if (result === null) {
-        // Redis is down — allow request, mark remaining as unknown
-        reply.header("X-RateLimit-Remaining", "unknown");
-        await recordMetrics(identifier, endpointKey ?? "global", false);
-        return;
-      }
-
-      const remaining = Math.max(0, effectiveLimit - result.current);
-      reply.header("X-RateLimit-Remaining", remaining);
-
-      if (!result.allowed) {
-        await recordMetrics(identifier, endpointKey ?? "global", true);
-        reply.header("Retry-After", Math.ceil(windowMs / 1000));
-        return reply.status(429).send({
-          error: "Too Many Requests",
-          message: "Rate limit exceeded. Please slow down.",
-          retryAfter: Math.ceil(windowMs / 1000),
-          limit,
-          burst,
-          windowMs,
-        });
-      }
-
-      await recordMetrics(identifier, endpointKey ?? "global", false);
+    // ---- Whitelist check (bypass all limiting) ----------------------------
+    if (whitelist.ips.has(ip) || (apiKey !== undefined && whitelist.keys.has(apiKey))) {
+      metrics.whitelistedRequests++;
+      metrics.byTier.trusted++;
+      reply.header("X-RateLimit-Tier", "trusted");
+      return;
     }
+
+    // ---- Determine tier and endpoint characteristics ----------------------
+    const tier = getTierFromApiKey(apiKey);
+    const category = getEndpointCategory(request.method, request.url);
+    const routeGroup = getRouteGroup(request.url);
+    const tierLimits = TIER_LIMITS[tier as keyof typeof TIER_LIMITS];
+    const multiplier = ENDPOINT_MULTIPLIERS[category];
+
+    const effectiveLimit = Math.max(1, Math.floor(tierLimits.requestsPerWindow * multiplier));
+    const effectiveBurst = Math.max(0, Math.floor(tierLimits.burstAllowance * multiplier));
+
+    // Track metrics
+    metrics.byTier[tier]++;
+    metrics.byRouteGroup[routeGroup] = (metrics.byRouteGroup[routeGroup] ?? 0) + 1;
+
+    // ---- Per-IP sliding-window check -------------------------------------
+    const ipKey = `bw:rl:ip:${ip}:${routeGroup}`;
+    const ipResult = await checkSlidingWindow(
+      ipKey,
+      effectiveLimit,
+      effectiveBurst,
+      tierLimits.windowMs
+    );
+
+    // ---- Per-API-key sliding-window check --------------------------------
+    let keyResult: RateLimitResult | undefined;
+    if (apiKey !== undefined) {
+      const keyKey = `bw:rl:key:${apiKey}:${routeGroup}`;
+      keyResult = await checkSlidingWindow(
+        keyKey,
+        effectiveLimit,
+        effectiveBurst,
+        tierLimits.windowMs
+      );
+    }
+
+    // The binding constraint is whichever check is most restrictive.
+    const denied = !ipResult.allowed || (keyResult !== undefined && !keyResult.allowed);
+    const bindingResult =
+      keyResult !== undefined && !keyResult.allowed ? keyResult : ipResult;
+
+    // ---- Standard rate-limit response headers ----------------------------
+    reply.header("X-RateLimit-Limit", String(bindingResult.limit));
+    reply.header("X-RateLimit-Remaining", String(bindingResult.remaining));
+    reply.header(
+      "X-RateLimit-Reset",
+      String(Math.ceil(bindingResult.resetMs / 1000))
+    );
+    reply.header(
+      "X-RateLimit-Policy",
+      `${effectiveLimit};w=${Math.floor(tierLimits.windowMs / 1000)}`
+    );
+    reply.header("X-RateLimit-Tier", tier);
+
+    // ---- Reject if over limit --------------------------------------------
+    if (denied) {
+      metrics.blockedRequests++;
+
+      const retryAfterSec = Math.ceil(
+        (bindingResult.retryAfterMs ?? tierLimits.windowMs) / 1000
+      );
+      reply.header("Retry-After", String(retryAfterSec));
+
+      logger.warn(
+        {
+          ip,
+          hasApiKey: apiKey !== undefined,
+          tier,
+          category,
+          routeGroup,
+          url: request.url,
+          method: request.method,
+        },
+        "Rate limit exceeded"
+      );
+
+      return reply.status(429).send({
+        error: "Too Many Requests",
+        message: "Rate limit exceeded. Please slow down your requests.",
+        retryAfter: retryAfterSec,
+        limit: bindingResult.limit,
+        remaining: 0,
+        resetAt: new Date(bindingResult.resetMs).toISOString(),
+      });
+    }
+  });
+
+  logger.info(
+    {
+      whitelistedIps: whitelist.ips.size,
+      whitelistedKeys: whitelist.keys.size,
+      tiers: Object.keys(TIER_LIMITS),
+    },
+    "Rate limiting middleware registered"
   );
 }

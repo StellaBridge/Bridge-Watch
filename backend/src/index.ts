@@ -4,7 +4,10 @@ import websocket from "@fastify/websocket";
 import { config } from "./config/index.js";
 import { logger } from "./utils/logger.js";
 import { registerRoutes } from "./api/routes/index.js";
-import { registerRateLimiting } from "./api/middleware/rateLimit.middleware.js";
+import {
+  registerRateLimiting,
+  getRateLimitMetrics,
+} from "./api/middleware/rateLimit.middleware.js";
 import { initJobSystem } from "./workers/index.js";
 import { JobQueue } from "./workers/queue.js";
 
@@ -19,6 +22,7 @@ export async function buildServer() {
     credentials: true,
   });
 
+  // Sliding-window Redis rate limiting (replaces the simple @fastify/rate-limit global)
   await registerRateLimiting(server);
 
   await server.register(websocket);
@@ -29,6 +33,11 @@ export async function buildServer() {
   // Health check
   server.get("/health", async () => {
     return { status: "ok", timestamp: new Date().toISOString() };
+  });
+
+  // Rate-limit metrics (internal monitoring endpoint)
+  server.get("/api/v1/metrics/rate-limits", async () => {
+    return { metrics: getRateLimitMetrics(), timestamp: new Date().toISOString() };
   });
 
   return server;
