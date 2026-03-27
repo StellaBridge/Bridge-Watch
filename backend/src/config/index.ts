@@ -36,14 +36,21 @@ const envSchema = z.object({
   CIRCUIT_BREAKER_CONTRACT_ID: z.string().optional(),
   LIQUIDITY_CONTRACT_ADDRESS: z.string().optional(),
 
-  // Ethereum
+  // Ethereum / EVM chains
   ETHEREUM_RPC_URL: z.string().url().optional(),
   ETHEREUM_RPC_WS_URL: z.string().url().optional(),
+  ETHEREUM_RPC_FALLBACK_URL: z.string().url().optional(),
   RPC_PROVIDER_TYPE: z.enum(["http", "ws"]).default("http"),
   USDC_BRIDGE_ADDRESS: z.string().optional(),
   EURC_BRIDGE_ADDRESS: z.string().optional(),
   USDC_TOKEN_ADDRESS: z.string().optional(),
   EURC_TOKEN_ADDRESS: z.string().optional(),
+  // Polygon
+  POLYGON_RPC_URL: z.string().url().optional(),
+  POLYGON_RPC_FALLBACK_URL: z.string().url().optional(),
+  // Base
+  BASE_RPC_URL: z.string().url().optional(),
+  BASE_RPC_FALLBACK_URL: z.string().url().optional(),
 
   // External APIs
   CIRCLE_API_KEY: z.string().optional(),
