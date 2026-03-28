@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getAssetPrice } from "../services/api";
 
@@ -58,59 +58,68 @@ export function usePriceComparison(params: UsePriceComparisonParams): UsePriceCo
     enabled: !!symbol,
     refetchInterval: refetchIntervalMs,
     staleTime: 5_000,
-    onSuccess: (data) => {
-      if (!data) return;
+  });
 
-      const nowIso = data.lastUpdated ?? new Date().toISOString();
-      const t = Date.parse(nowIso);
+  useEffect(() => {
+    const data = query.data;
+    if (!data) return;
 
-      const prices: Partial<Record<PriceSourceId, number>> = {};
-      for (const src of data.sources ?? []) {
-        const id = normalizeSourceId(src.source);
-        if (!id) continue;
-        prices[id] = src.price;
+    const nowIso = data.lastUpdated ?? new Date().toISOString();
+    const t = Date.parse(nowIso);
+
+    const prices: Partial<Record<PriceSourceId, number>> = {};
+    for (const src of data.sources ?? []) {
+      const id = normalizeSourceId(src.source);
+      if (!id) continue;
+      prices[id] = src.price;
+    }
+
+    const filteredPrices = enabledSources
+      ? (Object.fromEntries(
+          Object.entries(prices).filter(([k]) => enabledSources.includes(k as PriceSourceId))
+        ) as Partial<Record<PriceSourceId, number>>)
+      : prices;
+
+    const priceValues = Object.values(filteredPrices).filter(
+      (v): v is number => typeof v === "number" && Number.isFinite(v)
+    );
+
+    const vwap =
+      typeof data.vwap === "number" && Number.isFinite(data.vwap) ? data.vwap : null;
+    const baseline =
+      vwap ??
+      (priceValues.length
+        ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
+        : 0);
+    const deviationPct = priceValues.length
+      ? computeDeviationPct(priceValues, baseline)
+      : null;
+
+    setPoints((prev) => {
+      const nextPoint: PriceComparisonPoint = {
+        t: Number.isFinite(t) ? t : Date.now(),
+        iso: nowIso,
+        prices: filteredPrices,
+        vwap,
+        deviationPct,
+      };
+
+      const cutoff = Date.now() - rangeMs;
+      const next = [...prev, nextPoint].filter((p) => p.t >= cutoff);
+
+      const deduped: PriceComparisonPoint[] = [];
+      for (const p of next) {
+        const last = deduped[deduped.length - 1];
+        if (last && last.t === p.t) {
+          deduped[deduped.length - 1] = p;
+        } else {
+          deduped.push(p);
+        }
       }
 
-      const filteredPrices = enabledSources
-        ? Object.fromEntries(
-            Object.entries(prices).filter(([k]) => enabledSources.includes(k as PriceSourceId))
-          )
-        : prices;
-
-      const priceValues = Object.values(filteredPrices).filter(
-        (v): v is number => typeof v === "number" && Number.isFinite(v)
-      );
-
-      const vwap = typeof data.vwap === "number" && Number.isFinite(data.vwap) ? data.vwap : null;
-      const baseline = vwap ?? (priceValues.length ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length : 0);
-      const deviationPct = priceValues.length ? computeDeviationPct(priceValues, baseline) : null;
-
-      setPoints((prev) => {
-        const nextPoint: PriceComparisonPoint = {
-          t: Number.isFinite(t) ? t : Date.now(),
-          iso: nowIso,
-          prices: filteredPrices,
-          vwap,
-          deviationPct,
-        };
-
-        const cutoff = Date.now() - rangeMs;
-        const next = [...prev, nextPoint].filter((p) => p.t >= cutoff);
-
-        const deduped: PriceComparisonPoint[] = [];
-        for (const p of next) {
-          const last = deduped[deduped.length - 1];
-          if (last && last.t === p.t) {
-            deduped[deduped.length - 1] = p;
-          } else {
-            deduped.push(p);
-          }
-        }
-
-        return deduped;
-      });
-    },
-  });
+      return deduped;
+    });
+  }, [enabledSources, query.data, rangeMs]);
 
   const derived = useMemo(() => {
     const latest = points.length ? points[points.length - 1] : null;

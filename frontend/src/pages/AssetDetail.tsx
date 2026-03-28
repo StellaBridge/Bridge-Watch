@@ -5,12 +5,55 @@ import { usePrices } from "../hooks/usePrices";
 import HealthScoreCard from "../components/HealthScoreCard";
 import PriceChart from "../components/PriceChart";
 import LiquidityDepthChart from "../components/LiquidityDepthChart";
+import type { DataTableColumnDef } from "../components/DataTable";
+import { DataTable } from "../components/DataTable";
+import type { CellContext } from "@tanstack/react-table";
 import { ErrorBoundary, LoadingSpinner } from "../components/Skeleton";
 
 export default function AssetDetail() {
   const { symbol } = useParams<{ symbol: string }>();
   const { data: healthData } = useAssetHealth(symbol ?? "");
   const { data: priceData } = usePrices(symbol ?? "");
+
+  const priceSourceRows = (priceData?.sources ?? []) as Array<{
+    source: string;
+    price: number;
+    timestamp: string;
+  }>;
+
+  const priceSourceColumns: Array<
+    DataTableColumnDef<{
+      source: string;
+      price: number;
+      timestamp: string;
+    }>
+  > = [
+    {
+      id: "source",
+      accessorKey: "source",
+      header: "Source",
+      filterType: "text",
+    },
+    {
+      id: "price",
+      accessorKey: "price",
+      header: "Price",
+      filterType: "numberRange",
+      cell: (
+        ctx: CellContext<
+          { source: string; price: number; timestamp: string },
+          unknown
+        >
+      ) =>
+        `$${Number(ctx.getValue()).toFixed(4)}`,
+    },
+    {
+      id: "timestamp",
+      accessorKey: "timestamp",
+      header: "Last Updated",
+      filterType: "text",
+    },
+  ];
 
   if (!symbol) {
     return (
@@ -53,70 +96,30 @@ export default function AssetDetail() {
 
       <LiquidityDepthChart symbol={symbol} data={[]} isLoading={false} />
 
-      <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Price Sources
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">
-              Price sources for {symbol} including last update times
-            </caption>
-            <thead>
-              <tr className="text-left text-stellar-text-secondary border-b border-stellar-border">
-                <th scope="col" className="pb-3 pr-4">
-                  Source
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  Price
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  Last Updated
-                </th>
-                <th scope="col" className="pb-3">
-                  Deviation
-                </th>
-              </tr>
-            </thead>
-            <tbody className="text-white">
-              {priceData?.sources && priceData.sources.length > 0 ? (
-                priceData.sources.map(
-                  (source: {
-                    source: string;
-                    price: number;
-                    timestamp: string;
-                  }) => (
-                    <tr
-                      key={source.source}
-                      className="border-b border-stellar-border"
-                    >
-                      <th scope="row" className="py-3 pr-4 font-medium text-white">
-                        {source.source}
-                      </th>
-                      <td className="py-3 pr-4">
-                        ${source.price.toFixed(4)}
-                      </td>
-                      <td className="py-3 pr-4 text-stellar-text-secondary">
-                        {source.timestamp}
-                      </td>
-                      <td className="py-3">--</td>
-                    </tr>
-                  )
-                )
-              ) : (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="py-6 text-center text-stellar-text-secondary"
-                  >
-                    No price source data available
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        data={priceSourceRows}
+        columns={priceSourceColumns}
+        isLoading={!priceData}
+        title="Price Sources"
+        description={`Price sources for ${symbol} including last update times`}
+        pageSizeOptions={[10, 20, 50]}
+        filenameBase={`${symbol}-price-sources`}
+        enableRowSelection={true}
+        enableMultiSort={true}
+        enableColumnReorder={true}
+        enableVirtualization={true}
+        rowActions={{
+          items: [
+            {
+              id: "copy-source",
+              label: "Copy source",
+              onSelect: (row) => {
+                void navigator.clipboard.writeText(row.source);
+              },
+            },
+          ],
+        }}
+      />
     </div>
   </Suspense>
 </ErrorBoundary>
