@@ -11,6 +11,7 @@ import {
 } from "./api/middleware/rateLimit.middleware.js";
 import { initJobSystem } from "./workers/index.js";
 import { JobQueue } from "./workers/queue.js";
+import { initWebhookWorker, stopWebhookWorker } from "./workers/webhookDelivery.worker.js";
 
 export async function buildServer() {
   const server = Fastify({
@@ -56,11 +57,15 @@ async function start() {
     // Initialize background jobs
     await initJobSystem();
 
+    // Initialize webhook delivery worker
+    await initWebhookWorker();
+
     // Graceful shutdown
     const shutdown = async () => {
       logger.info("Closing server...");
       await server.close();
       await JobQueue.getInstance().stop();
+      await stopWebhookWorker();
       process.exit(0);
     };
 
