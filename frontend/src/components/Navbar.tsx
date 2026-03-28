@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import ConnectionStatus from "./ConnectionStatus";
 
 const navLinks = [
   { to: "/", label: "Dashboard" },
@@ -44,9 +45,7 @@ export default function Navbar() {
               ))}
             </div>
           </div>
-          <div className="text-sm text-stellar-text-secondary">
-            Stellar Network Monitor
-          </div>
+          <ConnectionStatus />
         </div>
       </div>
     </nav>
