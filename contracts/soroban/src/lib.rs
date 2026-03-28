@@ -3,6 +3,7 @@
 
 // governance and insurance_pool are standalone contracts — only compiled for
 // tests (native target) to avoid Wasm symbol conflicts with BridgeWatchContract.
+pub mod acl;
 pub mod analytics_aggregator;
 #[cfg(test)]
 pub mod asset_registry;
@@ -20,6 +21,10 @@ pub mod reputation_system;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, String, Vec,
+};
+
+use acl::{
+    AclKey, BulkPermissionEntry, BulkRoleEntry, Permission, PermissionGrant, Role, RoleGrant,
 };
 
 use liquidity_pool::{
@@ -1757,6 +1762,268 @@ impl BridgeWatchContract {
             .persistent()
             .get(&DataKey::RolesList)
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    // -----------------------------------------------------------------------
+    // ACL — flexible permission management (issue #101)
+    // -----------------------------------------------------------------------
+
+    /// Grant `role` to `grantee`.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// `expires_at` is a ledger timestamp; pass `0` for a non-expiring grant.
+    /// Granting the same role twice updates the expiry.
+    pub fn acl_grant_role(
+        env: Env,
+        caller: Address,
+        grantee: Address,
+        role: Role,
+        expires_at: u64,
+    ) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        acl::grant_role_internal(&env, &grantee, &role, &caller, expires_at);
+
+        env.events().publish(
+            (symbol_short!("acl_grnt"), grantee.clone()),
+            (role, expires_at),
+        );
+    }
+
+    /// Revoke `role` from `grantee`.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// No-ops silently if the grant does not exist.
+    pub fn acl_revoke_role(env: Env, caller: Address, grantee: Address, role: Role) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        acl::revoke_role_internal(&env, &grantee, &role);
+
+        env.events()
+            .publish((symbol_short!("acl_revk"), grantee.clone()), role);
+    }
+
+    /// Grant a direct `permission` to `grantee`.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// `expires_at` is a ledger timestamp; pass `0` for a non-expiring grant.
+    pub fn acl_grant_permission(
+        env: Env,
+        caller: Address,
+        grantee: Address,
+        permission: Permission,
+        expires_at: u64,
+    ) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        acl::grant_permission_internal(&env, &grantee, &permission, &caller, expires_at);
+
+        env.events().publish(
+            (symbol_short!("acl_pgrn"), grantee.clone()),
+            (permission, expires_at),
+        );
+    }
+
+    /// Revoke a direct `permission` from `grantee`.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    pub fn acl_revoke_permission(
+        env: Env,
+        caller: Address,
+        grantee: Address,
+        permission: Permission,
+    ) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        acl::revoke_permission_internal(&env, &grantee, &permission);
+
+        env.events()
+            .publish((symbol_short!("acl_prv"), grantee.clone()), permission);
+    }
+
+    /// Return `true` if `address` currently holds `role` (respects expiry).
+    ///
+    /// Public read — no authorisation required.
+    pub fn acl_has_role(env: Env, address: Address, role: Role) -> bool {
+        acl::has_role_internal(&env, &address, &role)
+    }
+
+    /// Return `true` if `address` has `permission` via any active role or
+    /// direct grant (respects expiry and inheritance).
+    ///
+    /// Public read — no authorisation required.
+    pub fn acl_has_permission(env: Env, address: Address, permission: Permission) -> bool {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if address == admin {
+            return true;
+        }
+        acl::has_permission_internal(&env, &address, &permission)
+    }
+
+    /// Return all role grants (including expired ones for audit purposes).
+    ///
+    /// Public read — no authorisation required.
+    pub fn acl_get_role_grants(env: Env) -> Vec<RoleGrant> {
+        env.storage()
+            .persistent()
+            .get(&AclKey::RoleGrants)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Return all direct permission grants (including expired ones).
+    ///
+    /// Public read — no authorisation required.
+    pub fn acl_get_permission_grants(env: Env) -> Vec<PermissionGrant> {
+        env.storage()
+            .persistent()
+            .get(&AclKey::PermissionGrants)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Return all role grants for a specific `address` (including expired).
+    ///
+    /// Public read — no authorisation required.
+    pub fn acl_get_roles_for(env: Env, address: Address) -> Vec<RoleGrant> {
+        let grants: Vec<RoleGrant> = env
+            .storage()
+            .persistent()
+            .get(&AclKey::RoleGrants)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut result: Vec<RoleGrant> = Vec::new(&env);
+        for g in grants.iter() {
+            if g.grantee == address {
+                result.push_back(g);
+            }
+        }
+        result
+    }
+
+    /// Return all direct permission grants for a specific `address`.
+    ///
+    /// Public read — no authorisation required.
+    pub fn acl_get_permissions_for(env: Env, address: Address) -> Vec<PermissionGrant> {
+        let grants: Vec<PermissionGrant> = env
+            .storage()
+            .persistent()
+            .get(&AclKey::PermissionGrants)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut result: Vec<PermissionGrant> = Vec::new(&env);
+        for g in grants.iter() {
+            if g.grantee == address {
+                result.push_back(g);
+            }
+        }
+        result
+    }
+
+    /// Bulk-grant roles to multiple addresses in a single transaction.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// Accepts up to 20 entries per call.
+    pub fn acl_bulk_grant_roles(env: Env, caller: Address, entries: Vec<BulkRoleEntry>) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        if entries.len() > 20 {
+            panic!("bulk grant exceeds maximum of 20 entries");
+        }
+
+        for entry in entries.iter() {
+            acl::grant_role_internal(&env, &entry.grantee, &entry.role, &caller, entry.expires_at);
+            env.events().publish(
+                (symbol_short!("acl_grnt"), entry.grantee.clone()),
+                (entry.role, entry.expires_at),
+            );
+        }
+    }
+
+    /// Bulk-revoke roles from multiple addresses in a single transaction.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// Accepts up to 20 entries per call.
+    pub fn acl_bulk_revoke_roles(env: Env, caller: Address, entries: Vec<BulkRoleEntry>) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        if entries.len() > 20 {
+            panic!("bulk revoke exceeds maximum of 20 entries");
+        }
+
+        for entry in entries.iter() {
+            acl::revoke_role_internal(&env, &entry.grantee, &entry.role);
+            env.events()
+                .publish((symbol_short!("acl_revk"), entry.grantee.clone()), entry.role);
+        }
+    }
+
+    /// Bulk-grant direct permissions to multiple addresses in a single transaction.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// Accepts up to 20 entries per call.
+    pub fn acl_bulk_grant_permissions(
+        env: Env,
+        caller: Address,
+        entries: Vec<BulkPermissionEntry>,
+    ) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        if entries.len() > 20 {
+            panic!("bulk grant exceeds maximum of 20 entries");
+        }
+
+        for entry in entries.iter() {
+            acl::grant_permission_internal(
+                &env,
+                &entry.grantee,
+                &entry.permission,
+                &caller,
+                entry.expires_at,
+            );
+            env.events().publish(
+                (symbol_short!("acl_pgrn"), entry.grantee.clone()),
+                (entry.permission, entry.expires_at),
+            );
+        }
+    }
+
+    /// Bulk-revoke direct permissions from multiple addresses.
+    ///
+    /// `caller` must be the contract admin or hold `ManagePermissions`.
+    /// Accepts up to 20 entries per call.
+    pub fn acl_bulk_revoke_permissions(
+        env: Env,
+        caller: Address,
+        entries: Vec<BulkPermissionEntry>,
+    ) {
+        Self::assert_not_globally_paused(&env);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        acl::require_permission(&env, &caller, &admin, &Permission::ManagePermissions);
+
+        if entries.len() > 20 {
+            panic!("bulk revoke exceeds maximum of 20 entries");
+        }
+
+        for entry in entries.iter() {
+            acl::revoke_permission_internal(&env, &entry.grantee, &entry.permission);
+            env.events().publish(
+                (symbol_short!("acl_prv"), entry.grantee.clone()),
+                entry.permission,
+            );
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -6987,5 +7254,330 @@ mod tests {
 
         let result = client.calculate_health_score(&0, &88, &0);
         assert_eq!(result.composite_score, 88);
+    }
+
+    // -----------------------------------------------------------------------
+    // ACL tests (issue #101)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_acl_grant_and_has_role() {
+        let (env, client, admin) = setup();
+        let operator = Address::generate(&env);
+
+        assert!(!client.acl_has_role(&operator, &acl::Role::Operator));
+        client.acl_grant_role(&admin, &operator, &acl::Role::Operator, &0);
+        assert!(client.acl_has_role(&operator, &acl::Role::Operator));
+    }
+
+    #[test]
+    fn test_acl_revoke_role() {
+        let (env, client, admin) = setup();
+        let operator = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &operator, &acl::Role::Operator, &0);
+        assert!(client.acl_has_role(&operator, &acl::Role::Operator));
+
+        client.acl_revoke_role(&admin, &operator, &acl::Role::Operator);
+        assert!(!client.acl_has_role(&operator, &acl::Role::Operator));
+    }
+
+    #[test]
+    fn test_acl_grant_permission_directly() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        assert!(!client.acl_has_permission(&user, &acl::Permission::ViewHealth));
+        client.acl_grant_permission(&admin, &user, &acl::Permission::ViewHealth, &0);
+        assert!(client.acl_has_permission(&user, &acl::Permission::ViewHealth));
+    }
+
+    #[test]
+    fn test_acl_revoke_permission() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        client.acl_grant_permission(&admin, &user, &acl::Permission::ViewHealth, &0);
+        client.acl_revoke_permission(&admin, &user, &acl::Permission::ViewHealth);
+        assert!(!client.acl_has_permission(&user, &acl::Permission::ViewHealth));
+    }
+
+    #[test]
+    fn test_acl_role_inherits_permissions() {
+        let (env, client, admin) = setup();
+        let readonly = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &readonly, &acl::Role::ReadOnly, &0);
+
+        // ReadOnly inherits ViewHealth, ViewPrice, ViewAnalytics
+        assert!(client.acl_has_permission(&readonly, &acl::Permission::ViewHealth));
+        assert!(client.acl_has_permission(&readonly, &acl::Permission::ViewPrice));
+        assert!(client.acl_has_permission(&readonly, &acl::Permission::ViewAnalytics));
+
+        // ReadOnly does NOT inherit write permissions
+        assert!(!client.acl_has_permission(&readonly, &acl::Permission::SubmitHealth));
+        assert!(!client.acl_has_permission(&readonly, &acl::Permission::ManageAssets));
+    }
+
+    #[test]
+    fn test_acl_operator_role_permissions() {
+        let (env, client, admin) = setup();
+        let operator = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &operator, &acl::Role::Operator, &0);
+
+        assert!(client.acl_has_permission(&operator, &acl::Permission::SubmitHealth));
+        assert!(client.acl_has_permission(&operator, &acl::Permission::SubmitPrice));
+        assert!(client.acl_has_permission(&operator, &acl::Permission::ManageAlerts));
+        // Operator cannot manage config or assets
+        assert!(!client.acl_has_permission(&operator, &acl::Permission::ManageConfig));
+        assert!(!client.acl_has_permission(&operator, &acl::Permission::ManageAssets));
+    }
+
+    #[test]
+    fn test_acl_super_admin_has_all_permissions() {
+        let (env, client, admin) = setup();
+        let super_admin = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &super_admin, &acl::Role::SuperAdmin, &0);
+
+        assert!(client.acl_has_permission(&super_admin, &acl::Permission::ManageUpgrades));
+        assert!(client.acl_has_permission(&super_admin, &acl::Permission::EmergencyPause));
+        assert!(client.acl_has_permission(&super_admin, &acl::Permission::ManagePermissions));
+        assert!(client.acl_has_permission(&super_admin, &acl::Permission::ManageConfig));
+    }
+
+    #[test]
+    fn test_acl_role_expiry() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        env.ledger().set_timestamp(1000);
+        // Grant role expiring at timestamp 2000
+        client.acl_grant_role(&admin, &user, &acl::Role::ReadOnly, &2000);
+        assert!(client.acl_has_role(&user, &acl::Role::ReadOnly));
+
+        // Advance past expiry
+        env.ledger().set_timestamp(2001);
+        assert!(!client.acl_has_role(&user, &acl::Role::ReadOnly));
+    }
+
+    #[test]
+    fn test_acl_permission_expiry() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        env.ledger().set_timestamp(1000);
+        client.acl_grant_permission(&admin, &user, &acl::Permission::ViewHealth, &2000);
+        assert!(client.acl_has_permission(&user, &acl::Permission::ViewHealth));
+
+        env.ledger().set_timestamp(2001);
+        assert!(!client.acl_has_permission(&user, &acl::Permission::ViewHealth));
+    }
+
+    #[test]
+    fn test_acl_grant_updates_expiry() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        env.ledger().set_timestamp(1000);
+        client.acl_grant_role(&admin, &user, &acl::Role::ReadOnly, &2000);
+
+        // Re-grant with extended expiry
+        client.acl_grant_role(&admin, &user, &acl::Role::ReadOnly, &5000);
+
+        env.ledger().set_timestamp(3000);
+        // Should still be valid with the updated expiry
+        assert!(client.acl_has_role(&user, &acl::Role::ReadOnly));
+    }
+
+    #[test]
+    fn test_acl_get_roles_for() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &user, &acl::Role::Operator, &0);
+        client.acl_grant_role(&admin, &user, &acl::Role::ReadOnly, &0);
+
+        let roles = client.acl_get_roles_for(&user);
+        assert_eq!(roles.len(), 2);
+    }
+
+    #[test]
+    fn test_acl_get_permissions_for() {
+        let (env, client, admin) = setup();
+        let user = Address::generate(&env);
+
+        client.acl_grant_permission(&admin, &user, &acl::Permission::ViewHealth, &0);
+        client.acl_grant_permission(&admin, &user, &acl::Permission::ViewPrice, &0);
+
+        let perms = client.acl_get_permissions_for(&user);
+        assert_eq!(perms.len(), 2);
+    }
+
+    #[test]
+    fn test_acl_bulk_grant_roles() {
+        let (env, client, admin) = setup();
+        let u1 = Address::generate(&env);
+        let u2 = Address::generate(&env);
+
+        let entries = soroban_sdk::vec![
+            &env,
+            acl::BulkRoleEntry { grantee: u1.clone(), role: acl::Role::Operator, expires_at: 0 },
+            acl::BulkRoleEntry { grantee: u2.clone(), role: acl::Role::ReadOnly, expires_at: 0 },
+        ];
+        client.acl_bulk_grant_roles(&admin, &entries);
+
+        assert!(client.acl_has_role(&u1, &acl::Role::Operator));
+        assert!(client.acl_has_role(&u2, &acl::Role::ReadOnly));
+    }
+
+    #[test]
+    fn test_acl_bulk_revoke_roles() {
+        let (env, client, admin) = setup();
+        let u1 = Address::generate(&env);
+        let u2 = Address::generate(&env);
+
+        let grant_entries = soroban_sdk::vec![
+            &env,
+            acl::BulkRoleEntry { grantee: u1.clone(), role: acl::Role::Operator, expires_at: 0 },
+            acl::BulkRoleEntry { grantee: u2.clone(), role: acl::Role::ReadOnly, expires_at: 0 },
+        ];
+        client.acl_bulk_grant_roles(&admin, &grant_entries);
+
+        let revoke_entries = soroban_sdk::vec![
+            &env,
+            acl::BulkRoleEntry { grantee: u1.clone(), role: acl::Role::Operator, expires_at: 0 },
+            acl::BulkRoleEntry { grantee: u2.clone(), role: acl::Role::ReadOnly, expires_at: 0 },
+        ];
+        client.acl_bulk_revoke_roles(&admin, &revoke_entries);
+
+        assert!(!client.acl_has_role(&u1, &acl::Role::Operator));
+        assert!(!client.acl_has_role(&u2, &acl::Role::ReadOnly));
+    }
+
+    #[test]
+    fn test_acl_bulk_grant_permissions() {
+        let (env, client, admin) = setup();
+        let u1 = Address::generate(&env);
+
+        let entries = soroban_sdk::vec![
+            &env,
+            acl::BulkPermissionEntry {
+                grantee: u1.clone(),
+                permission: acl::Permission::ViewHealth,
+                expires_at: 0,
+            },
+            acl::BulkPermissionEntry {
+                grantee: u1.clone(),
+                permission: acl::Permission::ViewPrice,
+                expires_at: 0,
+            },
+        ];
+        client.acl_bulk_grant_permissions(&admin, &entries);
+
+        assert!(client.acl_has_permission(&u1, &acl::Permission::ViewHealth));
+        assert!(client.acl_has_permission(&u1, &acl::Permission::ViewPrice));
+    }
+
+    #[test]
+    fn test_acl_bulk_revoke_permissions() {
+        let (env, client, admin) = setup();
+        let u1 = Address::generate(&env);
+
+        let grant_entries = soroban_sdk::vec![
+            &env,
+            acl::BulkPermissionEntry {
+                grantee: u1.clone(),
+                permission: acl::Permission::ViewHealth,
+                expires_at: 0,
+            },
+        ];
+        client.acl_bulk_grant_permissions(&admin, &grant_entries);
+
+        let revoke_entries = soroban_sdk::vec![
+            &env,
+            acl::BulkPermissionEntry {
+                grantee: u1.clone(),
+                permission: acl::Permission::ViewHealth,
+                expires_at: 0,
+            },
+        ];
+        client.acl_bulk_revoke_permissions(&admin, &revoke_entries);
+
+        assert!(!client.acl_has_permission(&u1, &acl::Permission::ViewHealth));
+    }
+
+    #[test]
+    fn test_acl_manage_permissions_role_can_grant() {
+        let (env, client, admin) = setup();
+        let manager = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        // Grant manager the ManagePermissions permission directly
+        client.acl_grant_permission(&admin, &manager, &acl::Permission::ManagePermissions, &0);
+
+        // Manager can now grant roles to others
+        client.acl_grant_role(&manager, &user, &acl::Role::ReadOnly, &0);
+        assert!(client.acl_has_role(&user, &acl::Role::ReadOnly));
+    }
+
+    #[test]
+    #[should_panic(expected = "unauthorized")]
+    fn test_acl_unauthorized_grant_panics() {
+        let (env, client, _admin) = setup();
+        let stranger = Address::generate(&env);
+        let victim = Address::generate(&env);
+
+        client.acl_grant_role(&stranger, &victim, &acl::Role::ReadOnly, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "unauthorized")]
+    fn test_acl_unauthorized_revoke_panics() {
+        let (env, client, admin) = setup();
+        let stranger = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &user, &acl::Role::ReadOnly, &0);
+        client.acl_revoke_role(&stranger, &user, &acl::Role::ReadOnly);
+    }
+
+    #[test]
+    fn test_acl_admin_always_has_permission() {
+        let (_env, client, admin) = setup();
+        // Admin has no explicit ACL grants but should pass all permission checks
+        assert!(client.acl_has_permission(&admin, &acl::Permission::ManageUpgrades));
+        assert!(client.acl_has_permission(&admin, &acl::Permission::EmergencyPause));
+        assert!(client.acl_has_permission(&admin, &acl::Permission::ManagePermissions));
+    }
+
+    #[test]
+    fn test_acl_multiple_admins_via_super_admin_role() {
+        let (env, client, admin) = setup();
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        client.acl_grant_role(&admin, &admin2, &acl::Role::SuperAdmin, &0);
+        // admin2 can now grant roles to admin3
+        client.acl_grant_role(&admin2, &admin3, &acl::Role::Admin, &0);
+
+        assert!(client.acl_has_role(&admin3, &acl::Role::Admin));
+        assert!(client.acl_has_permission(&admin3, &acl::Permission::SubmitHealth));
+    }
+
+    #[test]
+    #[should_panic(expected = "bulk grant exceeds maximum of 20 entries")]
+    fn test_acl_bulk_grant_exceeds_limit() {
+        let (env, client, admin) = setup();
+        let mut entries = soroban_sdk::Vec::new(&env);
+        for _ in 0..21 {
+            entries.push_back(acl::BulkRoleEntry {
+                grantee: Address::generate(&env),
+                role: acl::Role::ReadOnly,
+                expires_at: 0,
+            });
+        }
+        client.acl_bulk_grant_roles(&admin, &entries);
     }
 }
