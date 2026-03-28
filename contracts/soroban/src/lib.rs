@@ -18,7 +18,9 @@ pub mod multisig_treasury;
 pub mod rate_limiter;
 pub mod reputation_system;
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, String, Vec,
+};
 
 use liquidity_pool::{
     DailyBucket, ImpermanentLossResult, LiquidityDepth as PoolLiquidityDepth, PoolMetrics,
@@ -250,6 +252,54 @@ pub struct PendingAdminTransfer {
 }
 
 // ---------------------------------------------------------------------------
+// Contract Upgrade types (issue #98)
+// ---------------------------------------------------------------------------
+
+/// Pending contract upgrade proposal guarded by governance approvals.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposal {
+    /// Monotonic proposal identifier.
+    pub proposal_id: u64,
+    /// Governance member that created the proposal.
+    pub proposer: Address,
+    /// Target Wasm hash to activate.
+    pub new_wasm_hash: BytesN<32>,
+    /// Proposal creation timestamp.
+    pub proposed_at: u64,
+    /// Earliest timestamp at which execution is allowed.
+    pub execute_after: u64,
+    /// Number of distinct governance approvals required to execute.
+    pub required_approvals: u32,
+    /// Distinct governance addresses that have approved this proposal.
+    pub approvals: Vec<Address>,
+    /// `true` for emergency upgrade path.
+    pub emergency: bool,
+    /// Optional external migration callback contract.
+    pub migration_callback: Option<Address>,
+    /// Optional migration payload consumed by callback tooling.
+    pub migration_payload: Option<Bytes>,
+    /// `true` when this proposal is a rollback to a tracked prior hash.
+    pub is_rollback: bool,
+}
+
+/// Immutable historical entry for each executed upgrade.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeExecutionRecord {
+    pub proposal_id: u64,
+    pub executed_by: Address,
+    pub from_version: u32,
+    pub to_version: u32,
+    pub from_wasm_hash: Option<BytesN<32>>,
+    pub to_wasm_hash: BytesN<32>,
+    pub executed_at: u64,
+    pub emergency: bool,
+    pub is_rollback: bool,
+    pub migration_callback: Option<Address>,
+}
+
+// ---------------------------------------------------------------------------
 // Snapshot and checkpoint types (issue #105)
 // ---------------------------------------------------------------------------
 
@@ -349,6 +399,67 @@ pub struct CheckpointValidation {
     pub message: String,
 }
 
+/// Historical data buckets managed by retention policies.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RetentionDataType {
+    SupplyMismatches,
+    LiquidityHistory,
+    Checkpoints,
+}
+
+/// Admin-configurable retention policy for a single historical data bucket.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetentionPolicy {
+    pub data_type: RetentionDataType,
+    pub retention_secs: u64,
+    pub trigger_interval_secs: u64,
+    pub max_deletions_per_run: u32,
+    pub archive_before_delete: bool,
+    pub enabled: bool,
+}
+
+/// Per data type cleanup execution summary.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CleanupDataTypeResult {
+    pub data_type: RetentionDataType,
+    pub deleted: u32,
+    pub archived: u32,
+}
+
+/// Aggregate cleanup execution output.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CleanupResult {
+    pub executed_at: u64,
+    pub total_deleted: u32,
+    pub total_archived: u32,
+    pub details: Vec<CleanupDataTypeResult>,
+}
+
+/// Storage usage counters for a single retention bucket.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageUsageEntry {
+    pub data_type: RetentionDataType,
+    pub tracked_keys: u32,
+    pub active_records: u32,
+    pub archived_records: u32,
+}
+
+/// Lightweight storage usage snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageStats {
+    pub generated_at: u64,
+    pub total_tracked_keys: u32,
+    pub total_active_records: u32,
+    pub total_archived_records: u32,
+    pub entries: Vec<StorageUsageEntry>,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Signer {
@@ -420,6 +531,20 @@ pub enum DataKey {
     LastCheckpointAt,
     /// Id of the most recently created checkpoint.
     LastCheckpointId,
+    /// Retention policy keyed by historical data type.
+    RetentionPolicy(RetentionDataType),
+    /// Optional retention override for an asset/pair scoped to a data type.
+    AssetRetentionOverride(String, RetentionDataType),
+    /// Last cleanup timestamp keyed by historical data type.
+    LastCleanupAt(RetentionDataType),
+    /// Archived supply mismatch records (when archive-before-delete is enabled).
+    ArchivedSupplyMismatches(String),
+    /// Archived liquidity history records (when archive-before-delete is enabled).
+    ArchivedLiquidityDepthHistory(String),
+    /// Archived checkpoint metadata list.
+    ArchivedCheckpointMetadataList,
+    /// Archived checkpoint snapshot keyed by checkpoint id.
+    ArchivedCheckpointSnapshot(u64),
     // -----------------------------------------------------------------------
     // Emergency Pause storage keys (issue #96)
     // -----------------------------------------------------------------------
@@ -444,6 +569,21 @@ pub enum DataKey {
     // -----------------------------------------------------------------------
     /// Pending two-step admin transfer proposal (`PendingAdminTransfer`).
     PendingTransfer,
+    // -----------------------------------------------------------------------
+    // Contract Upgrade storage keys (issue #98)
+    // -----------------------------------------------------------------------
+    /// Pending contract upgrade proposal (`UpgradeProposal`).
+    PendingUpgrade,
+    /// Monotonic proposal id counter for upgrades.
+    UpgradeProposalCounter,
+    /// Ordered execution history of upgrades (`Vec<UpgradeExecutionRecord>`).
+    UpgradeHistory,
+    /// Monotonic semantic version counter for the contract state.
+    ContractVersion,
+    /// Latest active contract Wasm hash.
+    CurrentContractWasmHash,
+    /// Most recent rollback target hash (previous active Wasm hash).
+    RollbackTargetHash,
 }
 
 #[contract]
@@ -460,15 +600,35 @@ impl BridgeWatchContract {
         env.storage()
             .instance()
             .set(&DataKey::MonitoredAssets, &assets);
-        env.storage()
-            .instance()
-            .set(&DataKey::CheckpointConfig, &Self::default_checkpoint_config());
+        env.storage().instance().set(
+            &DataKey::CheckpointConfig,
+            &Self::default_checkpoint_config(),
+        );
         let empty_metadata: Vec<CheckpointMetadata> = Vec::new(&env);
         env.storage()
             .instance()
             .set(&DataKey::CheckpointMetadataList, &empty_metadata);
-        env.storage().instance().set(&DataKey::CheckpointCounter, &0u64);
-        env.storage().instance().set(&DataKey::LastCheckpointAt, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::ArchivedCheckpointMetadataList, &empty_metadata);
+        env.storage()
+            .instance()
+            .set(&DataKey::CheckpointCounter, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::LastCheckpointAt, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &1u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::UpgradeProposalCounter, &0u64);
+        let empty_upgrade_history: Vec<UpgradeExecutionRecord> = Vec::new(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UpgradeHistory, &empty_upgrade_history);
+
+        Self::initialize_retention_policies(&env);
     }
 
     /// Submit a health score for a monitored asset.
@@ -602,12 +762,7 @@ impl BridgeWatchContract {
     }
 
     /// Register an authorized signer for edge data submissions.
-    pub fn register_signer(
-        env: Env,
-        caller: Address,
-        signer_id: String,
-        public_key: BytesN<32>,
-    ) {
+    pub fn register_signer(env: Env, caller: Address, signer_id: String, public_key: BytesN<32>) {
         Self::check_permission(&env, &caller, AdminRole::SuperAdmin);
 
         if env
@@ -637,7 +792,8 @@ impl BridgeWatchContract {
         signers.push_back(signer_id.clone());
         env.storage().instance().set(&DataKey::SignerList, &signers);
 
-        env.events().publish((symbol_short!("signer_reg"), signer_id), true);
+        env.events()
+            .publish((symbol_short!("signer_reg"), signer_id), true);
     }
 
     /// Remove a signer from active set (soft delete).
@@ -652,7 +808,8 @@ impl BridgeWatchContract {
             .persistent()
             .set(&DataKey::Signer(signer_id.clone()), &signer);
 
-        env.events().publish((symbol_short!("signer_rem"), signer_id), true);
+        env.events()
+            .publish((symbol_short!("signer_rem"), signer_id), true);
     }
 
     /// Set the minimum required signatures for multi-sig verification.
@@ -737,15 +894,19 @@ impl BridgeWatchContract {
         }
 
         signer.registered_at = signer.registered_at; // keep unchanged
-        env.storage()
-            .persistent()
-            .set(&DataKey::SignerNonce(signature.signer_id.clone()), &signature.nonce);
+        env.storage().persistent().set(
+            &DataKey::SignerNonce(signature.signer_id.clone()),
+            &signature.nonce,
+        );
 
         env.storage()
             .instance()
             .set(&DataKey::SignatureCache(payload_hash), &true);
 
-        env.events().publish((symbol_short!("sig_ver"), signature.signer_id.clone()), true);
+        env.events().publish(
+            (symbol_short!("sig_ver"), signature.signer_id.clone()),
+            true,
+        );
         true
     }
 
@@ -1288,6 +1449,8 @@ impl BridgeWatchContract {
 
         env.events()
             .publish((symbol_short!("supply_mm"), bridge_id), mismatch_bps);
+
+        Self::maybe_trigger_auto_cleanup(&env);
     }
 
     /// Return all recorded supply mismatches for a bridge. Public read access.
@@ -1419,6 +1582,8 @@ impl BridgeWatchContract {
 
         env.events()
             .publish((symbol_short!("liq_chg"), asset_pair), total_liquidity);
+
+        Self::maybe_trigger_auto_cleanup(&env);
     }
 
     /// Return the latest aggregated liquidity depth for an asset pair.
@@ -1950,6 +2115,494 @@ impl BridgeWatchContract {
     }
 
     // -----------------------------------------------------------------------
+    // Contract Upgrade (issue #98)
+    // -----------------------------------------------------------------------
+
+    /// Propose a contract upgrade with governance approval and timelock.
+    ///
+    /// Standard proposals enforce a 48-hour timelock. Emergency proposals use
+    /// a higher governance threshold and may execute immediately.
+    pub fn propose_upgrade(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+        emergency: bool,
+        migration_callback: Option<Address>,
+        migration_payload: Option<Bytes>,
+    ) -> u64 {
+        Self::check_permission(&env, &caller, AdminRole::SuperAdmin);
+        Self::check_no_pending_transfer(&env);
+        if env.storage().instance().has(&DataKey::PendingUpgrade) {
+            panic!("an upgrade proposal is already pending");
+        }
+
+        Self::create_upgrade_proposal(
+            &env,
+            &caller,
+            new_wasm_hash,
+            emergency,
+            migration_callback,
+            migration_payload,
+            false,
+        )
+    }
+
+    /// Propose a rollback using the tracked prior Wasm hash.
+    pub fn propose_rollback(
+        env: Env,
+        caller: Address,
+        emergency: bool,
+        migration_callback: Option<Address>,
+        migration_payload: Option<Bytes>,
+    ) -> u64 {
+        Self::check_permission(&env, &caller, AdminRole::SuperAdmin);
+        Self::check_no_pending_transfer(&env);
+        if env.storage().instance().has(&DataKey::PendingUpgrade) {
+            panic!("an upgrade proposal is already pending");
+        }
+
+        let rollback_hash: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::RollbackTargetHash)
+            .unwrap_or_else(|| panic!("no rollback target is currently tracked"));
+
+        Self::create_upgrade_proposal(
+            &env,
+            &caller,
+            rollback_hash,
+            emergency,
+            migration_callback,
+            migration_payload,
+            true,
+        )
+    }
+
+    /// Approve a pending upgrade proposal as a governance member.
+    pub fn approve_upgrade(env: Env, caller: Address, proposal_id: u64) -> u32 {
+        Self::check_permission(&env, &caller, AdminRole::SuperAdmin);
+        Self::check_no_pending_transfer(&env);
+
+        let mut proposal = Self::load_pending_upgrade(&env);
+        if proposal.proposal_id != proposal_id {
+            panic!("upgrade proposal id does not match the pending proposal");
+        }
+        if Self::vec_contains_address(&proposal.approvals, &caller) {
+            panic!("caller has already approved this upgrade proposal");
+        }
+
+        proposal.approvals.push_back(caller.clone());
+        let approval_count = proposal.approvals.len();
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingUpgrade, &proposal);
+
+        env.events().publish(
+            (symbol_short!("up_appr"), caller),
+            (proposal_id, approval_count, proposal.required_approvals),
+        );
+
+        approval_count
+    }
+
+    /// Execute a pending upgrade once timelock and governance conditions pass.
+    pub fn execute_upgrade(env: Env, caller: Address, proposal_id: u64) {
+        Self::check_permission(&env, &caller, AdminRole::SuperAdmin);
+        Self::check_no_pending_transfer(&env);
+
+        let proposal = Self::load_pending_upgrade(&env);
+        if proposal.proposal_id != proposal_id {
+            panic!("upgrade proposal id does not match the pending proposal");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < proposal.execute_after {
+            panic!("upgrade timelock has not elapsed");
+        }
+        if proposal.approvals.len() < proposal.required_approvals {
+            panic!("insufficient governance approvals");
+        }
+
+        let from_version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or(1);
+        let to_version = from_version.saturating_add(1);
+        let from_wasm_hash: Option<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentContractWasmHash);
+
+        if let Some(previous_hash) = from_wasm_hash.clone() {
+            env.storage()
+                .instance()
+                .set(&DataKey::RollbackTargetHash, &previous_hash);
+            env.events()
+                .publish((symbol_short!("up_roll"), proposal_id), previous_hash);
+        }
+
+        if let Some(callback) = proposal.migration_callback.clone() {
+            env.events()
+                .publish((symbol_short!("up_migcb"), callback), proposal_id);
+        }
+        if let Some(payload) = proposal.migration_payload.clone() {
+            env.events()
+                .publish((symbol_short!("up_migpl"), proposal_id), payload);
+        }
+
+        #[cfg(not(test))]
+        env.deployer()
+            .update_current_contract_wasm(proposal.new_wasm_hash.clone());
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrentContractWasmHash, &proposal.new_wasm_hash);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &to_version);
+
+        let mut history: Vec<UpgradeExecutionRecord> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UpgradeHistory)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(UpgradeExecutionRecord {
+            proposal_id,
+            executed_by: caller.clone(),
+            from_version,
+            to_version,
+            from_wasm_hash,
+            to_wasm_hash: proposal.new_wasm_hash,
+            executed_at: now,
+            emergency: proposal.emergency,
+            is_rollback: proposal.is_rollback,
+            migration_callback: proposal.migration_callback,
+        });
+        env.storage()
+            .persistent()
+            .set(&DataKey::UpgradeHistory, &history);
+
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        env.events().publish(
+            (symbol_short!("up_exec"), caller),
+            (
+                proposal_id,
+                from_version,
+                to_version,
+                proposal.emergency,
+                proposal.is_rollback,
+            ),
+        );
+    }
+
+    /// Cancel a pending upgrade proposal.
+    pub fn cancel_upgrade(env: Env, caller: Address, proposal_id: u64, reason: String) {
+        Self::check_permission(&env, &caller, AdminRole::SuperAdmin);
+
+        let proposal = Self::load_pending_upgrade(&env);
+        if proposal.proposal_id != proposal_id {
+            panic!("upgrade proposal id does not match the pending proposal");
+        }
+
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+        env.events()
+            .publish((symbol_short!("up_cncl"), caller), (proposal_id, reason));
+    }
+
+    /// Return the currently pending contract upgrade proposal, if any.
+    pub fn get_pending_upgrade(env: Env) -> Option<UpgradeProposal> {
+        env.storage().instance().get(&DataKey::PendingUpgrade)
+    }
+
+    /// Return historical execution records for all completed upgrades.
+    pub fn get_upgrade_history(env: Env) -> Vec<UpgradeExecutionRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UpgradeHistory)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Return the current semantic version counter.
+    pub fn get_contract_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or(1)
+    }
+
+    /// Return the currently tracked active Wasm hash, if set.
+    pub fn get_current_wasm_hash(env: Env) -> Option<BytesN<32>> {
+        env.storage()
+            .instance()
+            .get(&DataKey::CurrentContractWasmHash)
+    }
+
+    /// Return the currently tracked rollback target hash, if available.
+    pub fn get_rollback_target(env: Env) -> Option<BytesN<32>> {
+        env.storage().instance().get(&DataKey::RollbackTargetHash)
+    }
+
+    // -----------------------------------------------------------------------
+    // Data retention and cleanup (issue #100)
+    // -----------------------------------------------------------------------
+
+    /// Configure retention and cleanup policy for a historical data bucket.
+    ///
+    /// Admin-only. `retention_secs`, `trigger_interval_secs`, and
+    /// `max_deletions_per_run` must all be greater than zero.
+    pub fn set_retention_policy(
+        env: Env,
+        caller: Address,
+        data_type: RetentionDataType,
+        retention_secs: u64,
+        trigger_interval_secs: u64,
+        max_deletions_per_run: u32,
+        archive_before_delete: bool,
+        enabled: bool,
+    ) {
+        Self::assert_admin_or_super_admin_retention(&env, &caller);
+        Self::validate_retention_policy_inputs(
+            retention_secs,
+            trigger_interval_secs,
+            max_deletions_per_run,
+        );
+
+        let policy = RetentionPolicy {
+            data_type: data_type.clone(),
+            retention_secs,
+            trigger_interval_secs,
+            max_deletions_per_run,
+            archive_before_delete,
+            enabled,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RetentionPolicy(data_type.clone()), &policy);
+
+        env.events().publish(
+            (
+                symbol_short!("ret_set"),
+                Self::retention_kind_code(&data_type),
+            ),
+            retention_secs,
+        );
+    }
+
+    /// Return retention policy for a given historical data bucket.
+    pub fn get_retention_policy(env: Env, data_type: RetentionDataType) -> RetentionPolicy {
+        Self::load_retention_policy(&env, &data_type)
+    }
+
+    /// Return all retention policies.
+    pub fn list_retention_policies(env: Env) -> Vec<RetentionPolicy> {
+        let mut policies = Vec::new(&env);
+        for data_type in Self::retention_data_types(&env).iter() {
+            policies.push_back(Self::load_retention_policy(&env, &data_type));
+        }
+        policies
+    }
+
+    /// Set or clear a per-asset retention override for a specific data bucket.
+    ///
+    /// When `retention_secs` is `Some(value)`, the override is upserted.
+    /// When `retention_secs` is `None`, the override is removed.
+    pub fn set_asset_retention_override(
+        env: Env,
+        caller: Address,
+        asset_code: String,
+        data_type: RetentionDataType,
+        retention_secs: Option<u64>,
+    ) {
+        Self::assert_admin_or_super_admin_retention(&env, &caller);
+
+        let key = DataKey::AssetRetentionOverride(asset_code.clone(), data_type.clone());
+        match retention_secs {
+            Some(value) => {
+                if value == 0 {
+                    panic!("asset retention override must be greater than zero");
+                }
+                env.storage().persistent().set(&key, &value);
+            }
+            None => env.storage().persistent().remove(&key),
+        }
+
+        env.events().publish(
+            (
+                symbol_short!("ret_ovr"),
+                Self::retention_kind_code(&data_type),
+            ),
+            asset_code,
+        );
+    }
+
+    /// Return per-asset retention override for a data bucket, if configured.
+    pub fn get_asset_retention_override(
+        env: Env,
+        asset_code: String,
+        data_type: RetentionDataType,
+    ) -> Option<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AssetRetentionOverride(asset_code, data_type))
+    }
+
+    /// Run gradual historical cleanup across all retention-enabled data buckets.
+    ///
+    /// Admin-only. Cleanup never deletes currently active/latest records.
+    pub fn cleanup_old_data(env: Env, caller: Address, max_total_deletions: u32) -> CleanupResult {
+        Self::assert_admin_or_super_admin_retention(&env, &caller);
+        if max_total_deletions == 0 {
+            panic!("max_total_deletions must be greater than zero");
+        }
+
+        let now = env.ledger().timestamp();
+        let mut details = Vec::new(&env);
+        let mut total_deleted = 0u32;
+        let mut total_archived = 0u32;
+
+        for data_type in Self::retention_data_types(&env).iter() {
+            if total_deleted >= max_total_deletions {
+                break;
+            }
+
+            let policy = Self::load_retention_policy(&env, &data_type);
+            if !policy.enabled {
+                continue;
+            }
+
+            let remaining_budget = max_total_deletions - total_deleted;
+            let run_budget = if policy.max_deletions_per_run < remaining_budget {
+                policy.max_deletions_per_run
+            } else {
+                remaining_budget
+            };
+
+            if run_budget == 0 {
+                continue;
+            }
+
+            let (deleted, archived) =
+                Self::cleanup_data_type_internal(&env, &data_type, &policy, run_budget);
+
+            details.push_back(CleanupDataTypeResult {
+                data_type: data_type.clone(),
+                deleted,
+                archived,
+            });
+
+            total_deleted += deleted;
+            total_archived += archived;
+            env.storage()
+                .instance()
+                .set(&DataKey::LastCleanupAt(data_type.clone()), &now);
+
+            if deleted > 0 || archived > 0 {
+                env.events().publish(
+                    (
+                        symbol_short!("ret_cln"),
+                        Self::retention_kind_code(&data_type),
+                    ),
+                    (deleted, archived, now),
+                );
+            }
+        }
+
+        env.events().publish(
+            (symbol_short!("ret_done"),),
+            (total_deleted, total_archived, now),
+        );
+
+        CleanupResult {
+            executed_at: now,
+            total_deleted,
+            total_archived,
+            details,
+        }
+    }
+
+    /// Run gradual cleanup for a single data bucket.
+    ///
+    /// Admin-only. This is useful for operational bulk deletes when only one
+    /// historical collection should be processed.
+    pub fn cleanup_data_type(
+        env: Env,
+        caller: Address,
+        data_type: RetentionDataType,
+        max_deletions: u32,
+    ) -> CleanupDataTypeResult {
+        Self::assert_admin_or_super_admin_retention(&env, &caller);
+        if max_deletions == 0 {
+            panic!("max_deletions must be greater than zero");
+        }
+
+        let policy = Self::load_retention_policy(&env, &data_type);
+        if !policy.enabled {
+            return CleanupDataTypeResult {
+                data_type,
+                deleted: 0,
+                archived: 0,
+            };
+        }
+
+        let run_budget = if policy.max_deletions_per_run < max_deletions {
+            policy.max_deletions_per_run
+        } else {
+            max_deletions
+        };
+        let (deleted, archived) =
+            Self::cleanup_data_type_internal(&env, &data_type, &policy, run_budget);
+        let now = env.ledger().timestamp();
+        env.storage()
+            .instance()
+            .set(&DataKey::LastCleanupAt(data_type.clone()), &now);
+
+        if deleted > 0 || archived > 0 {
+            env.events().publish(
+                (
+                    symbol_short!("ret_cln"),
+                    Self::retention_kind_code(&data_type),
+                ),
+                (deleted, archived, now),
+            );
+        }
+
+        CleanupDataTypeResult {
+            data_type,
+            deleted,
+            archived,
+        }
+    }
+
+    /// Return current storage usage counters for retained and archived data.
+    pub fn get_storage_stats(env: Env) -> StorageStats {
+        let supply = Self::supply_storage_usage(&env);
+        let liquidity = Self::liquidity_storage_usage(&env);
+        let checkpoints = Self::checkpoint_storage_usage(&env);
+
+        let mut entries = Vec::new(&env);
+        entries.push_back(supply.clone());
+        entries.push_back(liquidity.clone());
+        entries.push_back(checkpoints.clone());
+
+        StorageStats {
+            generated_at: env.ledger().timestamp(),
+            total_tracked_keys: supply.tracked_keys
+                + liquidity.tracked_keys
+                + checkpoints.tracked_keys,
+            total_active_records: supply.active_records
+                + liquidity.active_records
+                + checkpoints.active_records,
+            total_archived_records: supply.archived_records
+                + liquidity.archived_records
+                + checkpoints.archived_records,
+            entries,
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 
@@ -1997,6 +2650,116 @@ impl BridgeWatchContract {
                 panic!("admin functions are locked during a pending admin transfer");
             }
         }
+    }
+
+    fn load_pending_upgrade(env: &Env) -> UpgradeProposal {
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingUpgrade)
+            .unwrap_or_else(|| panic!("no pending upgrade proposal"))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn create_upgrade_proposal(
+        env: &Env,
+        caller: &Address,
+        new_wasm_hash: BytesN<32>,
+        emergency: bool,
+        migration_callback: Option<Address>,
+        migration_payload: Option<Bytes>,
+        is_rollback: bool,
+    ) -> u64 {
+        if migration_payload.is_some() && migration_callback.is_none() {
+            panic!("migration payload requires a migration callback");
+        }
+
+        let now = env.ledger().timestamp();
+        let timelock_secs = if emergency { 0u64 } else { 172_800u64 };
+        let required_approvals = Self::upgrade_approval_threshold(env, emergency);
+        let proposal_id: u64 = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::UpgradeProposalCounter)
+            .unwrap_or(0)
+            + 1;
+
+        let mut approvals = Vec::new(env);
+        approvals.push_back(caller.clone());
+
+        let proposal = UpgradeProposal {
+            proposal_id,
+            proposer: caller.clone(),
+            new_wasm_hash,
+            proposed_at: now,
+            execute_after: now + timelock_secs,
+            required_approvals,
+            approvals,
+            emergency,
+            migration_callback,
+            migration_payload,
+            is_rollback,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::UpgradeProposalCounter, &proposal_id);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingUpgrade, &proposal);
+
+        env.events().publish(
+            (symbol_short!("up_prop"), caller.clone()),
+            (proposal_id, required_approvals, emergency, is_rollback),
+        );
+
+        proposal_id
+    }
+
+    fn governance_member_count(env: &Env) -> u32 {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let mut members: Vec<Address> = Vec::new(env);
+        members.push_back(admin);
+
+        let assignments: Vec<RoleAssignment> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RolesList)
+            .unwrap_or_else(|| Vec::new(env));
+        for assignment in assignments.iter() {
+            if assignment.role == AdminRole::SuperAdmin
+                && !Self::vec_contains_address(&members, &assignment.address)
+            {
+                members.push_back(assignment.address);
+            }
+        }
+
+        members.len()
+    }
+
+    fn upgrade_approval_threshold(env: &Env, emergency: bool) -> u32 {
+        let members = Self::governance_member_count(env);
+        if members == 0 {
+            panic!("no governance members configured");
+        }
+
+        let standard_threshold = (members + 1) / 2;
+        if !emergency {
+            return standard_threshold;
+        }
+
+        if members < 2 {
+            panic!("emergency upgrades require at least two governance members");
+        }
+
+        let mut emergency_threshold = (members * 2 + 2) / 3;
+        if emergency_threshold <= standard_threshold {
+            emergency_threshold = standard_threshold + 1;
+        }
+        if emergency_threshold > members {
+            emergency_threshold = members;
+        }
+
+        emergency_threshold
     }
 
     /// Internal role lookup (no auth check).
@@ -2411,11 +3174,7 @@ impl BridgeWatchContract {
     }
 
     /// Create a manual checkpoint of the current contract state.
-    pub fn create_checkpoint(
-        env: Env,
-        caller: Address,
-        label: String,
-    ) -> CheckpointMetadata {
+    pub fn create_checkpoint(env: Env, caller: Address, label: String) -> CheckpointMetadata {
         Self::assert_admin_or_super_admin(&env, &caller);
         Self::persist_checkpoint(&env, &caller, CheckpointTrigger::Manual, label, None)
     }
@@ -2515,9 +3274,10 @@ impl BridgeWatchContract {
             .set(&DataKey::HealthWeights, &restored_weights);
 
         for asset in snapshot.assets.iter() {
-            env.storage()
-                .persistent()
-                .set(&DataKey::AssetHealth(asset.asset_code.clone()), &asset.health);
+            env.storage().persistent().set(
+                &DataKey::AssetHealth(asset.asset_code.clone()),
+                &asset.health,
+            );
 
             match asset.latest_price {
                 Some(price) => env
@@ -2531,10 +3291,10 @@ impl BridgeWatchContract {
             }
 
             match asset.health_result {
-                Some(result) => env
-                    .storage()
-                    .persistent()
-                    .set(&DataKey::HealthScoreResult(asset.asset_code.clone()), &result),
+                Some(result) => env.storage().persistent().set(
+                    &DataKey::HealthScoreResult(asset.asset_code.clone()),
+                    &result,
+                ),
                 None => env
                     .storage()
                     .persistent()
@@ -2610,6 +3370,497 @@ impl BridgeWatchContract {
             *caller == admin || Self::has_role_internal(env, caller, AdminRole::SuperAdmin);
         if !authorized {
             panic!("only admin or SuperAdmin can manage checkpoints");
+        }
+    }
+
+    fn assert_admin_or_super_admin_retention(env: &Env, caller: &Address) {
+        Self::assert_not_globally_paused(env);
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        Self::check_no_pending_transfer(env);
+        let authorized =
+            *caller == admin || Self::has_role_internal(env, caller, AdminRole::SuperAdmin);
+        if !authorized {
+            panic!("only admin or SuperAdmin can manage retention policies");
+        }
+    }
+
+    fn validate_retention_policy_inputs(
+        retention_secs: u64,
+        trigger_interval_secs: u64,
+        max_deletions_per_run: u32,
+    ) {
+        if retention_secs == 0 {
+            panic!("retention_secs must be greater than zero");
+        }
+        if trigger_interval_secs == 0 {
+            panic!("trigger_interval_secs must be greater than zero");
+        }
+        if max_deletions_per_run == 0 {
+            panic!("max_deletions_per_run must be greater than zero");
+        }
+    }
+
+    fn retention_data_types(env: &Env) -> Vec<RetentionDataType> {
+        let mut types = Vec::new(env);
+        types.push_back(RetentionDataType::SupplyMismatches);
+        types.push_back(RetentionDataType::LiquidityHistory);
+        types.push_back(RetentionDataType::Checkpoints);
+        types
+    }
+
+    fn initialize_retention_policies(env: &Env) {
+        for data_type in Self::retention_data_types(env).iter() {
+            let policy = Self::default_retention_policy(data_type.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::RetentionPolicy(data_type.clone()), &policy);
+            env.storage()
+                .instance()
+                .set(&DataKey::LastCleanupAt(data_type), &0u64);
+        }
+    }
+
+    fn default_retention_policy(data_type: RetentionDataType) -> RetentionPolicy {
+        let retention_secs = match data_type {
+            RetentionDataType::SupplyMismatches => 30 * 24 * 60 * 60,
+            RetentionDataType::LiquidityHistory => 30 * 24 * 60 * 60,
+            RetentionDataType::Checkpoints => 90 * 24 * 60 * 60,
+        };
+
+        RetentionPolicy {
+            data_type,
+            retention_secs,
+            trigger_interval_secs: 3_600,
+            max_deletions_per_run: 50,
+            archive_before_delete: false,
+            enabled: true,
+        }
+    }
+
+    fn load_retention_policy(env: &Env, data_type: &RetentionDataType) -> RetentionPolicy {
+        env.storage()
+            .instance()
+            .get(&DataKey::RetentionPolicy(data_type.clone()))
+            .unwrap_or_else(|| Self::default_retention_policy(data_type.clone()))
+    }
+
+    fn retention_kind_code(data_type: &RetentionDataType) -> u32 {
+        match data_type {
+            RetentionDataType::SupplyMismatches => 1,
+            RetentionDataType::LiquidityHistory => 2,
+            RetentionDataType::Checkpoints => 3,
+        }
+    }
+
+    fn cleanup_data_type_internal(
+        env: &Env,
+        data_type: &RetentionDataType,
+        policy: &RetentionPolicy,
+        max_deletions: u32,
+    ) -> (u32, u32) {
+        if max_deletions == 0 {
+            return (0, 0);
+        }
+
+        match data_type {
+            RetentionDataType::SupplyMismatches => {
+                Self::cleanup_supply_mismatches(env, policy, max_deletions)
+            }
+            RetentionDataType::LiquidityHistory => {
+                Self::cleanup_liquidity_history(env, policy, max_deletions)
+            }
+            RetentionDataType::Checkpoints => Self::cleanup_checkpoints(env, policy, max_deletions),
+        }
+    }
+
+    fn cleanup_supply_mismatches(
+        env: &Env,
+        policy: &RetentionPolicy,
+        max_deletions: u32,
+    ) -> (u32, u32) {
+        let now = env.ledger().timestamp();
+        let bridge_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::BridgeIds)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut deleted = 0u32;
+        let mut archived = 0u32;
+
+        for bridge_id in bridge_ids.iter() {
+            if deleted >= max_deletions {
+                break;
+            }
+
+            let records: Vec<SupplyMismatch> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::SupplyMismatches(bridge_id.clone()))
+                .unwrap_or_else(|| Vec::new(env));
+            if records.len() <= 1 {
+                continue;
+            }
+
+            let mut kept = Vec::new(env);
+            let mut removed = Vec::new(env);
+            let last_index = records.len() - 1;
+            let mut idx = 0u32;
+
+            for record in records.iter() {
+                let is_latest = idx == last_index;
+                let retention_secs = Self::resolve_retention_secs(
+                    env,
+                    &RetentionDataType::SupplyMismatches,
+                    Some(&record.asset_code),
+                    policy.retention_secs,
+                );
+                let should_delete = !is_latest
+                    && deleted < max_deletions
+                    && Self::is_expired(now, record.timestamp, retention_secs);
+
+                if should_delete {
+                    removed.push_back(record);
+                    deleted += 1;
+                } else {
+                    kept.push_back(record);
+                }
+                idx += 1;
+            }
+
+            if removed.is_empty() {
+                continue;
+            }
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::SupplyMismatches(bridge_id.clone()), &kept);
+
+            if policy.archive_before_delete {
+                let mut archived_records: Vec<SupplyMismatch> = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::ArchivedSupplyMismatches(bridge_id.clone()))
+                    .unwrap_or_else(|| Vec::new(env));
+                for record in removed.iter() {
+                    archived_records.push_back(record);
+                    archived += 1;
+                }
+                env.storage().persistent().set(
+                    &DataKey::ArchivedSupplyMismatches(bridge_id),
+                    &archived_records,
+                );
+            }
+        }
+
+        (deleted, archived)
+    }
+
+    fn cleanup_liquidity_history(
+        env: &Env,
+        policy: &RetentionPolicy,
+        max_deletions: u32,
+    ) -> (u32, u32) {
+        let now = env.ledger().timestamp();
+        let pairs: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidityPairs)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut deleted = 0u32;
+        let mut archived = 0u32;
+
+        for pair in pairs.iter() {
+            if deleted >= max_deletions {
+                break;
+            }
+
+            let history: Vec<LiquidityDepth> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LiquidityDepthHistory(pair.clone()))
+                .unwrap_or_else(|| Vec::new(env));
+            if history.len() <= 1 {
+                continue;
+            }
+
+            let mut kept = Vec::new(env);
+            let mut removed = Vec::new(env);
+            let last_index = history.len() - 1;
+            let mut idx = 0u32;
+
+            for snapshot in history.iter() {
+                let is_latest = idx == last_index;
+                let retention_secs = Self::resolve_retention_secs(
+                    env,
+                    &RetentionDataType::LiquidityHistory,
+                    Some(&snapshot.asset_pair),
+                    policy.retention_secs,
+                );
+                let should_delete = !is_latest
+                    && deleted < max_deletions
+                    && Self::is_expired(now, snapshot.timestamp, retention_secs);
+
+                if should_delete {
+                    removed.push_back(snapshot);
+                    deleted += 1;
+                } else {
+                    kept.push_back(snapshot);
+                }
+                idx += 1;
+            }
+
+            if removed.is_empty() {
+                continue;
+            }
+
+            env.storage()
+                .persistent()
+                .set(&DataKey::LiquidityDepthHistory(pair.clone()), &kept);
+
+            if policy.archive_before_delete {
+                let mut archived_history: Vec<LiquidityDepth> = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::ArchivedLiquidityDepthHistory(pair.clone()))
+                    .unwrap_or_else(|| Vec::new(env));
+                for snapshot in removed.iter() {
+                    archived_history.push_back(snapshot);
+                    archived += 1;
+                }
+                env.storage().persistent().set(
+                    &DataKey::ArchivedLiquidityDepthHistory(pair),
+                    &archived_history,
+                );
+            }
+        }
+
+        (deleted, archived)
+    }
+
+    fn cleanup_checkpoints(env: &Env, policy: &RetentionPolicy, max_deletions: u32) -> (u32, u32) {
+        let now = env.ledger().timestamp();
+        let metadata_list = Self::load_checkpoint_metadata(env);
+        if metadata_list.len() <= 1 {
+            return (0, 0);
+        }
+
+        let mut deleted = 0u32;
+        let mut archived = 0u32;
+        let mut kept = Vec::new(env);
+        let mut removed_metadata = Vec::new(env);
+        let last_index = metadata_list.len() - 1;
+        let mut idx = 0u32;
+
+        for metadata in metadata_list.iter() {
+            let is_latest = idx == last_index;
+            let should_delete = !is_latest
+                && deleted < max_deletions
+                && Self::is_expired(now, metadata.created_at, policy.retention_secs);
+
+            if should_delete {
+                if policy.archive_before_delete {
+                    let archived_snapshot: Option<CheckpointSnapshot> = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::CheckpointSnapshot(metadata.checkpoint_id));
+                    if let Some(snapshot) = archived_snapshot {
+                        env.storage().persistent().set(
+                            &DataKey::ArchivedCheckpointSnapshot(metadata.checkpoint_id),
+                            &snapshot,
+                        );
+                    }
+                    removed_metadata.push_back(metadata.clone());
+                    archived += 1;
+                }
+
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::CheckpointSnapshot(metadata.checkpoint_id));
+                deleted += 1;
+            } else {
+                kept.push_back(metadata);
+            }
+            idx += 1;
+        }
+
+        if deleted > 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::CheckpointMetadataList, &kept);
+        }
+
+        if policy.archive_before_delete && !removed_metadata.is_empty() {
+            let mut archived_metadata: Vec<CheckpointMetadata> = env
+                .storage()
+                .instance()
+                .get(&DataKey::ArchivedCheckpointMetadataList)
+                .unwrap_or_else(|| Vec::new(env));
+            for metadata in removed_metadata.iter() {
+                archived_metadata.push_back(metadata);
+            }
+            env.storage()
+                .instance()
+                .set(&DataKey::ArchivedCheckpointMetadataList, &archived_metadata);
+        }
+
+        (deleted, archived)
+    }
+
+    fn resolve_retention_secs(
+        env: &Env,
+        data_type: &RetentionDataType,
+        asset_code: Option<&String>,
+        default_retention_secs: u64,
+    ) -> u64 {
+        match asset_code {
+            Some(code) => env
+                .storage()
+                .persistent()
+                .get(&DataKey::AssetRetentionOverride(
+                    code.clone(),
+                    data_type.clone(),
+                ))
+                .unwrap_or(default_retention_secs),
+            None => default_retention_secs,
+        }
+    }
+
+    fn is_expired(now: u64, timestamp: u64, retention_secs: u64) -> bool {
+        now.saturating_sub(timestamp) > retention_secs
+    }
+
+    fn maybe_trigger_auto_cleanup(env: &Env) {
+        let now = env.ledger().timestamp();
+        let mut total_deleted = 0u32;
+        let mut total_archived = 0u32;
+
+        for data_type in Self::retention_data_types(env).iter() {
+            let policy = Self::load_retention_policy(env, &data_type);
+            if !policy.enabled {
+                continue;
+            }
+
+            let last_cleanup_at: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::LastCleanupAt(data_type.clone()))
+                .unwrap_or(0);
+            if last_cleanup_at != 0 && now < last_cleanup_at + policy.trigger_interval_secs {
+                continue;
+            }
+
+            let (deleted, archived) = Self::cleanup_data_type_internal(
+                env,
+                &data_type,
+                &policy,
+                policy.max_deletions_per_run,
+            );
+            env.storage()
+                .instance()
+                .set(&DataKey::LastCleanupAt(data_type.clone()), &now);
+
+            if deleted > 0 || archived > 0 {
+                env.events().publish(
+                    (
+                        symbol_short!("ret_auto"),
+                        Self::retention_kind_code(&data_type),
+                    ),
+                    (deleted, archived, now),
+                );
+            }
+
+            total_deleted += deleted;
+            total_archived += archived;
+        }
+
+        if total_deleted > 0 || total_archived > 0 {
+            env.events().publish(
+                (symbol_short!("ret_job"),),
+                (total_deleted, total_archived, now),
+            );
+        }
+    }
+
+    fn supply_storage_usage(env: &Env) -> StorageUsageEntry {
+        let bridge_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::BridgeIds)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut active_records = 0u32;
+        let mut archived_records = 0u32;
+        for bridge_id in bridge_ids.iter() {
+            let active: Vec<SupplyMismatch> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::SupplyMismatches(bridge_id.clone()))
+                .unwrap_or_else(|| Vec::new(env));
+            let archived: Vec<SupplyMismatch> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ArchivedSupplyMismatches(bridge_id))
+                .unwrap_or_else(|| Vec::new(env));
+            active_records += active.len();
+            archived_records += archived.len();
+        }
+
+        StorageUsageEntry {
+            data_type: RetentionDataType::SupplyMismatches,
+            tracked_keys: bridge_ids.len(),
+            active_records,
+            archived_records,
+        }
+    }
+
+    fn liquidity_storage_usage(env: &Env) -> StorageUsageEntry {
+        let pairs: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidityPairs)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut active_records = 0u32;
+        let mut archived_records = 0u32;
+        for pair in pairs.iter() {
+            let active: Vec<LiquidityDepth> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LiquidityDepthHistory(pair.clone()))
+                .unwrap_or_else(|| Vec::new(env));
+            let archived: Vec<LiquidityDepth> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ArchivedLiquidityDepthHistory(pair))
+                .unwrap_or_else(|| Vec::new(env));
+            active_records += active.len();
+            archived_records += archived.len();
+        }
+
+        StorageUsageEntry {
+            data_type: RetentionDataType::LiquidityHistory,
+            tracked_keys: pairs.len(),
+            active_records,
+            archived_records,
+        }
+    }
+
+    fn checkpoint_storage_usage(env: &Env) -> StorageUsageEntry {
+        let active_metadata = Self::load_checkpoint_metadata(env);
+        let archived_metadata: Vec<CheckpointMetadata> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ArchivedCheckpointMetadataList)
+            .unwrap_or_else(|| Vec::new(env));
+
+        StorageUsageEntry {
+            data_type: RetentionDataType::Checkpoints,
+            tracked_keys: active_metadata.len(),
+            active_records: active_metadata.len(),
+            archived_records: archived_metadata.len(),
         }
     }
 
@@ -2721,6 +3972,7 @@ impl BridgeWatchContract {
         Self::prune_checkpoints(env, &config);
         env.events()
             .publish((symbol_short!("chkptnew"), next_id), metadata.asset_count);
+        Self::maybe_trigger_auto_cleanup(env);
         metadata
     }
 
@@ -2814,7 +4066,9 @@ impl BridgeWatchContract {
         CheckpointComparison {
             from_checkpoint_id,
             to_checkpoint_id,
-            timestamp_delta: to_snapshot.created_at.saturating_sub(from_snapshot.created_at),
+            timestamp_delta: to_snapshot
+                .created_at
+                .saturating_sub(from_snapshot.created_at),
             state_hash_changed: Self::compute_checkpoint_hash(env, from_snapshot)
                 != Self::compute_checkpoint_hash(env, to_snapshot),
             weights_changed: from_snapshot.health_weights != to_snapshot.health_weights,
@@ -2841,6 +4095,18 @@ impl BridgeWatchContract {
     }
 
     fn vec_contains_string(values: &Vec<String>, target: &String) -> bool {
+        let mut i = 0;
+        while i < values.len() {
+            if values.get(i).unwrap() == *target {
+                return true;
+            }
+            i += 1;
+        }
+
+        false
+    }
+
+    fn vec_contains_address(values: &Vec<Address>, target: &Address) -> bool {
         let mut i = 0;
         while i < values.len() {
             if values.get(i).unwrap() == *target {
@@ -3061,8 +4327,7 @@ mod tests {
         client.register_asset(&admin, &eurc);
         let second = client.create_checkpoint(&admin, &String::from_str(&env, "after"));
 
-        let comparison =
-            client.compare_checkpoints(&first.checkpoint_id, &second.checkpoint_id);
+        let comparison = client.compare_checkpoints(&first.checkpoint_id, &second.checkpoint_id);
         assert!(comparison.state_hash_changed);
         assert_eq!(comparison.added_assets.len(), 1);
         assert_eq!(comparison.added_assets.get(0).unwrap(), eurc);
@@ -3088,8 +4353,14 @@ mod tests {
 
         let checkpoints = client.list_checkpoints();
         assert_eq!(checkpoints.len(), 2);
-        assert_eq!(checkpoints.get(0).unwrap().checkpoint_id, second.checkpoint_id);
-        assert_eq!(checkpoints.get(1).unwrap().checkpoint_id, third.checkpoint_id);
+        assert_eq!(
+            checkpoints.get(0).unwrap().checkpoint_id,
+            second.checkpoint_id
+        );
+        assert_eq!(
+            checkpoints.get(1).unwrap().checkpoint_id,
+            third.checkpoint_id
+        );
         assert!(client.get_checkpoint(&1).is_none());
     }
 
@@ -3145,6 +4416,201 @@ mod tests {
         assert_eq!(client.get_price(&usdc).unwrap().price, 1_000_000);
         assert_eq!(restore_meta.trigger, CheckpointTrigger::Restore);
         assert_eq!(restore_meta.restored_from, Some(baseline.checkpoint_id));
+    }
+
+    // -----------------------------------------------------------------------
+    // Data retention and cleanup tests (issue #100)
+    // -----------------------------------------------------------------------
+
+    fn find_storage_entry(stats: &StorageStats, data_type: RetentionDataType) -> StorageUsageEntry {
+        let mut i = 0;
+        while i < stats.entries.len() {
+            let entry = stats.entries.get(i).unwrap();
+            if entry.data_type == data_type {
+                return entry;
+            }
+            i += 1;
+        }
+
+        panic!("storage usage entry not found");
+    }
+
+    #[test]
+    #[should_panic(expected = "only admin or SuperAdmin can manage retention policies")]
+    fn test_set_retention_policy_requires_admin_or_super_admin() {
+        let (env, client, _admin) = setup();
+        let stranger = Address::generate(&env);
+
+        client.set_retention_policy(
+            &stranger,
+            &RetentionDataType::SupplyMismatches,
+            &86_400,
+            &3_600,
+            &25,
+            &false,
+            &true,
+        );
+    }
+
+    #[test]
+    fn test_cleanup_old_data_archives_and_preserves_latest_record() {
+        let (env, client, admin) = setup();
+        let bridge = String::from_str(&env, "CIRCLE_USDC");
+        let asset = String::from_str(&env, "USDC");
+
+        client.set_retention_policy(
+            &admin,
+            &RetentionDataType::SupplyMismatches,
+            &100,
+            &1_000_000,
+            &20,
+            &true,
+            &true,
+        );
+
+        env.ledger().set_timestamp(100);
+        client.record_supply_mismatch(&bridge, &asset, &1_000_000, &1_001_000);
+
+        env.ledger().set_timestamp(200);
+        client.record_supply_mismatch(&bridge, &asset, &1_000_000, &1_002_000);
+
+        env.ledger().set_timestamp(500);
+        client.record_supply_mismatch(&bridge, &asset, &1_000_000, &1_003_000);
+
+        env.ledger().set_timestamp(2_000);
+        let result = client.cleanup_old_data(&admin, &10);
+
+        assert_eq!(result.total_deleted, 2);
+        assert_eq!(result.total_archived, 2);
+
+        let records = client.get_supply_mismatches(&bridge);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records.get(0).unwrap().timestamp, 500);
+
+        let stats = client.get_storage_stats();
+        let supply = find_storage_entry(&stats, RetentionDataType::SupplyMismatches);
+        assert_eq!(supply.active_records, 1);
+        assert_eq!(supply.archived_records, 2);
+    }
+
+    #[test]
+    fn test_per_asset_override_prevents_override_asset_cleanup() {
+        let (env, client, admin) = setup();
+        let bridge = String::from_str(&env, "CIRCLE_MULTI");
+        let usdc = String::from_str(&env, "USDC");
+        let eurc = String::from_str(&env, "EURC");
+
+        client.set_retention_policy(
+            &admin,
+            &RetentionDataType::SupplyMismatches,
+            &100,
+            &1_000_000,
+            &20,
+            &false,
+            &true,
+        );
+
+        let override_secs = Some(10_000u64);
+        client.set_asset_retention_override(
+            &admin,
+            &usdc,
+            &RetentionDataType::SupplyMismatches,
+            &override_secs,
+        );
+
+        env.ledger().set_timestamp(100);
+        client.record_supply_mismatch(&bridge, &usdc, &1_000_000, &1_001_000);
+
+        env.ledger().set_timestamp(150);
+        client.record_supply_mismatch(&bridge, &eurc, &1_000_000, &1_001_000);
+
+        env.ledger().set_timestamp(200);
+        client.record_supply_mismatch(&bridge, &usdc, &1_000_000, &1_002_000);
+
+        env.ledger().set_timestamp(1_000);
+        let result = client.cleanup_old_data(&admin, &20);
+        assert_eq!(result.total_deleted, 1);
+
+        let records = client.get_supply_mismatches(&bridge);
+        assert_eq!(records.len(), 2);
+
+        let mut usdc_count = 0u32;
+        let mut eurc_count = 0u32;
+        for record in records.iter() {
+            if record.asset_code == usdc {
+                usdc_count += 1;
+            }
+            if record.asset_code == eurc {
+                eurc_count += 1;
+            }
+        }
+
+        assert_eq!(usdc_count, 2);
+        assert_eq!(eurc_count, 0);
+    }
+
+    #[test]
+    fn test_gradual_cleanup_respects_policy_delete_cap() {
+        let (env, client, admin) = setup();
+        let bridge = String::from_str(&env, "CIRCLE_CAP");
+        let asset = String::from_str(&env, "USDC");
+
+        client.set_retention_policy(
+            &admin,
+            &RetentionDataType::SupplyMismatches,
+            &20,
+            &1_000_000,
+            &2,
+            &false,
+            &true,
+        );
+
+        for i in 0..6u64 {
+            env.ledger().set_timestamp(100 + i * 10);
+            client.record_supply_mismatch(
+                &bridge,
+                &asset,
+                &(1_000_000 + i as i128),
+                &(1_001_000 + i as i128),
+            );
+        }
+
+        env.ledger().set_timestamp(1_000);
+        let result = client.cleanup_old_data(&admin, &25);
+
+        assert_eq!(result.total_deleted, 2);
+        let records = client.get_supply_mismatches(&bridge);
+        assert_eq!(records.len(), 4);
+    }
+
+    #[test]
+    fn test_auto_cleanup_trigger_runs_during_writes() {
+        let (env, client, admin) = setup();
+        let bridge = String::from_str(&env, "CIRCLE_AUTO");
+        let asset = String::from_str(&env, "USDC");
+
+        client.set_retention_policy(
+            &admin,
+            &RetentionDataType::SupplyMismatches,
+            &10,
+            &1,
+            &50,
+            &false,
+            &true,
+        );
+
+        env.ledger().set_timestamp(100);
+        client.record_supply_mismatch(&bridge, &asset, &1_000_000, &1_001_000);
+
+        env.ledger().set_timestamp(200);
+        client.record_supply_mismatch(&bridge, &asset, &1_000_000, &1_002_000);
+
+        env.ledger().set_timestamp(500);
+        client.record_supply_mismatch(&bridge, &asset, &1_000_000, &1_003_000);
+
+        let records = client.get_supply_mismatches(&bridge);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records.get(0).unwrap().timestamp, 500);
     }
 
     // -----------------------------------------------------------------------
@@ -3790,6 +5256,126 @@ mod tests {
         client.set_mismatch_threshold(&5);
 
         assert_has_event(&env, &client.address, symbol_short!("thresh_up"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Contract upgrade tests (issue #98)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_propose_upgrade_sets_pending_with_timelock() {
+        let (env, client, admin) = setup();
+        env.ledger().set_timestamp(1_000);
+
+        let new_hash = BytesN::from_array(&env, &[7u8; 32]);
+        let proposal_id = client.propose_upgrade(&admin, &new_hash, &false, &None, &None);
+
+        assert_eq!(proposal_id, 1);
+        let pending = client.get_pending_upgrade().unwrap();
+        assert_eq!(pending.proposal_id, 1);
+        assert_eq!(pending.new_wasm_hash, new_hash);
+        assert_eq!(pending.execute_after, 1_000 + 172_800);
+        assert_eq!(pending.required_approvals, 1);
+        assert_eq!(pending.approvals.len(), 1);
+        assert_eq!(pending.approvals.get(0).unwrap(), admin);
+
+        assert_has_event(&env, &client.address, symbol_short!("up_prop"));
+    }
+
+    #[test]
+    #[should_panic(expected = "upgrade timelock has not elapsed")]
+    fn test_execute_upgrade_enforces_timelock() {
+        let (env, client, admin) = setup();
+        env.ledger().set_timestamp(2_000);
+
+        let new_hash = BytesN::from_array(&env, &[8u8; 32]);
+        client.propose_upgrade(&admin, &new_hash, &false, &None, &None);
+        client.execute_upgrade(&admin, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "insufficient governance approvals")]
+    fn test_emergency_upgrade_requires_higher_approval_threshold() {
+        let (env, client, admin) = setup();
+        let super_admin = Address::generate(&env);
+        client.grant_role(&admin, &super_admin, &AdminRole::SuperAdmin);
+
+        env.ledger().set_timestamp(3_000);
+        let new_hash = BytesN::from_array(&env, &[9u8; 32]);
+        client.propose_upgrade(&admin, &new_hash, &true, &None, &None);
+
+        let pending = client.get_pending_upgrade().unwrap();
+        assert_eq!(pending.required_approvals, 2);
+        assert_eq!(pending.execute_after, 3_000);
+
+        // Only proposer approval exists at this point.
+        client.execute_upgrade(&admin, &1);
+    }
+
+    #[test]
+    fn test_emergency_upgrade_executes_after_additional_approval() {
+        let (env, client, admin) = setup();
+        let super_admin = Address::generate(&env);
+        client.grant_role(&admin, &super_admin, &AdminRole::SuperAdmin);
+
+        env.ledger().set_timestamp(4_000);
+        let new_hash = BytesN::from_array(&env, &[10u8; 32]);
+        client.propose_upgrade(&admin, &new_hash, &true, &None, &None);
+        client.approve_upgrade(&super_admin, &1);
+        client.execute_upgrade(&admin, &1);
+
+        assert!(client.get_pending_upgrade().is_none());
+        assert_eq!(client.get_contract_version(), 2);
+        assert_eq!(client.get_current_wasm_hash().unwrap(), new_hash);
+
+        let history = client.get_upgrade_history();
+        assert_eq!(history.len(), 1);
+        let record = history.get(0).unwrap();
+        assert_eq!(record.proposal_id, 1);
+        assert!(record.emergency);
+        assert!(!record.is_rollback);
+
+        assert_has_event(&env, &client.address, symbol_short!("up_appr"));
+        assert_has_event(&env, &client.address, symbol_short!("up_exec"));
+    }
+
+    #[test]
+    fn test_cancel_upgrade_clears_pending_proposal() {
+        let (env, client, admin) = setup();
+        env.ledger().set_timestamp(5_000);
+
+        let new_hash = BytesN::from_array(&env, &[11u8; 32]);
+        client.propose_upgrade(&admin, &new_hash, &false, &None, &None);
+        client.cancel_upgrade(&admin, &1, &String::from_str(&env, "no longer needed"));
+
+        assert!(client.get_pending_upgrade().is_none());
+        assert_has_event(&env, &client.address, symbol_short!("up_cncl"));
+    }
+
+    #[test]
+    fn test_propose_rollback_uses_tracked_target_hash() {
+        let (env, client, admin) = setup();
+
+        let first_hash = BytesN::from_array(&env, &[12u8; 32]);
+        let second_hash = BytesN::from_array(&env, &[13u8; 32]);
+
+        env.ledger().set_timestamp(10_000);
+        client.propose_upgrade(&admin, &first_hash, &false, &None, &None);
+        env.ledger().set_timestamp(10_000 + 172_800);
+        client.execute_upgrade(&admin, &1);
+
+        env.ledger().set_timestamp(200_000);
+        client.propose_upgrade(&admin, &second_hash, &false, &None, &None);
+        env.ledger().set_timestamp(200_000 + 172_800);
+        client.execute_upgrade(&admin, &2);
+
+        assert_eq!(client.get_rollback_target().unwrap(), first_hash);
+
+        let rollback_id = client.propose_rollback(&admin, &false, &None, &None);
+        assert_eq!(rollback_id, 3);
+        let pending = client.get_pending_upgrade().unwrap();
+        assert!(pending.is_rollback);
+        assert_eq!(pending.new_wasm_hash, first_hash);
     }
 
     // -----------------------------------------------------------------------

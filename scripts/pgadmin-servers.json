@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Bridge Watch (dev)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "bridge_watch",
+      "Username": "bridge_watch",
+      "SSLMode": "prefer",
+      "PassFile": "/pgpass"
+    }
+  }
+}

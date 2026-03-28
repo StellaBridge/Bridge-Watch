@@ -86,3 +86,51 @@ export interface TransactionPage {
   pageSize: number;
   totalPages: number;
 }
+
+// WebSocket connection
+export type ConnectionState = "connecting" | "connected" | "disconnected" | "error";
+
+export type SubscriptionChannel = "prices" | "health" | "health-updates" | "alerts" | "bridges";
+
+interface WsBaseMessage {
+  channel: SubscriptionChannel | string;
+  type?: string;
+  timestamp?: string;
+}
+
+export interface WsPriceMessage extends WsBaseMessage {
+  channel: "prices";
+  symbol: string;
+  price: number;
+  source: string;
+  vwap?: number;
+}
+
+export interface WsHealthMessage extends WsBaseMessage {
+  channel: "health" | "health-updates";
+  symbol: string;
+  overallScore: number;
+  factors: HealthFactors;
+  trend: "improving" | "stable" | "deteriorating";
+  lastUpdated: string;
+}
+
+export interface WsAlertMessage extends WsBaseMessage {
+  channel: "alerts";
+  severity: "info" | "warning" | "critical";
+  message: string;
+  symbol?: string;
+  bridgeName?: string;
+}
+
+export interface WsBridgeMessage extends WsBaseMessage {
+  channel: "bridges";
+  name: string;
+  status: "healthy" | "degraded" | "down" | "unknown";
+  totalValueLocked: number;
+  supplyOnStellar: number;
+  supplyOnSource: number;
+  mismatchPercentage: number;
+}
+
+export type WsMessage = WsPriceMessage | WsHealthMessage | WsAlertMessage | WsBridgeMessage;

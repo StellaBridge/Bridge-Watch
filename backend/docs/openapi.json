@@ -1,0 +1,856 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Bridge-Watch API",
+    "description": "Real-time Stellar bridge monitoring API. Provides bridge statuses, asset health, liquidity, price feeds, alert management, analytics, and administrative controls.\n\n## Authentication\nProtected endpoints require an API key in the `x-api-key` header.\n\n## Rate Limiting\nAll endpoints are rate-limited per IP using a sliding-window algorithm backed by Redis. Exceeding the limit returns **429 Too Many Requests** with a `Retry-After` header.\n\n## Versioning\nAll REST endpoints are prefixed with `/api/v1/`. Breaking changes increment the version segment.\n\n## Error Format\n```json\n{ \"error\": \"Short label\", \"message\": \"Human-readable description\" }\n```",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Bridge-Watch Team",
+      "url": "https://github.com/StellaBridge/Bridge-Watch"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    { "url": "http://localhost:3000", "description": "Local development" },
+    { "url": "https://api.bridge-watch.io", "description": "Production" }
+  ],
+  "tags": [
+    { "name": "Health", "description": "Service health check" },
+    { "name": "Assets", "description": "Asset prices, liquidity, and health scores" },
+    { "name": "Bridges", "description": "Stellar bridge status and statistics" },
+    { "name": "Alerts", "description": "Alert rule management and history (requires API key)" },
+    { "name": "Analytics", "description": "Protocol-wide and per-asset analytics" },
+    { "name": "Aggregation", "description": "Time-series aggregation of prices, health, and volume" },
+    { "name": "Metadata", "description": "Asset metadata — logos, descriptions, social links" },
+    { "name": "Watchlists", "description": "User watchlists" },
+    { "name": "Preferences", "description": "User preference storage" },
+    { "name": "Jobs", "description": "Background job queue monitoring and control" },
+    { "name": "Config", "description": "Runtime configuration and feature flags" },
+    { "name": "Cache", "description": "Redis cache inspection and invalidation" },
+    { "name": "Circuit Breaker", "description": "Automated circuit-breaker pause controls" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "API key for protected endpoints"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "Not Found" },
+          "message": { "type": "string", "example": "The requested resource was not found" }
+        }
+      },
+      "HealthScore": {
+        "type": "object",
+        "properties": {
+          "symbol": { "type": "string", "example": "USDC" },
+          "score": { "type": "number", "format": "float", "minimum": 0, "maximum": 100, "example": 87.5 },
+          "status": { "type": "string", "enum": ["healthy", "warning", "critical"], "example": "healthy" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AlertRule": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "ownerAddress": { "type": "string" },
+          "name": { "type": "string" },
+          "assetCode": { "type": "string" },
+          "conditions": { "type": "array", "items": { "type": "object" } },
+          "conditionOp": { "type": "string", "enum": ["AND", "OR"] },
+          "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "cooldownSeconds": { "type": "integer" },
+          "webhookUrl": { "type": "string", "format": "uri" },
+          "isActive": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Watchlist": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "userId": { "type": "string" },
+          "name": { "type": "string" },
+          "isDefault": { "type": "boolean" },
+          "assets": { "type": "array", "items": { "type": "string" } },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Service health check",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                },
+                "example": { "status": "ok", "timestamp": "2026-03-28T12:00:00.000Z" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assets": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "List all monitored assets",
+        "responses": {
+          "200": {
+            "description": "List of assets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "assets": { "type": "array", "items": { "type": "object" } },
+                    "total": { "type": "integer", "example": 0 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/assets/{symbol}": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "Get asset details",
+        "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" }, "example": "USDC" }],
+        "responses": {
+          "200": { "description": "Asset details" },
+          "404": { "description": "Asset not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/assets/{symbol}/health": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "Get current health score",
+        "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" }, "example": "USDC" }],
+        "responses": {
+          "200": {
+            "description": "Health score",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthScore" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/assets/{symbol}/health/history": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "Get health score history",
+        "parameters": [
+          { "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "period", "in": "query", "schema": { "type": "string", "enum": ["24h", "7d", "30d"], "default": "7d" } }
+        ],
+        "responses": {
+          "200": { "description": "Health score history" },
+          "400": { "description": "Bad request" }
+        }
+      }
+    },
+    "/api/v1/assets/{symbol}/liquidity": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "Get aggregated liquidity data",
+        "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Liquidity data" } }
+      }
+    },
+    "/api/v1/assets/{symbol}/price": {
+      "get": {
+        "tags": ["Assets"],
+        "summary": "Get aggregated price from all sources",
+        "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Aggregated price" } }
+      }
+    },
+    "/api/v1/bridges": {
+      "get": {
+        "tags": ["Bridges"],
+        "summary": "List all bridge statuses",
+        "responses": { "200": { "description": "Bridge status list" } }
+      }
+    },
+    "/api/v1/bridges/{bridge}/stats": {
+      "get": {
+        "tags": ["Bridges"],
+        "summary": "Get bridge statistics",
+        "parameters": [{ "name": "bridge", "in": "path", "required": true, "schema": { "type": "string" }, "example": "allbridge" }],
+        "responses": {
+          "200": { "description": "Bridge statistics" },
+          "404": { "description": "Bridge not found" }
+        }
+      }
+    },
+    "/api/v1/alerts/rules": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "List alert rules for an owner",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "owner", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Alert rules" },
+          "400": { "description": "Missing owner param" },
+          "401": { "description": "Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Alerts"],
+        "summary": "Create an alert rule",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ownerAddress", "name", "assetCode", "conditions"],
+                "properties": {
+                  "ownerAddress": { "type": "string" },
+                  "name": { "type": "string", "example": "USDC health drop" },
+                  "assetCode": { "type": "string", "example": "USDC" },
+                  "conditions": { "type": "array", "items": { "type": "object" } },
+                  "conditionOp": { "type": "string", "enum": ["AND", "OR"], "default": "AND" },
+                  "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium" },
+                  "cooldownSeconds": { "type": "integer", "default": 300 },
+                  "webhookUrl": { "type": "string", "format": "uri" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Rule created" },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/alerts/rules/{ruleId}": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "Get a single alert rule",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "ruleId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Alert rule" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Rule not found" }
+        }
+      },
+      "patch": {
+        "tags": ["Alerts"],
+        "summary": "Update an alert rule",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "ruleId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated rule" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Rule not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Alerts"],
+        "summary": "Delete an alert rule",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "ruleId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["ownerAddress"], "properties": { "ownerAddress": { "type": "string" } } } } }
+        },
+        "responses": {
+          "204": { "description": "Rule deleted" },
+          "401": { "description": "Unauthorized" },
+          "404": { "description": "Rule not found" }
+        }
+      }
+    },
+    "/api/v1/alerts/rules/{ruleId}/active": {
+      "patch": {
+        "tags": ["Alerts"],
+        "summary": "Pause or resume an alert rule",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "ruleId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["ownerAddress", "isActive"], "properties": { "ownerAddress": { "type": "string" }, "isActive": { "type": "boolean" } } } } }
+        },
+        "responses": { "200": { "description": "Success" }, "401": { "description": "Unauthorized" }, "404": { "description": "Rule not found" } }
+      }
+    },
+    "/api/v1/alerts/rules/{ruleId}/events": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "Get events fired by a specific rule",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [
+          { "name": "ruleId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } }
+        ],
+        "responses": { "200": { "description": "Rule events" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/alerts/rules/bulk": {
+      "post": {
+        "tags": ["Alerts"],
+        "summary": "Bulk create alert rules",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Rules created" }, "401": { "description": "Unauthorized" } }
+      },
+      "patch": {
+        "tags": ["Alerts"],
+        "summary": "Bulk update alert rules",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Rules updated" }, "401": { "description": "Unauthorized" } }
+      },
+      "delete": {
+        "tags": ["Alerts"],
+        "summary": "Bulk delete alert rules",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Rules deleted" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/alerts/history": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "Get paginated alert history",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": { "200": { "description": "Paginated alert history" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/alerts/history/{assetCode}": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "Get alert history for an asset",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [
+          { "name": "assetCode", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } }
+        ],
+        "responses": { "200": { "description": "Asset alert history" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/alerts/stats": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "Get alert statistics for an owner",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "owner", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Alert stats" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/alerts/recent": {
+      "get": {
+        "tags": ["Alerts"],
+        "summary": "Get most recent alert events",
+        "security": [{ "ApiKeyAuth": [] }],
+        "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } }],
+        "responses": { "200": { "description": "Recent events" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/alerts/test": {
+      "post": {
+        "tags": ["Alerts"],
+        "summary": "Dry-run an alert rule against current metrics",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["rule", "metrics"], "properties": { "rule": { "type": "object" }, "metrics": { "type": "object" } } } } }
+        },
+        "responses": { "200": { "description": "Dry-run result" }, "401": { "description": "Unauthorized" } }
+      }
+    },
+    "/api/v1/analytics/protocol": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get protocol-wide statistics",
+        "parameters": [{ "name": "forceRefresh", "in": "query", "schema": { "type": "string", "enum": ["true", "false"] } }],
+        "responses": { "200": { "description": "Protocol stats" } }
+      }
+    },
+    "/api/v1/analytics/bridges/comparison": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get bridge comparison metrics",
+        "responses": { "200": { "description": "Bridge comparisons" } }
+      }
+    },
+    "/api/v1/analytics/assets/rankings": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get asset rankings",
+        "responses": { "200": { "description": "Asset rankings" } }
+      }
+    },
+    "/api/v1/analytics/volume": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get volume aggregations",
+        "parameters": [
+          { "name": "period", "in": "query", "schema": { "type": "string", "enum": ["hourly", "daily", "weekly", "monthly"], "default": "daily" } },
+          { "name": "symbol", "in": "query", "schema": { "type": "string" } },
+          { "name": "bridgeName", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Volume aggregations" }, "400": { "description": "Invalid period" } }
+      }
+    },
+    "/api/v1/analytics/trends/{metric}": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Calculate trend for a metric",
+        "parameters": [{ "name": "metric", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Trend data" } }
+      }
+    },
+    "/api/v1/analytics/top-performers": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get top performing assets or bridges",
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["assets", "bridges"], "default": "assets" } },
+          { "name": "metric", "in": "query", "schema": { "type": "string", "enum": ["volume", "tvl", "health"], "default": "health" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 10 } }
+        ],
+        "responses": { "200": { "description": "Top performers" } }
+      }
+    },
+    "/api/v1/analytics/historical/{metric}": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get historical comparison data",
+        "parameters": [
+          { "name": "metric", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "symbol", "in": "query", "schema": { "type": "string" } },
+          { "name": "days", "in": "query", "schema": { "type": "integer", "default": 30 } }
+        ],
+        "responses": { "200": { "description": "Historical data" } }
+      }
+    },
+    "/api/v1/analytics/summary": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Get comprehensive analytics summary",
+        "responses": { "200": { "description": "Analytics summary" } }
+      }
+    },
+    "/api/v1/analytics/custom-metrics": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "List all custom metrics",
+        "responses": { "200": { "description": "Custom metrics list" } }
+      }
+    },
+    "/api/v1/analytics/custom-metrics/{metricId}": {
+      "get": {
+        "tags": ["Analytics"],
+        "summary": "Execute a custom metric query",
+        "parameters": [{ "name": "metricId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Metric result" }, "404": { "description": "Metric not found" } }
+      }
+    },
+    "/api/v1/analytics/cache/invalidate": {
+      "post": {
+        "tags": ["Analytics"],
+        "summary": "Invalidate analytics cache",
+        "requestBody": {
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "pattern": { "type": "string" } } } } }
+        },
+        "responses": { "200": { "description": "Cache invalidated" } }
+      }
+    },
+    "/api/v1/aggregation/{symbol}/prices": {
+      "get": {
+        "tags": ["Aggregation"],
+        "summary": "Aggregate price data",
+        "parameters": [
+          { "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "interval", "in": "query", "required": true, "schema": { "type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d"] } },
+          { "name": "startTime", "in": "query", "required": true, "schema": { "type": "string", "format": "date-time" } },
+          { "name": "endTime", "in": "query", "required": true, "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": { "200": { "description": "Price aggregations" } }
+      }
+    },
+    "/api/v1/aggregation/{symbol}/health": {
+      "get": {
+        "tags": ["Aggregation"],
+        "summary": "Aggregate health scores",
+        "parameters": [
+          { "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "interval", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "startTime", "in": "query", "required": true, "schema": { "type": "string", "format": "date-time" } },
+          { "name": "endTime", "in": "query", "required": true, "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": { "200": { "description": "Health aggregations" } }
+      }
+    },
+    "/api/v1/aggregation/{symbol}/volume": {
+      "get": {
+        "tags": ["Aggregation"],
+        "summary": "Aggregate volume data",
+        "parameters": [
+          { "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "interval", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "startTime", "in": "query", "required": true, "schema": { "type": "string", "format": "date-time" } },
+          { "name": "endTime", "in": "query", "required": true, "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": { "200": { "description": "Volume aggregations" } }
+      }
+    },
+    "/api/v1/aggregation/stats": {
+      "get": {
+        "tags": ["Aggregation"],
+        "summary": "Get aggregation statistics",
+        "responses": { "200": { "description": "Stats" } }
+      }
+    },
+    "/api/v1/metadata": {
+      "get": {
+        "tags": ["Metadata"],
+        "summary": "List all asset metadata",
+        "responses": { "200": { "description": "Metadata list" } }
+      },
+      "post": {
+        "tags": ["Metadata"],
+        "summary": "Create or update asset metadata",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created/updated" }, "400": { "description": "Validation error" } }
+      }
+    },
+    "/api/v1/metadata/search": {
+      "get": {
+        "tags": ["Metadata"],
+        "summary": "Search asset metadata",
+        "parameters": [{ "name": "q", "in": "query", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Search results" } }
+      }
+    },
+    "/api/v1/metadata/symbol/{symbol}": {
+      "get": {
+        "tags": ["Metadata"],
+        "summary": "Get metadata by symbol",
+        "parameters": [{ "name": "symbol", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Metadata" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/api/v1/metadata/category/{category}": {
+      "get": {
+        "tags": ["Metadata"],
+        "summary": "Get metadata by category",
+        "parameters": [{ "name": "category", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Metadata" } }
+      }
+    },
+    "/api/v1/metadata/{assetId}": {
+      "get": {
+        "tags": ["Metadata"],
+        "summary": "Get metadata by asset ID",
+        "parameters": [{ "name": "assetId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Metadata" }, "404": { "description": "Not found" } }
+      },
+      "delete": {
+        "tags": ["Metadata"],
+        "summary": "Delete asset metadata",
+        "parameters": [{ "name": "assetId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/api/v1/metadata/{assetId}/logo": {
+      "patch": {
+        "tags": ["Metadata"],
+        "summary": "Update asset logo",
+        "parameters": [{ "name": "assetId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["logoUrl", "updatedBy"], "properties": { "logoUrl": { "type": "string", "format": "uri" }, "updatedBy": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Logo updated" } }
+      }
+    },
+    "/api/v1/metadata/{assetId}/history": {
+      "get": {
+        "tags": ["Metadata"],
+        "summary": "Get metadata version history",
+        "parameters": [{ "name": "assetId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Version history" } }
+      }
+    },
+    "/api/v1/watchlists/{userId}": {
+      "get": {
+        "tags": ["Watchlists"],
+        "summary": "Get all watchlists for a user",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Watchlists" } }
+      },
+      "post": {
+        "tags": ["Watchlists"],
+        "summary": "Create a watchlist",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "isDefault": { "type": "boolean" } } } } } },
+        "responses": { "200": { "description": "Created watchlist" }, "400": { "description": "Validation error" } }
+      }
+    },
+    "/api/v1/watchlists/{userId}/{id}": {
+      "delete": {
+        "tags": ["Watchlists"],
+        "summary": "Delete a watchlist",
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      },
+      "patch": {
+        "tags": ["Watchlists"],
+        "summary": "Update a watchlist",
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" }, "400": { "description": "Error" } }
+      }
+    },
+    "/api/v1/preferences/{userId}": {
+      "get": {
+        "tags": ["Preferences"],
+        "summary": "Get all preferences for a user",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Preferences" } }
+      }
+    },
+    "/api/v1/preferences/{userId}/{category}/{key}": {
+      "get": {
+        "tags": ["Preferences"],
+        "summary": "Get a single preference value",
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "category", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Preference value" }, "400": { "description": "Invalid category" }, "404": { "description": "Key not found" } }
+      },
+      "put": {
+        "tags": ["Preferences"],
+        "summary": "Set a preference value",
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "category", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["value"], "properties": { "value": {} } } } } },
+        "responses": { "200": { "description": "Updated preferences" } }
+      },
+      "delete": {
+        "tags": ["Preferences"],
+        "summary": "Reset (delete) a preference key",
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "category", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Reset preferences" } }
+      }
+    },
+    "/api/v1/preferences/{userId}/bulk": {
+      "patch": {
+        "tags": ["Preferences"],
+        "summary": "Bulk update preferences",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated preferences" }, "409": { "description": "Version conflict" } }
+      }
+    },
+    "/api/v1/preferences/{userId}/export": {
+      "get": {
+        "tags": ["Preferences"],
+        "summary": "Export user preferences",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Exported preferences" } }
+      }
+    },
+    "/api/v1/preferences/{userId}/import": {
+      "post": {
+        "tags": ["Preferences"],
+        "summary": "Import user preferences",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Imported preferences" } }
+      }
+    },
+    "/api/v1/preferences/{userId}/stream": {
+      "get": {
+        "tags": ["Preferences"],
+        "summary": "Stream preference change events (SSE)",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "SSE stream", "content": { "text/event-stream": {} } } }
+      }
+    },
+    "/api/v1/jobs/monitor": {
+      "get": {
+        "tags": ["Jobs"],
+        "summary": "Get job queue status",
+        "responses": { "200": { "description": "Queue status and failed jobs" } }
+      }
+    },
+    "/api/v1/jobs/{jobName}/trigger": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Manually trigger a job",
+        "parameters": [{ "name": "jobName", "in": "path", "required": true, "schema": { "type": "string" }, "example": "bridge-health-check" }],
+        "responses": { "200": { "description": "Job queued" }, "500": { "description": "Failed to queue" } }
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "tags": ["Config"],
+        "summary": "List all configuration entries",
+        "responses": { "200": { "description": "Config list" } }
+      },
+      "post": {
+        "tags": ["Config"],
+        "summary": "Set a configuration value",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Config set" } }
+      }
+    },
+    "/api/v1/config/{key}": {
+      "get": {
+        "tags": ["Config"],
+        "summary": "Get a configuration value",
+        "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Config value" }, "404": { "description": "Not found" } }
+      },
+      "delete": {
+        "tags": ["Config"],
+        "summary": "Delete a configuration entry",
+        "parameters": [{ "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["deletedBy"], "properties": { "deletedBy": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/api/v1/config/features/{name}": {
+      "get": {
+        "tags": ["Config"],
+        "summary": "Check a feature flag",
+        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Feature flag status" } }
+      }
+    },
+    "/api/v1/config/features": {
+      "post": {
+        "tags": ["Config"],
+        "summary": "Set a feature flag",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Feature flag set" } }
+      }
+    },
+    "/api/v1/config/export": {
+      "get": { "tags": ["Config"], "summary": "Export configuration", "responses": { "200": { "description": "Config export" } } }
+    },
+    "/api/v1/config/import": {
+      "post": { "tags": ["Config"], "summary": "Import configuration", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } }, "responses": { "201": { "description": "Imported" } } }
+    },
+    "/api/v1/config/audit": {
+      "get": { "tags": ["Config"], "summary": "Get configuration audit trail", "responses": { "200": { "description": "Audit trail" } } }
+    },
+    "/api/v1/config/cache/clear": {
+      "post": { "tags": ["Config"], "summary": "Clear configuration cache", "responses": { "200": { "description": "Cache cleared" } } }
+    },
+    "/api/v1/cache/stats": {
+      "get": {
+        "tags": ["Cache"],
+        "summary": "Get Redis cache statistics",
+        "responses": { "200": { "description": "Cache stats" } }
+      }
+    },
+    "/api/v1/cache/invalidate": {
+      "post": {
+        "tags": ["Cache"],
+        "summary": "Invalidate cache entries",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "tag": { "type": "string" }, "key": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Invalidated" }, "400": { "description": "Missing tag or key" } }
+      }
+    },
+    "/api/v1/circuit-breaker/status": {
+      "get": {
+        "tags": ["Circuit Breaker"],
+        "summary": "Check circuit-breaker pause status",
+        "parameters": [
+          { "name": "scope", "in": "query", "required": true, "schema": { "type": "string", "enum": ["global", "bridge", "asset"] } },
+          { "name": "identifier", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Pause status" }, "400": { "description": "Invalid scope" } }
+      }
+    },
+    "/api/v1/circuit-breaker/whitelist": {
+      "get": {
+        "tags": ["Circuit Breaker"],
+        "summary": "Check whitelist status",
+        "parameters": [
+          { "name": "type", "in": "query", "required": true, "schema": { "type": "string", "enum": ["address", "asset"] } },
+          { "name": "address", "in": "query", "schema": { "type": "string" } },
+          { "name": "asset", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Whitelist status" } }
+      }
+    },
+    "/api/v1/circuit-breaker/pause": {
+      "post": {
+        "tags": ["Circuit Breaker"],
+        "summary": "Pause a scope (not yet implemented — requires guardian auth)",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "501": { "description": "Not implemented" } }
+      }
+    },
+    "/api/v1/circuit-breaker/recovery": {
+      "post": {
+        "tags": ["Circuit Breaker"],
+        "summary": "Recover from a pause (not yet implemented — requires guardian auth)",
+        "security": [{ "ApiKeyAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "501": { "description": "Not implemented" } }
+      }
+    },
+    "/api/v1/metrics/rate-limits": {
+      "get": {
+        "tags": ["Cache"],
+        "summary": "Rate-limit sliding-window metrics",
+        "security": [{ "ApiKeyAuth": [] }],
+        "responses": { "200": { "description": "Rate-limit metrics" } }
+      }
+    }
+  }
+}

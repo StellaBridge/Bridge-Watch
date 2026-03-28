@@ -5,6 +5,7 @@ import { SkeletonText } from "./Skeleton";
 import NotificationCenter from "./NotificationCenter";
 import { useNotificationContext } from "../context/NotificationContext";
 import { WatchlistSidebar } from "./WatchlistSidebar";
+import ConnectionStatus from "./ConnectionStatus";
 
 const navLinks = [
   { to: "/dashboard", label: "Dashboard" },
@@ -124,15 +125,15 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
                   </span>
                 )}
               </button>
-              
+
               <NotificationCenter
                 isOpen={isNotifOpen}
                 onClose={() => setIsNotifOpen(false)}
               />
             </div>
 
-            <div className="hidden sm:block text-sm text-stellar-text-secondary border-l border-stellar-border pl-4">
-              Stellar Network Monitor
+            <div className="hidden sm:flex items-center gap-3 border-l border-stellar-border pl-4">
+              <ConnectionStatus />
             </div>
           </div>
         </div>
@@ -140,4 +141,3 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
     </nav>
   );
 }
-
