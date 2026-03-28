@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyPluginOptions, FastifyRequest, FastifyReply } f
 import { JobQueue } from "../../workers/queue.js";
 import { logger } from "../../utils/logger.js";
 
-export default async function jobsRoutes(fastify: FastifyInstance, options: FastifyPluginOptions) {
+export default async function jobsRoutes(fastify: FastifyInstance, _options: FastifyPluginOptions) {
   const jobQueue = JobQueue.getInstance();
 
   /**

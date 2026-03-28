@@ -1,16 +1,29 @@
 import { Suspense } from "react";
 import { useParams } from "react-router-dom";
-import { useAssetHealth } from "../hooks/useAssets";
-import { usePrices } from "../hooks/usePrices";
-import HealthScoreCard from "../components/HealthScoreCard";
-import PriceChart from "../components/PriceChart";
+import { useAssetDetail } from "../hooks/useAssetDetail";
+import AssetHeader from "../components/AssetHeader";
+import HealthBreakdown from "../components/HealthBreakdown";
+import { EnhancedPriceChart } from "../components/PriceChart";
 import LiquidityDepthChart from "../components/LiquidityDepthChart";
 import { ErrorBoundary, LoadingSpinner } from "../components/Skeleton";
 
 export default function AssetDetail() {
   const { symbol } = useParams<{ symbol: string }>();
-  const { data: healthData } = useAssetHealth(symbol ?? "");
-  const { data: priceData, isLoading: priceLoading } = usePrices(symbol ?? "");
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+
+  const {
+    assetInfo,
+    health,
+    priceHistory,
+    priceSources,
+    liquidity,
+    volume,
+    supply,
+    healthHistory,
+    alerts,
+    timeframe,
+    setTimeframe,
+  } = useAssetDetail(symbol ?? "");
 
   if (!symbol) {
     return (
@@ -46,81 +59,28 @@ export default function AssetDetail() {
           factors={healthData?.factors ?? null}
           trend={healthData?.trend ?? null}
         />
-        <div className="lg:col-span-2">
-          <PriceChart
+      )}
+
+      {activeTab === "liquidity" && (
+        <div className="space-y-6">
+          <LiquidityDepthChart
             symbol={symbol}
-            data={priceData?.history ?? []}
-            isLoading={priceLoading}
+            data={liquidity.data ?? []}
+            isLoading={liquidity.isLoading}
           />
         </div>
-      </div>
+      )}
 
-      <LiquidityDepthChart symbol={symbol} data={[]} isLoading={false} />
+      {activeTab === "volume" && (
+        <VolumeAnalytics data={volume.data} isLoading={volume.isLoading} />
+      )}
 
-      <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Price Sources
-        </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">
-              Price sources for {symbol} including last update times
-            </caption>
-            <thead>
-              <tr className="text-left text-stellar-text-secondary border-b border-stellar-border">
-                <th scope="col" className="pb-3 pr-4">
-                  Source
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  Price
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  Last Updated
-                </th>
-                <th scope="col" className="pb-3">
-                  Deviation
-                </th>
-              </tr>
-            </thead>
-            <tbody className="text-white">
-              {priceData?.sources && priceData.sources.length > 0 ? (
-                priceData.sources.map(
-                  (source: {
-                    source: string;
-                    price: number;
-                    timestamp: string;
-                  }) => (
-                    <tr
-                      key={source.source}
-                      className="border-b border-stellar-border"
-                    >
-                      <th scope="row" className="py-3 pr-4 font-medium text-white">
-                        {source.source}
-                      </th>
-                      <td className="py-3 pr-4">
-                        ${source.price.toFixed(4)}
-                      </td>
-                      <td className="py-3 pr-4 text-stellar-text-secondary">
-                        {source.timestamp}
-                      </td>
-                      <td className="py-3">--</td>
-                    </tr>
-                  )
-                )
-              ) : (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="py-6 text-center text-stellar-text-secondary"
-                  >
-                    No price source data available
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {activeTab === "alerts" && (
+        <AlertConfigSection
+          alerts={alerts.data}
+          isLoading={alerts.isLoading}
+        />
+      )}
     </div>
   </Suspense>
 </ErrorBoundary>

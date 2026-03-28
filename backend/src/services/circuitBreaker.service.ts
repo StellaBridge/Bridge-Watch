@@ -170,7 +170,7 @@ class CircuitBreakerService {
     identifier: string | undefined,
     reason: string
   ): Promise<void> {
-    const contract = new StellarSdk.Contract(this.contractId);
+    const _contract = new StellarSdk.Contract(this.contractId);
 
     let operation: StellarSdk.xdr.Operation;
     switch (scope) {
@@ -227,7 +227,7 @@ class CircuitBreakerService {
    * Request recovery from pause
    */
   async requestRecovery(signer: StellarSdk.Keypair, pauseId: number): Promise<void> {
-    const contract = new StellarSdk.Contract(this.contractId);
+    const _contract = new StellarSdk.Contract(this.contractId);
 
     const operation = StellarSdk.Operation.invokeContractFunction({
       contract: this.contractId,

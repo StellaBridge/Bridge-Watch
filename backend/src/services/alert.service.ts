@@ -388,7 +388,7 @@ export class AlertService {
 
   private async triggerCircuitBreaker(
     event: AlertEvent,
-    rule: AlertRule
+    _rule: AlertRule
   ): Promise<void> {
     // Map alert types to circuit breaker trigger data
     const severity = event.priority === "critical" ? "high" :
