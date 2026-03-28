@@ -14,6 +14,7 @@ interface QueryParams {
   limit?: string;
   days?: string;
   pattern?: string;
+  forceRefresh?: string;
 }
 
 export async function analyticsRoutes(server: FastifyInstance) {
@@ -21,9 +22,10 @@ export async function analyticsRoutes(server: FastifyInstance) {
    * GET /api/v1/analytics/protocol
    * Get protocol-wide statistics
    */
-  server.get("/protocol", async (request: FastifyRequest, reply: FastifyReply) => {
+  server.get<{ Querystring: QueryParams }>("/protocol", async (request: FastifyRequest<{ Querystring: QueryParams }>, reply: FastifyReply) => {
     try {
-      const stats = await analyticsService.getProtocolStats();
+      const forceRefresh = request.query.forceRefresh === "true";
+      const stats = await analyticsService.getProtocolStats(forceRefresh);
       return reply.send({
         success: true,
         data: stats,
@@ -41,9 +43,10 @@ export async function analyticsRoutes(server: FastifyInstance) {
    * GET /api/v1/analytics/bridges/comparison
    * Get bridge comparison metrics
    */
-  server.get("/bridges/comparison", async (request: FastifyRequest, reply: FastifyReply) => {
+  server.get<{ Querystring: QueryParams }>("/bridges/comparison", async (request: FastifyRequest<{ Querystring: QueryParams }>, reply: FastifyReply) => {
     try {
-      const comparisons = await analyticsService.getBridgeComparisons();
+      const forceRefresh = request.query.forceRefresh === "true";
+      const comparisons = await analyticsService.getBridgeComparisons(forceRefresh);
       return reply.send({
         success: true,
         data: comparisons,
@@ -61,9 +64,10 @@ export async function analyticsRoutes(server: FastifyInstance) {
    * GET /api/v1/analytics/assets/rankings
    * Get asset rankings
    */
-  server.get("/assets/rankings", async (request: FastifyRequest, reply: FastifyReply) => {
+  server.get<{ Querystring: QueryParams }>("/assets/rankings", async (request: FastifyRequest<{ Querystring: QueryParams }>, reply: FastifyReply) => {
     try {
-      const rankings = await analyticsService.getAssetRankings();
+      const forceRefresh = request.query.forceRefresh === "true";
+      const rankings = await analyticsService.getAssetRankings(forceRefresh);
       return reply.send({
         success: true,
         data: rankings,
@@ -86,7 +90,7 @@ export async function analyticsRoutes(server: FastifyInstance) {
     "/volume",
     async (request: FastifyRequest<{ Querystring: QueryParams }>, reply: FastifyReply) => {
       try {
-        const { period = "daily", symbol, bridgeName } = request.query;
+        const { period = "daily", symbol, bridgeName, forceRefresh } = request.query;
 
         if (!["hourly", "daily", "weekly", "monthly"].includes(period)) {
           return reply.status(400).send({
@@ -95,10 +99,12 @@ export async function analyticsRoutes(server: FastifyInstance) {
           });
         }
 
+        const bypassCache = forceRefresh === "true";
         const aggregations = await analyticsService.getVolumeAggregation(
           period as AggregationPeriod,
           symbol,
-          bridgeName
+          bridgeName,
+          bypassCache
         );
 
         return reply.send({
@@ -128,9 +134,10 @@ export async function analyticsRoutes(server: FastifyInstance) {
     ) => {
       try {
         const { metric } = request.params;
-        const { symbol, bridgeName } = request.query;
+        const { symbol, bridgeName, forceRefresh } = request.query;
 
-        const trend = await analyticsService.calculateTrend(metric, symbol, bridgeName);
+        const bypassCache = forceRefresh === "true";
+        const trend = await analyticsService.calculateTrend(metric, symbol, bridgeName, bypassCache);
 
         return reply.send({
           success: true,
@@ -155,7 +162,7 @@ export async function analyticsRoutes(server: FastifyInstance) {
     "/top-performers",
     async (request: FastifyRequest<{ Querystring: QueryParams }>, reply: FastifyReply) => {
       try {
-        const { type = "assets", metric = "health", limit = "10" } = request.query;
+        const { type = "assets", metric = "health", limit = "10", forceRefresh } = request.query;
 
         if (!["assets", "bridges"].includes(type)) {
           return reply.status(400).send({
@@ -171,10 +178,12 @@ export async function analyticsRoutes(server: FastifyInstance) {
           });
         }
 
+        const bypassCache = forceRefresh === "true";
         const performers = await analyticsService.getTopPerformers(
           type as "assets" | "bridges",
           metric as "volume" | "tvl" | "health",
-          parseInt(limit, 10)
+          parseInt(limit, 10),
+          bypassCache
         );
 
         return reply.send({
@@ -204,12 +213,14 @@ export async function analyticsRoutes(server: FastifyInstance) {
     ) => {
       try {
         const { metric } = request.params;
-        const { symbol, days = "30" } = request.query;
+        const { symbol, days = "30", forceRefresh } = request.query;
 
+        const bypassCache = forceRefresh === "true";
         const history = await analyticsService.getHistoricalComparison(
           metric,
           symbol,
-          parseInt(days, 10)
+          parseInt(days, 10),
+          bypassCache
         );
 
         return reply.send({
@@ -259,12 +270,13 @@ export async function analyticsRoutes(server: FastifyInstance) {
    * GET /api/v1/analytics/summary
    * Get comprehensive analytics summary (combines multiple metrics)
    */
-  server.get("/summary", async (request: FastifyRequest, reply: FastifyReply) => {
+  server.get<{ Querystring: QueryParams }>("/summary", async (request: FastifyRequest<{Querystring: QueryParams}>, reply: FastifyReply) => {
     try {
+      const forceRefresh = request.query.forceRefresh === "true";
       const [protocolStats, topAssets, topBridges] = await Promise.all([
-        analyticsService.getProtocolStats(),
-        analyticsService.getTopPerformers("assets", "health", 5),
-        analyticsService.getTopPerformers("bridges", "tvl", 5),
+        analyticsService.getProtocolStats(forceRefresh),
+        analyticsService.getTopPerformers("assets", "health", 5, forceRefresh),
+        analyticsService.getTopPerformers("bridges", "tvl", 5, forceRefresh),
       ]);
 
       return reply.send({
@@ -313,10 +325,10 @@ export async function analyticsRoutes(server: FastifyInstance) {
    * GET /api/v1/analytics/custom-metrics/:metricId
    * Execute a custom metric query
    */
-  server.get<{ Params: { metricId: string } }>(
+  server.get<{ Params: { metricId: string }; Querystring: QueryParams }>(
     "/custom-metrics/:metricId",
     async (
-      request: FastifyRequest<{ Params: { metricId: string } }>,
+      request: FastifyRequest<{ Params: { metricId: string }; Querystring: QueryParams }>,
       reply: FastifyReply
     ) => {
       try {
@@ -330,7 +342,8 @@ export async function analyticsRoutes(server: FastifyInstance) {
           });
         }
 
-        const result = await analyticsService.executeCustomMetric(metric);
+        const bypassCache = request.query.forceRefresh === "true";
+        const result = await analyticsService.executeCustomMetric(metric, bypassCache);
 
         return reply.send({
           success: true,

@@ -1,16 +1,24 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { AnalyticsService } from "../../src/services/analytics.service.js";
-import { knex } from "../../src/database/connection.js";
-import { redis } from "../../src/utils/redis.js";
+import { CacheService } from "../../src/utils/cache.js";
 
-vi.mock("../../src/utils/redis.js", () => ({
-  redis: {
-    get: vi.fn(),
-    setex: vi.fn(),
-    del: vi.fn(),
-    keys: vi.fn(),
-  },
-}));
+// We mock CacheService so we don't have to worry about Redis internals here.
+vi.mock("../../src/utils/cache.js", () => {
+  return {
+    CacheService: {
+      getOrSet: vi.fn(),
+      invalidateByTag: vi.fn(),
+      invalidatePattern: vi.fn(),
+      generateKey: vi.fn((namespace, id) => `cache:${namespace}:${id}`),
+    },
+    CacheTTL: {
+      ANALYTICS: 300,
+      PRICES: 60,
+      METADATA: 3600,
+      HEALTH_SCORE: 600,
+    }
+  };
+});
 
 describe("AnalyticsService", () => {
   let analyticsService: AnalyticsService;
@@ -18,6 +26,11 @@ describe("AnalyticsService", () => {
   beforeEach(() => {
     analyticsService = new AnalyticsService();
     vi.clearAllMocks();
+
+    // Default mock implementation for getOrSet to just execute the fetcher
+    vi.mocked(CacheService.getOrSet).mockImplementation(async (key, fetcher, options) => {
+      return fetcher();
+    });
   });
 
   afterEach(() => {
@@ -34,18 +47,19 @@ describe("AnalyticsService", () => {
         timestamp: new Date().toISOString(),
       };
 
-      vi.mocked(redis.get).mockResolvedValue(JSON.stringify(cachedStats));
+      vi.mocked(CacheService.getOrSet).mockResolvedValue(cachedStats);
 
       const result = await analyticsService.getProtocolStats();
 
-      expect(redis.get).toHaveBeenCalledWith("analytics:protocol:stats");
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:protocol:stats",
+        expect.any(Function),
+        expect.objectContaining({ tags: ["analytics"], ttl: 300 })
+      );
       expect(result).toEqual(cachedStats);
     });
 
     it("should compute and cache protocol stats if not cached", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.getProtocolStats();
 
       expect(result).toHaveProperty("totalValueLocked");
@@ -53,7 +67,6 @@ describe("AnalyticsService", () => {
       expect(result).toHaveProperty("activeBridges");
       expect(result).toHaveProperty("activeAssets");
       expect(result).toHaveProperty("timestamp");
-      expect(redis.setex).toHaveBeenCalled();
     });
   });
 
@@ -69,18 +82,19 @@ describe("AnalyticsService", () => {
         },
       ];
 
-      vi.mocked(redis.get).mockResolvedValue(JSON.stringify(cachedComparisons));
+      vi.mocked(CacheService.getOrSet).mockResolvedValue(cachedComparisons);
 
       const result = await analyticsService.getBridgeComparisons();
 
-      expect(redis.get).toHaveBeenCalledWith("analytics:bridges:comparison");
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:bridges:comparison",
+        expect.any(Function),
+        expect.anything()
+      );
       expect(result).toEqual(cachedComparisons);
     });
 
     it("should compute bridge comparisons with market share", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.getBridgeComparisons();
 
       expect(Array.isArray(result)).toBe(true);
@@ -105,18 +119,19 @@ describe("AnalyticsService", () => {
         },
       ];
 
-      vi.mocked(redis.get).mockResolvedValue(JSON.stringify(cachedRankings));
+      vi.mocked(CacheService.getOrSet).mockResolvedValue(cachedRankings);
 
       const result = await analyticsService.getAssetRankings();
 
-      expect(redis.get).toHaveBeenCalledWith("analytics:assets:rankings");
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:assets:rankings",
+        expect.any(Function),
+        expect.anything()
+      );
       expect(result).toEqual(cachedRankings);
     });
 
     it("should compute and rank assets by health score", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.getAssetRankings();
 
       expect(Array.isArray(result)).toBe(true);
@@ -145,18 +160,19 @@ describe("AnalyticsService", () => {
         },
       ];
 
-      vi.mocked(redis.get).mockResolvedValue(JSON.stringify(cachedAggregation));
+      vi.mocked(CacheService.getOrSet).mockResolvedValue(cachedAggregation);
 
       const result = await analyticsService.getVolumeAggregation("daily");
 
-      expect(redis.get).toHaveBeenCalledWith("analytics:volume:daily:all:all");
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:volume:daily:all:all",
+        expect.any(Function),
+        expect.anything()
+      );
       expect(result).toEqual(cachedAggregation);
     });
 
     it("should compute volume aggregation for different periods", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const periods: Array<"hourly" | "daily" | "weekly" | "monthly"> = [
         "hourly",
         "daily",
@@ -171,9 +187,6 @@ describe("AnalyticsService", () => {
     });
 
     it("should filter by symbol and bridge name", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.getVolumeAggregation(
         "daily",
         "USDC",
@@ -181,7 +194,11 @@ describe("AnalyticsService", () => {
       );
 
       expect(Array.isArray(result)).toBe(true);
-      expect(redis.get).toHaveBeenCalledWith("analytics:volume:daily:USDC:Circle USDC");
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:volume:daily:USDC:Circle USDC", 
+        expect.any(Function), 
+        expect.anything()
+      );
     });
   });
 
@@ -228,9 +245,6 @@ describe("AnalyticsService", () => {
 
   describe("getTopPerformers", () => {
     it("should return top performing assets by health", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.getTopPerformers("assets", "health", 5);
 
       expect(Array.isArray(result)).toBe(true);
@@ -238,9 +252,6 @@ describe("AnalyticsService", () => {
     });
 
     it("should return top performing bridges by TVL", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.getTopPerformers("bridges", "tvl", 10);
 
       expect(Array.isArray(result)).toBe(true);
@@ -248,46 +259,25 @@ describe("AnalyticsService", () => {
     });
 
     it("should cache top performers", async () => {
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       await analyticsService.getTopPerformers("assets", "volume", 5);
 
-      expect(redis.setex).toHaveBeenCalledWith(
-        "analytics:top:assets:volume:5",
-        300,
-        expect.any(String)
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:top:assets:volume:5",
+        expect.any(Function),
+        expect.anything()
       );
     });
   });
 
   describe("invalidateCache", () => {
     it("should invalidate all analytics cache when no pattern provided", async () => {
-      vi.mocked(redis.keys).mockResolvedValue(["analytics:key1", "analytics:key2"]);
-      vi.mocked(redis.del).mockResolvedValue(2);
-
       await analyticsService.invalidateCache();
-
-      expect(redis.keys).toHaveBeenCalledWith("analytics:*");
-      expect(redis.del).toHaveBeenCalledWith("analytics:key1", "analytics:key2");
+      expect(CacheService.invalidateByTag).toHaveBeenCalledWith("analytics");
     });
 
     it("should invalidate cache matching pattern", async () => {
-      vi.mocked(redis.keys).mockResolvedValue(["analytics:protocol:stats"]);
-      vi.mocked(redis.del).mockResolvedValue(1);
-
       await analyticsService.invalidateCache("protocol");
-
-      expect(redis.keys).toHaveBeenCalledWith("analytics:protocol*");
-      expect(redis.del).toHaveBeenCalledWith("analytics:protocol:stats");
-    });
-
-    it("should handle empty cache gracefully", async () => {
-      vi.mocked(redis.keys).mockResolvedValue([]);
-
-      await analyticsService.invalidateCache();
-
-      expect(redis.del).not.toHaveBeenCalled();
+      expect(CacheService.invalidatePattern).toHaveBeenCalledWith("cache:analytics:protocol*");
     });
   });
 
@@ -343,16 +333,13 @@ describe("AnalyticsService", () => {
         cacheTTL: 300,
       };
 
-      vi.mocked(redis.get).mockResolvedValue(null);
-      vi.mocked(redis.setex).mockResolvedValue("OK");
-
       const result = await analyticsService.executeCustomMetric(customMetric);
 
       expect(result).toBeDefined();
-      expect(redis.setex).toHaveBeenCalledWith(
-        "analytics:custom:test-metric",
-        300,
-        expect.any(String)
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:custom:test-metric",
+        expect.any(Function),
+        expect.objectContaining({ ttl: 300 })
       );
     });
 
@@ -368,12 +355,16 @@ describe("AnalyticsService", () => {
         cacheTTL: 300,
       };
 
-      vi.mocked(redis.get).mockResolvedValue(JSON.stringify(cachedResult));
+      vi.mocked(CacheService.getOrSet).mockResolvedValue(cachedResult);
 
       const result = await analyticsService.executeCustomMetric(customMetric);
 
       expect(result).toEqual(cachedResult);
-      expect(redis.get).toHaveBeenCalledWith("analytics:custom:test-metric");
+      expect(CacheService.getOrSet).toHaveBeenCalledWith(
+        "cache:analytics:custom:test-metric",
+        expect.any(Function),
+        expect.anything()
+      );
     });
   });
 });

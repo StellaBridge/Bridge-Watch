@@ -1,4 +1,6 @@
-import { db } from "../database/index.js";
+import { getDatabase } from "../database/connection.js";
+
+const db = getDatabase();
 
 export interface Watchlist {
   id: string;

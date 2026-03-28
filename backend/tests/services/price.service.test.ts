@@ -1,14 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PriceService, PriceFetchError } from "../../src/services/price.service.js";
-import { redis } from "../../src/utils/redis.js";
+import { CacheService } from "../../src/utils/cache.js";
 import { getOrderBook, getLiquidityPools, HorizonTimeoutError, HorizonClientError } from "../../src/utils/stellar.js";
+import { CircleSource } from "../../src/services/sources/circle.source.js";
 
-vi.mock("../../src/utils/redis.js", () => ({
-    redis: {
-        get: vi.fn(),
-        set: vi.fn(),
-    }
+// Mock CacheService
+vi.mock("../../src/utils/cache.js", () => ({
+  CacheService: {
+    getOrSet: vi.fn(),
+    generateKey: vi.fn((ns, key) => `cache:${ns}:${key}`),
+  },
+  CacheTTL: {
+    PRICES: 60,
+  }
 }));
+
+// Mock CircleSource to avoid real HTTP requests
+vi.mock("../../src/services/sources/circle.source.js", () => {
+  return {
+    CircleSource: class {
+      static supports(symbol: string) {
+        return symbol === "USDC" || symbol === "EURC";
+      }
+      async getPriceSourceData(symbol: string) {
+        if (symbol === "USDC") return { price: 1.0, volume: 1000000, name: "Circle API" };
+        if (symbol === "EURC") return { price: 1.05, volume: 500000, name: "Circle API" };
+        throw new Error("Unsupported symbol in mocked Circle API");
+      }
+    }
+  }
+});
 
 vi.mock("../../src/utils/stellar.js", () => ({
     getOrderBook: vi.fn(),
@@ -44,6 +65,11 @@ describe("PriceService", () => {
     beforeEach(() => {
         priceService = new PriceService();
         vi.resetAllMocks();
+
+        // Default mock implementation to run fetcher
+        vi.mocked(CacheService.getOrSet).mockImplementation(async (key, fetcher, options) => {
+          return fetcher();
+        });
     });
 
     afterEach(() => {
@@ -153,23 +179,20 @@ describe("PriceService", () => {
         });
 
         it("returns cached result if available", async () => {
-            vi.mocked(redis.get).mockResolvedValue(JSON.stringify({ vwap: 999 }));
+            vi.mocked(CacheService.getOrSet).mockResolvedValue({ vwap: 999 });
             const result = await priceService.getAggregatedPrice("XLM");
             expect(result?.vwap).toBe(999);
             expect(priceService.fetchSDEXPrice).not.toHaveBeenCalled();
         });
 
-        it("fetches from both sources on cache miss and writes to cache", async () => {
-            vi.mocked(redis.get).mockResolvedValue(null);
+        it("fetches from sources on cache miss", async () => {
             const result = await priceService.getAggregatedPrice("XLM");
             expect(result?.vwap).toBeCloseTo(0.113333);
             expect(priceService.fetchSDEXPrice).toHaveBeenCalledWith("XLM");
             expect(priceService.fetchAMMPrice).toHaveBeenCalledWith("XLM");
-            expect(redis.set).toHaveBeenCalled();
         });
 
         it("gracefully calculates from SDEX if AMM fails", async () => {
-            vi.mocked(redis.get).mockResolvedValue(null);
             vi.spyOn(priceService, "fetchAMMPrice").mockRejectedValue(new Error("AMM Down"));
             const result = await priceService.getAggregatedPrice("XLM");
             expect(result?.vwap).toBeCloseTo(0.1);
@@ -177,7 +200,6 @@ describe("PriceService", () => {
         });
 
         it("gracefully calculates from AMM if SDEX fails", async () => {
-            vi.mocked(redis.get).mockResolvedValue(null);
             vi.spyOn(priceService, "fetchSDEXPrice").mockRejectedValue(new Error("SDEX Down"));
             const result = await priceService.getAggregatedPrice("XLM");
             expect(result?.vwap).toBeCloseTo(0.12);
@@ -185,22 +207,12 @@ describe("PriceService", () => {
         });
 
         it("throws if both sources fail", async () => {
-            vi.mocked(redis.get).mockResolvedValue(null);
             vi.spyOn(priceService, "fetchSDEXPrice").mockRejectedValue(new HorizonTimeoutError("First error"));
             vi.spyOn(priceService, "fetchAMMPrice").mockRejectedValue(new Error("Second error"));
             await expect(priceService.getAggregatedPrice("XLM")).rejects.toThrow("First error");
         });
 
-        it("does not block if saving to Redis fails", async () => {
-            vi.mocked(redis.get).mockResolvedValue(null);
-            vi.mocked(redis.set).mockRejectedValue(new Error("Redis disconnected"));
-            const result = await priceService.getAggregatedPrice("XLM");
-            expect(result?.vwap).toBeCloseTo(0.113333); // Should still return the result
-        });
-
         it("works for each of the 5 assets", async () => {
-            vi.mocked(redis.get).mockResolvedValue(null);
-
             const assets = ["USDC", "PYUSD", "EURC", "XLM", "FOBXX"];
             for (const asset of assets) {
                 const result = await priceService.getAggregatedPrice(asset);

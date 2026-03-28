@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger.js";
-import { redis } from "../utils/redis.js";
+import { CacheService, CacheTTL } from "../utils/cache.js";
 import { config, SUPPORTED_ASSETS } from "../config/index.js";
 import { getOrderBook, getLiquidityPools, HorizonTimeoutError, HorizonClientError } from "../utils/stellar.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -157,61 +157,54 @@ export class PriceService {
    * @returns {Promise<AggregatedPrice | null>} The aggregated price object conforming to AggregatedPrice or null if fundamentally unresolvable
    * @throws {Error} Re-throws first error if all individual fetch sources fail
    */
-  async getAggregatedPrice(symbol: string): Promise<AggregatedPrice | null> {
-    logger.info({ symbol }, "Fetching aggregated price");
+  async getAggregatedPrice(symbol: string, bypassCache: boolean = false): Promise<AggregatedPrice | null> {
+    const cacheKey = CacheService.generateKey("price", `aggregated:${symbol}`);
 
-    const cacheKey = `price:aggregated:${symbol}`;
+    return CacheService.getOrSet(
+      cacheKey,
+      async () => {
+        logger.info({ symbol }, "Fetching aggregated price from sources");
 
-    try {
-      const cached = await redis.get(cacheKey);
-      if (cached) return JSON.parse(cached) as AggregatedPrice;
-    } catch (redisError) {
-      logger.error({ error: redisError, symbol }, "Redis cache read error");
-    }
+        const fetches: Promise<{ price: number; volume: number; name: string }>[] = [
+          this.fetchSDEXPrice(symbol).then((r) => ({ ...r, name: "Stellar DEX" })),
+          this.fetchAMMPrice(symbol).then((r) => ({ ...r, name: "Stellar AMM" })),
+        ];
 
-    const fetches: Promise<{ price: number; volume: number; name: string }>[] = [
-      this.fetchSDEXPrice(symbol).then((r) => ({ ...r, name: "Stellar DEX" })),
-      this.fetchAMMPrice(symbol).then((r) => ({ ...r, name: "Stellar AMM" })),
-    ];
+        if (CircleSource.supports(symbol)) {
+          fetches.push(this.circleSource.getPriceSourceData(symbol));
+        }
 
-    if (CircleSource.supports(symbol)) {
-      fetches.push(this.circleSource.getPriceSourceData(symbol));
-    }
+        const results = await Promise.allSettled(fetches);
 
-    const results = await Promise.allSettled(fetches);
+        const sourceData: { price: number; volume: number; name: string }[] = [];
 
-    const sourceData: { price: number; volume: number; name: string }[] = [];
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            sourceData.push(result.value);
+          } else {
+            logger.warn({ error: result.reason, symbol }, "Price source fetch failed");
+          }
+        }
 
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        sourceData.push(result.value);
-      } else {
-        logger.warn({ error: result.reason, symbol }, "Price source fetch failed");
-      }
-    }
+        if (sourceData.length === 0) {
+          const firstError = (results[0] as PromiseRejectedResult).reason || (results[1] as PromiseRejectedResult).reason;
+          throw firstError;
+        }
 
-    if (sourceData.length === 0) {
-      const firstError = (results[0] as PromiseRejectedResult).reason || (results[1] as PromiseRejectedResult).reason;
-      throw firstError;
-    }
+        const { vwap, validSources } = this.calculateVWAP(sourceData);
 
-    const { vwap, validSources } = this.calculateVWAP(sourceData);
+        const aggregated: AggregatedPrice = {
+          symbol,
+          vwap,
+          sources: validSources,
+          deviation: 0,
+          lastUpdated: new Date().toISOString()
+        };
 
-    const aggregated: AggregatedPrice = {
-      symbol,
-      vwap,
-      sources: validSources,
-      deviation: 0,
-      lastUpdated: new Date().toISOString()
-    };
-
-    try {
-      await redis.set(cacheKey, JSON.stringify(aggregated), "EX", config.REDIS_CACHE_TTL_SEC);
-    } catch (redisError) {
-      logger.error({ error: redisError, symbol }, "Redis cache write error");
-    }
-
-    return aggregated;
+        return aggregated;
+      },
+      { bypassCache, tags: ["price"], ttl: CacheTTL.PRICES }
+    );
   }
 
   /**
