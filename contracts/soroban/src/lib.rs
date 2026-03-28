@@ -249,6 +249,106 @@ pub struct PendingAdminTransfer {
     pub timeout_at: u64,
 }
 
+// ---------------------------------------------------------------------------
+// Snapshot and checkpoint types (issue #105)
+// ---------------------------------------------------------------------------
+
+/// How a checkpoint was created.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CheckpointTrigger {
+    Automatic,
+    Manual,
+    Restore,
+}
+
+/// Admin-configurable checkpoint behavior.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointConfig {
+    /// Minimum number of seconds between automatic checkpoints.
+    pub interval_secs: u64,
+    /// Maximum number of stored checkpoints before pruning oldest entries.
+    pub max_checkpoints: u32,
+    /// Checkpoint serialization format version for compatibility checks.
+    pub format_version: u32,
+}
+
+/// Per-asset state captured in a checkpoint snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointAssetState {
+    pub asset_code: String,
+    pub health: AssetHealth,
+    pub latest_price: Option<PriceRecord>,
+    pub health_result: Option<HealthScoreResult>,
+}
+
+/// Full checkpoint snapshot used for historical analysis and restore.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointSnapshot {
+    pub checkpoint_id: u64,
+    pub format_version: u32,
+    pub created_at: u64,
+    pub trigger: CheckpointTrigger,
+    pub created_by: Address,
+    pub label: String,
+    pub monitored_assets: Vec<String>,
+    pub health_weights: HealthWeights,
+    pub assets: Vec<CheckpointAssetState>,
+    pub restored_from: Option<u64>,
+}
+
+/// Compact metadata stored separately for efficient checkpoint listing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointMetadata {
+    pub checkpoint_id: u64,
+    pub format_version: u32,
+    pub created_at: u64,
+    pub trigger: CheckpointTrigger,
+    pub created_by: Address,
+    pub label: String,
+    pub monitored_asset_count: u32,
+    pub asset_count: u32,
+    pub state_hash: BytesN<32>,
+    pub restored_from: Option<u64>,
+}
+
+/// Per-asset comparison result between two checkpoints.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointAssetDiff {
+    pub asset_code: String,
+    pub health_changed: bool,
+    pub price_changed: bool,
+    pub health_result_changed: bool,
+}
+
+/// High-level comparison output for two checkpoints.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointComparison {
+    pub from_checkpoint_id: u64,
+    pub to_checkpoint_id: u64,
+    pub timestamp_delta: u64,
+    pub state_hash_changed: bool,
+    pub weights_changed: bool,
+    pub added_assets: Vec<String>,
+    pub removed_assets: Vec<String>,
+    pub changed_assets: Vec<CheckpointAssetDiff>,
+}
+
+/// Validation result for a stored checkpoint snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckpointValidation {
+    pub checkpoint_id: u64,
+    pub is_valid: bool,
+    pub message: String,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Signer {
@@ -308,6 +408,18 @@ pub enum DataKey {
     HealthWeights,
     /// Detailed health score calculation result for an asset.
     HealthScoreResult(String),
+    /// Snapshot/checkpoint configuration.
+    CheckpointConfig,
+    /// Monotonic checkpoint id counter.
+    CheckpointCounter,
+    /// Ordered checkpoint metadata history (`Vec<CheckpointMetadata>`).
+    CheckpointMetadataList,
+    /// Full checkpoint snapshot keyed by checkpoint id.
+    CheckpointSnapshot(u64),
+    /// Timestamp of the most recent checkpoint.
+    LastCheckpointAt,
+    /// Id of the most recently created checkpoint.
+    LastCheckpointId,
     // -----------------------------------------------------------------------
     // Emergency Pause storage keys (issue #96)
     // -----------------------------------------------------------------------
@@ -348,6 +460,15 @@ impl BridgeWatchContract {
         env.storage()
             .instance()
             .set(&DataKey::MonitoredAssets, &assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::CheckpointConfig, &Self::default_checkpoint_config());
+        let empty_metadata: Vec<CheckpointMetadata> = Vec::new(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::CheckpointMetadataList, &empty_metadata);
+        env.storage().instance().set(&DataKey::CheckpointCounter, &0u64);
+        env.storage().instance().set(&DataKey::LastCheckpointAt, &0u64);
     }
 
     /// Submit a health score for a monitored asset.
@@ -386,6 +507,7 @@ impl BridgeWatchContract {
 
         env.events()
             .publish((symbol_short!("health_up"), asset_code), health_score);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Submit health scores for multiple assets in a single transaction.
@@ -427,6 +549,8 @@ impl BridgeWatchContract {
                 item.health_score,
             );
         }
+
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Submit a price record for an asset.
@@ -460,6 +584,7 @@ impl BridgeWatchContract {
 
         env.events()
             .publish((symbol_short!("price_up"), asset_code), price);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Get the latest health record for an asset
@@ -858,6 +983,7 @@ impl BridgeWatchContract {
 
         env.events()
             .publish((symbol_short!("asset_reg"), asset_code), true);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Temporarily pause monitoring for an asset.
@@ -877,6 +1003,7 @@ impl BridgeWatchContract {
             .set(&DataKey::AssetHealth(asset_code.clone()), &status);
         env.events()
             .publish((symbol_short!("asset_pau"), asset_code), true);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Resume monitoring for a paused asset.
@@ -896,6 +1023,7 @@ impl BridgeWatchContract {
             .set(&DataKey::AssetHealth(asset_code.clone()), &status);
         env.events()
             .publish((symbol_short!("asset_unp"), asset_code), true);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Permanently deregister an asset while retaining historical data.
@@ -914,6 +1042,7 @@ impl BridgeWatchContract {
             .set(&DataKey::AssetHealth(asset_code.clone()), &status);
         env.events()
             .publish((symbol_short!("asset_del"), asset_code), false);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Get all monitored assets
@@ -2091,6 +2220,7 @@ impl BridgeWatchContract {
             .set(&DataKey::HealthWeights, &weights);
 
         env.events().publish((symbol_short!("wt_set"),), version);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Return the current health score calculation weights.
@@ -2230,6 +2360,7 @@ impl BridgeWatchContract {
 
         env.events()
             .publish((symbol_short!("health_up"), asset_code), final_score);
+        Self::maybe_create_auto_checkpoint(&env, &caller);
     }
 
     /// Return the latest calculated health score result for an asset.
@@ -2242,9 +2373,569 @@ impl BridgeWatchContract {
             .get(&DataKey::HealthScoreResult(asset_code))
     }
 
+    /// Update automatic checkpoint settings.
+    pub fn set_checkpoint_config(
+        env: Env,
+        caller: Address,
+        interval_secs: u64,
+        max_checkpoints: u32,
+        format_version: u32,
+    ) {
+        Self::assert_admin_or_super_admin(&env, &caller);
+
+        if max_checkpoints == 0 {
+            panic!("max_checkpoints must be greater than zero");
+        }
+        if format_version == 0 {
+            panic!("format_version must be greater than zero");
+        }
+
+        let config = CheckpointConfig {
+            interval_secs,
+            max_checkpoints,
+            format_version,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CheckpointConfig, &config);
+        Self::prune_checkpoints(&env, &config);
+
+        env.events()
+            .publish((symbol_short!("chk_cfg"),), max_checkpoints);
+    }
+
+    /// Return the active checkpoint configuration.
+    pub fn get_checkpoint_config(env: Env) -> CheckpointConfig {
+        Self::load_checkpoint_config(&env)
+    }
+
+    /// Create a manual checkpoint of the current contract state.
+    pub fn create_checkpoint(
+        env: Env,
+        caller: Address,
+        label: String,
+    ) -> CheckpointMetadata {
+        Self::assert_admin_or_super_admin(&env, &caller);
+        Self::persist_checkpoint(&env, &caller, CheckpointTrigger::Manual, label, None)
+    }
+
+    /// Return a historical checkpoint snapshot by id.
+    pub fn get_checkpoint(env: Env, checkpoint_id: u64) -> Option<CheckpointSnapshot> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CheckpointSnapshot(checkpoint_id))
+    }
+
+    /// Return ordered metadata for all stored checkpoints.
+    pub fn list_checkpoints(env: Env) -> Vec<CheckpointMetadata> {
+        Self::load_checkpoint_metadata(&env)
+    }
+
+    /// Return metadata for the latest stored checkpoint.
+    pub fn get_latest_checkpoint(env: Env) -> Option<CheckpointMetadata> {
+        let metadata = Self::load_checkpoint_metadata(&env);
+        if metadata.is_empty() {
+            None
+        } else {
+            Some(metadata.get(metadata.len() - 1).unwrap())
+        }
+    }
+
+    /// Validate a stored checkpoint by recomputing its state hash.
+    pub fn validate_checkpoint(env: Env, checkpoint_id: u64) -> CheckpointValidation {
+        let snapshot = Self::get_checkpoint_or_panic(&env, checkpoint_id);
+        let metadata = Self::load_checkpoint_metadata_by_id(&env, checkpoint_id);
+        let computed_hash = Self::compute_checkpoint_hash(&env, &snapshot);
+        let is_valid = metadata.state_hash == computed_hash;
+        let message = if is_valid {
+            String::from_str(&env, "checkpoint hash verified")
+        } else {
+            String::from_str(&env, "checkpoint hash mismatch")
+        };
+
+        CheckpointValidation {
+            checkpoint_id,
+            is_valid,
+            message,
+        }
+    }
+
+    /// Compare two historical checkpoints and return high-level differences.
+    pub fn compare_checkpoints(
+        env: Env,
+        from_checkpoint_id: u64,
+        to_checkpoint_id: u64,
+    ) -> CheckpointComparison {
+        let from_snapshot = Self::get_checkpoint_or_panic(&env, from_checkpoint_id);
+        let to_snapshot = Self::get_checkpoint_or_panic(&env, to_checkpoint_id);
+        Self::build_checkpoint_comparison(
+            &env,
+            &from_snapshot,
+            &to_snapshot,
+            from_checkpoint_id,
+            to_checkpoint_id,
+        )
+    }
+
+    /// Restore current contract state from a historical checkpoint.
+    ///
+    /// A new restore checkpoint is created immediately after the state is
+    /// applied to preserve an audit trail.
+    pub fn restore_from_checkpoint(
+        env: Env,
+        caller: Address,
+        checkpoint_id: u64,
+    ) -> CheckpointMetadata {
+        Self::assert_admin_or_super_admin(&env, &caller);
+        let snapshot = Self::get_checkpoint_or_panic(&env, checkpoint_id);
+
+        let current_assets = Self::load_registered_assets_raw(&env);
+        let restored_assets = snapshot.monitored_assets.clone();
+        let restored_weights = snapshot.health_weights.clone();
+        for asset_code in current_assets.iter() {
+            if !Self::vec_contains_string(&restored_assets, &asset_code) {
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::AssetHealth(asset_code.clone()));
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::PriceRecord(asset_code.clone()));
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::HealthScoreResult(asset_code.clone()));
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MonitoredAssets, &restored_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::HealthWeights, &restored_weights);
+
+        for asset in snapshot.assets.iter() {
+            env.storage()
+                .persistent()
+                .set(&DataKey::AssetHealth(asset.asset_code.clone()), &asset.health);
+
+            match asset.latest_price {
+                Some(price) => env
+                    .storage()
+                    .persistent()
+                    .set(&DataKey::PriceRecord(asset.asset_code.clone()), &price),
+                None => env
+                    .storage()
+                    .persistent()
+                    .remove(&DataKey::PriceRecord(asset.asset_code.clone())),
+            }
+
+            match asset.health_result {
+                Some(result) => env
+                    .storage()
+                    .persistent()
+                    .set(&DataKey::HealthScoreResult(asset.asset_code.clone()), &result),
+                None => env
+                    .storage()
+                    .persistent()
+                    .remove(&DataKey::HealthScoreResult(asset.asset_code.clone())),
+            }
+        }
+
+        env.events()
+            .publish((symbol_short!("chk_rst"), checkpoint_id), true);
+
+        Self::persist_checkpoint(
+            &env,
+            &caller,
+            CheckpointTrigger::Restore,
+            String::from_str(&env, "restore"),
+            Some(checkpoint_id),
+        )
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers — health score calculation
     // -----------------------------------------------------------------------
+
+    fn default_checkpoint_config() -> CheckpointConfig {
+        CheckpointConfig {
+            interval_secs: 86_400,
+            max_checkpoints: 25,
+            format_version: 1,
+        }
+    }
+
+    fn load_checkpoint_config(env: &Env) -> CheckpointConfig {
+        env.storage()
+            .instance()
+            .get(&DataKey::CheckpointConfig)
+            .unwrap_or_else(Self::default_checkpoint_config)
+    }
+
+    fn load_checkpoint_metadata(env: &Env) -> Vec<CheckpointMetadata> {
+        env.storage()
+            .instance()
+            .get(&DataKey::CheckpointMetadataList)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn load_checkpoint_metadata_by_id(env: &Env, checkpoint_id: u64) -> CheckpointMetadata {
+        let metadata = Self::load_checkpoint_metadata(env);
+        let mut i = 0;
+        while i < metadata.len() {
+            let item = metadata.get(i).unwrap();
+            if item.checkpoint_id == checkpoint_id {
+                return item;
+            }
+            i += 1;
+        }
+
+        panic!("checkpoint metadata not found");
+    }
+
+    fn load_registered_assets_raw(env: &Env) -> Vec<String> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MonitoredAssets)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn assert_admin_or_super_admin(env: &Env, caller: &Address) {
+        Self::assert_not_globally_paused(env);
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        Self::check_no_pending_transfer(env);
+        let authorized =
+            *caller == admin || Self::has_role_internal(env, caller, AdminRole::SuperAdmin);
+        if !authorized {
+            panic!("only admin or SuperAdmin can manage checkpoints");
+        }
+    }
+
+    fn maybe_create_auto_checkpoint(env: &Env, caller: &Address) {
+        let config = Self::load_checkpoint_config(env);
+        let now = env.ledger().timestamp();
+        let last_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LastCheckpointAt)
+            .unwrap_or(0);
+
+        if last_at != 0 && now < last_at + config.interval_secs {
+            return;
+        }
+
+        Self::persist_checkpoint(
+            env,
+            caller,
+            CheckpointTrigger::Automatic,
+            String::from_str(env, "auto"),
+            None,
+        );
+    }
+
+    fn persist_checkpoint(
+        env: &Env,
+        caller: &Address,
+        trigger: CheckpointTrigger,
+        label: String,
+        restored_from: Option<u64>,
+    ) -> CheckpointMetadata {
+        let config = Self::load_checkpoint_config(env);
+        let next_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CheckpointCounter)
+            .unwrap_or(0)
+            + 1;
+        let created_at = env.ledger().timestamp();
+        let monitored_assets = Self::load_registered_assets_raw(env);
+        let health_weights = Self::load_health_weights(env);
+        let mut assets = Vec::new(env);
+
+        for asset_code in monitored_assets.iter() {
+            let health = Self::load_asset_health(env, &asset_code);
+            let latest_price: Option<PriceRecord> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::PriceRecord(asset_code.clone()));
+            let health_result: Option<HealthScoreResult> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::HealthScoreResult(asset_code.clone()));
+
+            assets.push_back(CheckpointAssetState {
+                asset_code,
+                health,
+                latest_price,
+                health_result,
+            });
+        }
+
+        let snapshot = CheckpointSnapshot {
+            checkpoint_id: next_id,
+            format_version: config.format_version,
+            created_at,
+            trigger: trigger.clone(),
+            created_by: caller.clone(),
+            label: label.clone(),
+            monitored_assets: monitored_assets.clone(),
+            health_weights,
+            assets,
+            restored_from,
+        };
+        let state_hash = Self::compute_checkpoint_hash(env, &snapshot);
+        let metadata = CheckpointMetadata {
+            checkpoint_id: next_id,
+            format_version: snapshot.format_version,
+            created_at,
+            trigger,
+            created_by: caller.clone(),
+            label,
+            monitored_asset_count: snapshot.monitored_assets.len(),
+            asset_count: snapshot.assets.len(),
+            state_hash,
+            restored_from,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::CheckpointSnapshot(next_id), &snapshot);
+
+        let mut metadata_list = Self::load_checkpoint_metadata(env);
+        metadata_list.push_back(metadata.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::CheckpointMetadataList, &metadata_list);
+        env.storage()
+            .instance()
+            .set(&DataKey::CheckpointCounter, &next_id);
+        env.storage()
+            .instance()
+            .set(&DataKey::LastCheckpointAt, &created_at);
+        env.storage()
+            .instance()
+            .set(&DataKey::LastCheckpointId, &next_id);
+
+        Self::prune_checkpoints(env, &config);
+        env.events()
+            .publish((symbol_short!("chkptnew"), next_id), metadata.asset_count);
+        metadata
+    }
+
+    fn prune_checkpoints(env: &Env, config: &CheckpointConfig) {
+        let mut metadata_list = Self::load_checkpoint_metadata(env);
+        let mut pruned = 0u32;
+
+        while metadata_list.len() > config.max_checkpoints {
+            let oldest = metadata_list.get(0).unwrap();
+            env.storage()
+                .persistent()
+                .remove(&DataKey::CheckpointSnapshot(oldest.checkpoint_id));
+            metadata_list.remove(0);
+            pruned += 1;
+        }
+
+        if pruned > 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::CheckpointMetadataList, &metadata_list);
+            env.events().publish((symbol_short!("chkprune"),), pruned);
+        }
+    }
+
+    fn get_checkpoint_or_panic(env: &Env, checkpoint_id: u64) -> CheckpointSnapshot {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CheckpointSnapshot(checkpoint_id))
+            .unwrap_or_else(|| panic!("checkpoint not found"))
+    }
+
+    fn compute_checkpoint_hash(env: &Env, snapshot: &CheckpointSnapshot) -> BytesN<32> {
+        let mut data = Bytes::new(env);
+        Self::append_u32(&mut data, snapshot.format_version);
+        Self::append_u32(&mut data, snapshot.health_weights.liquidity_weight);
+        Self::append_u32(&mut data, snapshot.health_weights.price_stability_weight);
+        Self::append_u32(&mut data, snapshot.health_weights.bridge_uptime_weight);
+        Self::append_u32(&mut data, snapshot.health_weights.version);
+
+        for asset_code in snapshot.monitored_assets.iter() {
+            Self::append_string(&mut data, &asset_code);
+        }
+
+        for asset in snapshot.assets.iter() {
+            Self::append_string(&mut data, &asset.asset_code);
+            Self::append_asset_health(&mut data, &asset.health);
+            Self::append_option_price_record(&mut data, &asset.latest_price);
+            Self::append_option_health_score_result(&mut data, &asset.health_result);
+        }
+
+        env.crypto().sha256(&data).into()
+    }
+
+    fn build_checkpoint_comparison(
+        env: &Env,
+        from_snapshot: &CheckpointSnapshot,
+        to_snapshot: &CheckpointSnapshot,
+        from_checkpoint_id: u64,
+        to_checkpoint_id: u64,
+    ) -> CheckpointComparison {
+        let mut added_assets = Vec::new(env);
+        let mut removed_assets = Vec::new(env);
+        let mut changed_assets = Vec::new(env);
+
+        for to_asset in to_snapshot.assets.iter() {
+            if let Some(from_asset) =
+                Self::find_checkpoint_asset(&from_snapshot.assets, &to_asset.asset_code)
+            {
+                let health_changed = from_asset.health != to_asset.health;
+                let price_changed = from_asset.latest_price != to_asset.latest_price;
+                let health_result_changed = from_asset.health_result != to_asset.health_result;
+                if health_changed || price_changed || health_result_changed {
+                    changed_assets.push_back(CheckpointAssetDiff {
+                        asset_code: to_asset.asset_code.clone(),
+                        health_changed,
+                        price_changed,
+                        health_result_changed,
+                    });
+                }
+            } else {
+                added_assets.push_back(to_asset.asset_code.clone());
+            }
+        }
+
+        for from_asset in from_snapshot.assets.iter() {
+            if Self::find_checkpoint_asset(&to_snapshot.assets, &from_asset.asset_code).is_none() {
+                removed_assets.push_back(from_asset.asset_code.clone());
+            }
+        }
+
+        CheckpointComparison {
+            from_checkpoint_id,
+            to_checkpoint_id,
+            timestamp_delta: to_snapshot.created_at.saturating_sub(from_snapshot.created_at),
+            state_hash_changed: Self::compute_checkpoint_hash(env, from_snapshot)
+                != Self::compute_checkpoint_hash(env, to_snapshot),
+            weights_changed: from_snapshot.health_weights != to_snapshot.health_weights,
+            added_assets,
+            removed_assets,
+            changed_assets,
+        }
+    }
+
+    fn find_checkpoint_asset(
+        assets: &Vec<CheckpointAssetState>,
+        asset_code: &String,
+    ) -> Option<CheckpointAssetState> {
+        let mut i = 0;
+        while i < assets.len() {
+            let asset = assets.get(i).unwrap();
+            if asset.asset_code == *asset_code {
+                return Some(asset);
+            }
+            i += 1;
+        }
+
+        None
+    }
+
+    fn vec_contains_string(values: &Vec<String>, target: &String) -> bool {
+        let mut i = 0;
+        while i < values.len() {
+            if values.get(i).unwrap() == *target {
+                return true;
+            }
+            i += 1;
+        }
+
+        false
+    }
+
+    fn append_i128(buf: &mut Bytes, value: i128) {
+        let bytes = value.to_be_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            buf.push_back(bytes[i]);
+            i += 1;
+        }
+    }
+
+    fn append_bool(buf: &mut Bytes, value: bool) {
+        buf.push_back(if value { 1 } else { 0 });
+    }
+
+    fn append_string(buf: &mut Bytes, value: &String) {
+        let raw = value.to_string();
+        let bytes = raw.as_bytes();
+        Self::append_u32(buf, bytes.len() as u32);
+        let mut i = 0;
+        while i < bytes.len() {
+            buf.push_back(bytes[i]);
+            i += 1;
+        }
+    }
+
+    fn append_option_u64(buf: &mut Bytes, value: Option<u64>) {
+        match value {
+            Some(v) => {
+                Self::append_bool(buf, true);
+                Self::append_u64(buf, v);
+            }
+            None => Self::append_bool(buf, false),
+        }
+    }
+
+    fn append_checkpoint_trigger(buf: &mut Bytes, trigger: &CheckpointTrigger) {
+        let code = match trigger {
+            CheckpointTrigger::Automatic => 1u32,
+            CheckpointTrigger::Manual => 2u32,
+            CheckpointTrigger::Restore => 3u32,
+        };
+        Self::append_u32(buf, code);
+    }
+
+    fn append_asset_health(buf: &mut Bytes, health: &AssetHealth) {
+        Self::append_string(buf, &health.asset_code);
+        Self::append_u32(buf, health.health_score);
+        Self::append_u32(buf, health.liquidity_score);
+        Self::append_u32(buf, health.price_stability_score);
+        Self::append_u32(buf, health.bridge_uptime_score);
+        Self::append_bool(buf, health.paused);
+        Self::append_bool(buf, health.active);
+        Self::append_u64(buf, health.timestamp);
+    }
+
+    fn append_option_price_record(buf: &mut Bytes, record: &Option<PriceRecord>) {
+        match record {
+            Some(price) => {
+                Self::append_bool(buf, true);
+                Self::append_string(buf, &price.asset_code);
+                Self::append_i128(buf, price.price);
+                Self::append_string(buf, &price.source);
+                Self::append_u64(buf, price.timestamp);
+            }
+            None => Self::append_bool(buf, false),
+        }
+    }
+
+    fn append_option_health_score_result(buf: &mut Bytes, result: &Option<HealthScoreResult>) {
+        match result {
+            Some(value) => {
+                Self::append_bool(buf, true);
+                Self::append_u32(buf, value.composite_score);
+                Self::append_u32(buf, value.liquidity_score);
+                Self::append_u32(buf, value.price_stability_score);
+                Self::append_u32(buf, value.bridge_uptime_score);
+                Self::append_u32(buf, value.weights.liquidity_weight);
+                Self::append_u32(buf, value.weights.price_stability_weight);
+                Self::append_u32(buf, value.weights.bridge_uptime_weight);
+                Self::append_u32(buf, value.weights.version);
+                Self::append_u64(buf, value.timestamp);
+            }
+            None => Self::append_bool(buf, false),
+        }
+    }
 
     /// Load stored health weights or return defaults (30 / 40 / 30, v1).
     fn load_health_weights(env: &Env) -> HealthWeights {
@@ -2317,6 +3008,143 @@ mod tests {
             sources.push_back(String::from_str(env, venue));
         }
         sources
+    }
+
+    // -----------------------------------------------------------------------
+    // Checkpoint tests (issue #105)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_manual_checkpoint_stores_snapshot_and_metadata() {
+        let (env, client, admin) = setup();
+        env.ledger().set_timestamp(100);
+        client.set_checkpoint_config(&admin, &86_400, &10, &2);
+
+        let usdc = String::from_str(&env, "USDC");
+        let source = String::from_str(&env, "oracle");
+        let label = String::from_str(&env, "manual-baseline");
+
+        client.register_asset(&admin, &usdc);
+        client.submit_price(&admin, &usdc, &1_000_000, &source);
+
+        let metadata = client.create_checkpoint(&admin, &label);
+        assert_eq!(metadata.checkpoint_id, 2);
+        assert_eq!(metadata.format_version, 2);
+        assert_eq!(metadata.label, label);
+        assert_eq!(metadata.asset_count, 1);
+        assert_eq!(metadata.trigger, CheckpointTrigger::Manual);
+
+        let snapshot = client.get_checkpoint(&metadata.checkpoint_id).unwrap();
+        assert_eq!(snapshot.assets.len(), 1);
+        assert_eq!(snapshot.health_weights.version, 1);
+        assert_eq!(snapshot.assets.get(0).unwrap().asset_code, usdc);
+
+        let validation = client.validate_checkpoint(&metadata.checkpoint_id);
+        assert!(validation.is_valid);
+    }
+
+    #[test]
+    fn test_compare_checkpoints_detects_asset_changes() {
+        let (env, client, admin) = setup();
+        client.set_checkpoint_config(&admin, &86_400, &10, &1);
+
+        let usdc = String::from_str(&env, "USDC");
+        let eurc = String::from_str(&env, "EURC");
+        let source = String::from_str(&env, "oracle");
+
+        env.ledger().set_timestamp(10);
+        client.register_asset(&admin, &usdc);
+        let first = client.create_checkpoint(&admin, &String::from_str(&env, "before"));
+
+        env.ledger().set_timestamp(20);
+        client.submit_price(&admin, &usdc, &1_020_000, &source);
+        client.register_asset(&admin, &eurc);
+        let second = client.create_checkpoint(&admin, &String::from_str(&env, "after"));
+
+        let comparison =
+            client.compare_checkpoints(&first.checkpoint_id, &second.checkpoint_id);
+        assert!(comparison.state_hash_changed);
+        assert_eq!(comparison.added_assets.len(), 1);
+        assert_eq!(comparison.added_assets.get(0).unwrap(), eurc);
+        assert_eq!(comparison.changed_assets.len(), 1);
+        assert_eq!(comparison.changed_assets.get(0).unwrap().asset_code, usdc);
+        assert!(comparison.changed_assets.get(0).unwrap().price_changed);
+    }
+
+    #[test]
+    fn test_checkpoint_pruning_keeps_latest_entries() {
+        let (env, client, admin) = setup();
+        client.set_checkpoint_config(&admin, &0, &2, &1);
+        let usdc = String::from_str(&env, "USDC");
+
+        env.ledger().set_timestamp(1);
+        client.register_asset(&admin, &usdc);
+
+        env.ledger().set_timestamp(2);
+        let second = client.create_checkpoint(&admin, &String::from_str(&env, "second"));
+
+        env.ledger().set_timestamp(3);
+        let third = client.create_checkpoint(&admin, &String::from_str(&env, "third"));
+
+        let checkpoints = client.list_checkpoints();
+        assert_eq!(checkpoints.len(), 2);
+        assert_eq!(checkpoints.get(0).unwrap().checkpoint_id, second.checkpoint_id);
+        assert_eq!(checkpoints.get(1).unwrap().checkpoint_id, third.checkpoint_id);
+        assert!(client.get_checkpoint(&1).is_none());
+    }
+
+    #[test]
+    fn test_auto_checkpoint_respects_interval() {
+        let (env, client, admin) = setup();
+        client.set_checkpoint_config(&admin, &60, &10, &1);
+        let usdc = String::from_str(&env, "USDC");
+        let source = String::from_str(&env, "oracle");
+
+        env.ledger().set_timestamp(100);
+        client.register_asset(&admin, &usdc);
+        assert_eq!(client.list_checkpoints().len(), 1);
+
+        env.ledger().set_timestamp(120);
+        client.submit_price(&admin, &usdc, &1_000_000, &source);
+        assert_eq!(client.list_checkpoints().len(), 1);
+
+        env.ledger().set_timestamp(200);
+        client.submit_health(&admin, &usdc, &80, &75, &90, &88);
+        assert_eq!(client.list_checkpoints().len(), 2);
+        assert_eq!(
+            client.get_latest_checkpoint().unwrap().trigger,
+            CheckpointTrigger::Automatic
+        );
+    }
+
+    #[test]
+    fn test_restore_from_checkpoint_restores_prior_state() {
+        let (env, client, admin) = setup();
+        client.set_checkpoint_config(&admin, &86_400, &10, &1);
+
+        let usdc = String::from_str(&env, "USDC");
+        let eurc = String::from_str(&env, "EURC");
+        let source = String::from_str(&env, "oracle");
+
+        env.ledger().set_timestamp(1_000);
+        client.register_asset(&admin, &usdc);
+        client.submit_price(&admin, &usdc, &1_000_000, &source);
+        let baseline = client.create_checkpoint(&admin, &String::from_str(&env, "baseline"));
+
+        env.ledger().set_timestamp(2_000);
+        client.submit_health(&admin, &usdc, &91, &92, &93, &94);
+        client.register_asset(&admin, &eurc);
+        client.submit_price(&admin, &eurc, &990_000, &source);
+
+        env.ledger().set_timestamp(3_000);
+        let restore_meta = client.restore_from_checkpoint(&admin, &baseline.checkpoint_id);
+
+        assert_eq!(client.get_monitored_assets().len(), 1);
+        assert_eq!(client.get_monitored_assets().get(0).unwrap(), usdc);
+        assert!(client.get_health(&eurc).is_none());
+        assert_eq!(client.get_price(&usdc).unwrap().price, 1_000_000);
+        assert_eq!(restore_meta.trigger, CheckpointTrigger::Restore);
+        assert_eq!(restore_meta.restored_from, Some(baseline.checkpoint_id));
     }
 
     // -----------------------------------------------------------------------
