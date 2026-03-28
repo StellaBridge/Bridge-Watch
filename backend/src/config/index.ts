@@ -103,6 +103,13 @@ const envSchema = z.object({
   HEALTH_WEIGHT_BRIDGE: z.coerce.number().default(0.20),
   HEALTH_WEIGHT_RESERVES: z.coerce.number().default(0.20),
   HEALTH_WEIGHT_VOLUME: z.coerce.number().default(0.10),
+
+  // Health Check Configuration
+  HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().default(5000),
+  HEALTH_CHECK_INTERVAL_MS: z.coerce.number().default(30000),
+  HEALTH_CHECK_MEMORY_THRESHOLD: z.coerce.number().default(90),
+  HEALTH_CHECK_DISK_THRESHOLD: z.coerce.number().default(80),
+  HEALTH_CHECK_EXTERNAL_APIS: z.string().default("true"),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
