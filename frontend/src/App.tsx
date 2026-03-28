@@ -12,7 +12,8 @@ const Reports = lazy(() => import("./pages/Reports"));
 const Landing = lazy(() => import("./pages/Landing"));
 const Settings = lazy(() => import("./pages/Settings"));
 const WatchlistPage = lazy(() => import("./pages/Watchlist"));
-
+const Transactions = lazy(() => import("./pages/Transactions"));
+const ApiKeys = lazy(() => import("./pages/ApiKeys"));
 
 function NotificationInitializer() {
   useNotifications();
@@ -31,20 +32,19 @@ function App() {
         }
       >
         <Routes>
-          {/* Landing page — full-page layout with its own nav */}
           <Route path="/" element={<Landing />} />
 
-          {/* App pages — shared Layout with Navbar */}
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/assets/:symbol" element={<AssetDetail />} />
             <Route path="/bridges" element={<Bridges />} />
+            <Route path="/transactions" element={<Transactions />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/watchlist" element={<WatchlistPage />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/admin/api-keys" element={<ApiKeys />} />
           </Route>
-
         </Routes>
       </Suspense>
     </NotificationProvider>
@@ -52,4 +52,3 @@ function App() {
 }
 
 export default App;
-

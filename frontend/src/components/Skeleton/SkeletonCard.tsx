@@ -1,4 +1,3 @@
-import React from "react";
 import SkeletonText from "./SkeletonText";
 import SkeletonAvatar from "./SkeletonAvatar";
 

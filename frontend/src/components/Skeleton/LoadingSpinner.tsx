@@ -1,5 +1,3 @@
-import React from "react";
-
 interface LoadingSpinnerProps {
   message?: string;
   progress?: number;

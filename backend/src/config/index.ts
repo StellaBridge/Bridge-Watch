@@ -69,6 +69,7 @@ const envSchema = z.object({
   CIRCLE_RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   COINBASE_API_KEY: z.string().optional(),
   COINBASE_API_SECRET: z.string().optional(),
+  API_KEY_BOOTSTRAP_TOKEN: z.string().optional(),
 
   // Logging
   LOG_LEVEL: z

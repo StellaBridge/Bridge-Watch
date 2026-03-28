@@ -84,3 +84,31 @@ export interface TransactionPage {
   pageSize: number;
   totalPages: number;
 }
+
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  rateLimitPerMinute: number;
+  usageCount: number;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  lastUsedIp: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  scopes: string[];
+  rateLimitPerMinute?: number;
+  expiresInDays?: number;
+}
+
+export interface CreateApiKeyResponse {
+  apiKey: string;
+  key: ApiKeyRecord;
+}

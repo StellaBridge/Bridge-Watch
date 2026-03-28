@@ -1,15 +1,18 @@
 import { FastifyInstance, FastifyPluginOptions, FastifyRequest, FastifyReply } from "fastify";
 import { JobQueue } from "../../workers/queue.js";
 import { logger } from "../../utils/logger.js";
+import { authMiddleware } from "../middleware/auth.js";
 
 export default async function jobsRoutes(fastify: FastifyInstance, options: FastifyPluginOptions) {
   const jobQueue = JobQueue.getInstance();
+  const requireRead = authMiddleware({ requiredScopes: ["jobs:read"] });
+  const requireTrigger = authMiddleware({ requiredScopes: ["jobs:trigger"] });
 
   /**
    * GET /api/jobs/monitor
    * Returns current queue status and job counts
    */
-  fastify.get("/monitor", async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get("/monitor", { preHandler: requireRead }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const counts = await jobQueue.getJobCounts();
       const failed = await jobQueue.getFailedJobs();
@@ -35,7 +38,7 @@ export default async function jobsRoutes(fastify: FastifyInstance, options: Fast
    * POST /api/jobs/:jobName/trigger
    * Manually trigger a job by name
    */
-  fastify.post("/:jobName/trigger", async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post("/:jobName/trigger", { preHandler: requireTrigger }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { jobName } = request.params as { jobName: string };
     
     try {
