@@ -84,6 +84,23 @@ const envSchema = z.object({
   RATE_LIMIT_WHITELIST_IPS: z.string().optional(),
   // Comma-separated API keys that bypass rate limiting entirely
   RATE_LIMIT_WHITELIST_KEYS: z.string().optional(),
+  
+  // Enhanced Rate Limiting Configuration
+  RATE_LIMIT_ENABLE_DYNAMIC: z.coerce.boolean().default(true),
+  RATE_LIMIT_GLOBAL_ALERT_THRESHOLD: z.coerce.number().default(0.9),
+  RATE_LIMIT_BURST_ALERT_THRESHOLD: z.coerce.number().default(0.8),
+  RATE_LIMIT_SUSTAINED_ALERT_THRESHOLD: z.coerce.number().default(0.7),
+  RATE_LIMIT_STATS_RETENTION_HOURS: z.coerce.number().default(168), // 7 days
+  RATE_LIMIT_ENABLE_MONITORING: z.coerce.boolean().default(true),
+  RATE_LIMIT_ADMIN_API_KEY_PREFIX: z.string().default("admin_"),
+  
+  // Per-endpoint rate limits (requests per window)
+  RATE_LIMIT_ENDPOINT_ASSETS: z.coerce.number().default(200),
+  RATE_LIMIT_ENDPOINT_BRIDGES: z.coerce.number().default(150),
+  RATE_LIMIT_ENDPOINT_ALERTS: z.coerce.number().default(50),
+  RATE_LIMIT_ENDPOINT_ANALYTICS: z.coerce.number().default(100),
+  RATE_LIMIT_ENDPOINT_CONFIG: z.coerce.number().default(30),
+  RATE_LIMIT_ENDPOINT_HEALTH: z.coerce.number().default(1000),
 
   // Alert Thresholds
   PRICE_DEVIATION_THRESHOLD: z.coerce.number().default(0.02),
@@ -103,6 +120,13 @@ const envSchema = z.object({
   HEALTH_WEIGHT_BRIDGE: z.coerce.number().default(0.20),
   HEALTH_WEIGHT_RESERVES: z.coerce.number().default(0.20),
   HEALTH_WEIGHT_VOLUME: z.coerce.number().default(0.10),
+
+  // Health Check Configuration
+  HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().default(5000),
+  HEALTH_CHECK_INTERVAL_MS: z.coerce.number().default(30000),
+  HEALTH_CHECK_MEMORY_THRESHOLD: z.coerce.number().default(90),
+  HEALTH_CHECK_DISK_THRESHOLD: z.coerce.number().default(80),
+  HEALTH_CHECK_EXTERNAL_APIS: z.string().default("true"),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
