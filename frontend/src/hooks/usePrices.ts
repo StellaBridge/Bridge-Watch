@@ -1,11 +1,18 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { getAssetPrice } from "../services/api";
 
-export function usePrices(symbol: string) {
+type QueryRefreshOptions = {
+  refetchInterval?: number | false;
+  refetchOnWindowFocus?: boolean;
+};
+
+export function usePrices(symbol: string, options?: QueryRefreshOptions) {
   return useQuery({
     queryKey: ["prices", symbol],
     queryFn: () => getAssetPrice(symbol),
     enabled: !!symbol,
+    refetchInterval: options?.refetchInterval,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus,
     select: (data) => ({
       ...data,
       sources: data?.sources ?? [],
@@ -14,12 +21,14 @@ export function usePrices(symbol: string) {
   });
 }
 
-export function usePricesForSymbols(symbols: string[]) {
+export function usePricesForSymbols(symbols: string[], options?: QueryRefreshOptions) {
   return useQueries({
     queries: symbols.map((symbol) => ({
       queryKey: ["prices", symbol],
       queryFn: () => getAssetPrice(symbol),
       enabled: !!symbol,
+      refetchInterval: options?.refetchInterval,
+      refetchOnWindowFocus: options?.refetchOnWindowFocus,
       select: (data: Awaited<ReturnType<typeof getAssetPrice>>) => ({
         ...data,
         sources: data?.sources ?? [],
