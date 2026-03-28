@@ -74,6 +74,14 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace"])
     .default("info"),
+  LOG_FILE: z.string().optional(),
+  LOG_MAX_FILE_SIZE: z.coerce.number().default(100 * 1024 * 1024), // 100MB
+  LOG_MAX_FILES: z.coerce.number().default(10),
+  LOG_RETENTION_DAYS: z.coerce.number().default(30),
+  LOG_REQUEST_BODY: z.coerce.boolean().default(false),
+  LOG_RESPONSE_BODY: z.coerce.boolean().default(false),
+  LOG_SENSITIVE_DATA: z.coerce.boolean().default(false),
+  REQUEST_SLOW_THRESHOLD_MS: z.coerce.number().default(1000),
 
   // Rate Limiting
   RATE_LIMIT_MAX: z.coerce.number().default(100),

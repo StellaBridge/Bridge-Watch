@@ -11,11 +11,15 @@ import {
 } from "./api/middleware/rateLimit.middleware.js";
 import { initJobSystem } from "./workers/index.js";
 import { JobQueue } from "./workers/queue.js";
+import { registerTracing } from "./api/middleware/tracing.js";
 
 export async function buildServer() {
   const server = Fastify({
     logger: logger,
   });
+
+  // Register tracing middleware first (to capture all requests)
+  await registerTracing(server as any);
 
   // Register plugins
   await server.register(cors, {
