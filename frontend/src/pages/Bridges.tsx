@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import { useBridges } from "../hooks/useBridges";
 import BridgeStatusCard from "../components/BridgeStatusCard";
+import { SkeletonCard, ErrorBoundary } from "../components/Skeleton";
 
 export default function Bridges() {
   const { data, isLoading } = useBridges();
@@ -15,31 +17,47 @@ export default function Bridges() {
       </div>
 
       {/* Bridge Cards */}
-      {isLoading ? (
-        <p className="text-stellar-text-secondary">Loading bridge data...</p>
-      ) : data && data.bridges.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {data.bridges.map(
-            (bridge: {
-              name: string;
-              status: "healthy" | "degraded" | "down" | "unknown";
-              totalValueLocked: number;
-              supplyOnStellar: number;
-              supplyOnSource: number;
-              mismatchPercentage: number;
-            }) => (
-              <BridgeStatusCard key={bridge.name} {...bridge} />
-            )
+      <ErrorBoundary onRetry={() => window.location.reload()}>
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <SkeletonCard key={i} rows={6} ariaLabel={`Loading bridge card ${i}`} />
+              ))}
+            </div>
+          }
+        >
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <SkeletonCard key={i} rows={6} ariaLabel={`Loading bridge card ${i}`} />
+              ))}
+            </div>
+          ) : data && data.bridges.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {data.bridges.map(
+                (bridge: {
+                  name: string;
+                  status: "healthy" | "degraded" | "down" | "unknown";
+                  totalValueLocked: number;
+                  supplyOnStellar: number;
+                  supplyOnSource: number;
+                  mismatchPercentage: number;
+                }) => (
+                  <BridgeStatusCard key={bridge.name} {...bridge} />
+                )
+              )}
+            </div>
+          ) : (
+            <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
+              <p className="text-stellar-text-secondary">
+                No bridge data available. Bridge monitoring will populate this page
+                once configured and running.
+              </p>
+            </div>
           )}
-        </div>
-      ) : (
-        <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
-          <p className="text-stellar-text-secondary">
-            No bridge data available. Bridge monitoring will populate this page
-            once configured and running.
-          </p>
-        </div>
-      )}
+        </Suspense>
+      </ErrorBoundary>
 
       {/* Bridge Performance Table */}
       <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">

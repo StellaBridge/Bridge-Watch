@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import TransactionHistory from "../components/TransactionHistory";
+import { ErrorBoundary, LoadingSpinner } from "../components/Skeleton";
 
 export default function Transactions() {
   return (
@@ -10,7 +12,19 @@ export default function Transactions() {
         </p>
       </header>
 
-      <TransactionHistory />
+      <ErrorBoundary onRetry={() => window.location.reload()}>
+        <Suspense
+          fallback={
+            <LoadingSpinner
+              message="Loading transactions..."
+              progress={30}
+              className="max-w-sm mx-auto"
+            />
+          }
+        >
+          <TransactionHistory />
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

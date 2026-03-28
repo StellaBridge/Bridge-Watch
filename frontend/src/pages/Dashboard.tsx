@@ -1,13 +1,15 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { useAssetsWithHealth, useHealthUpdater } from "../hooks/useAssets";
 import { useBridges } from "../hooks/useBridges";
 import { useWebSocket } from "../hooks/useWebSocket";
-import HealthScoreCard, {
-  HealthScoreCardSkeleton,
-} from "../components/HealthScoreCard";
+import HealthScoreCard from "../components/HealthScoreCard";
 import BridgeStatusCard from "../components/BridgeStatusCard";
 import OnboardingDialog from "../components/OnboardingDialog";
+import {
+  SkeletonCard,
+  ErrorBoundary,
+} from "../components/Skeleton";
 import { useLocalStorageState } from "../hooks/useLocalStorageState";
 import type {
   AssetWithHealth,
@@ -190,23 +192,40 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {assetsError ? (
-          <div
-            className="bg-red-500/10 border border-red-500/30 rounded-lg p-6 text-center"
-            role="alert"
+        <ErrorBoundary onRetry={() => window.location.reload()}>
+          <Suspense
+            fallback={
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <SkeletonCard key={i} rows={4} ariaLabel={`Loading asset ${i}`} />
+                ))}
+              </div>
+            }
           >
-            <p className="text-red-400 font-medium">Failed to load asset data</p>
-            <p className="text-sm text-red-400/80 mt-1">
-              Please check your connection and try again.
-            </p>
-          </div>
-        ) : assetsLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <HealthScoreCardSkeleton key={i} symbol={`Asset ${i}`} />
-            ))}
-          </div>
-        ) : processedAssets.length > 0 ? (
+            {assetsError ? (
+              <div
+                className="bg-red-500/10 border border-red-500/30 rounded-lg p-6 text-center"
+                role="alert"
+              >
+                <p className="text-red-400 font-medium">Failed to load asset data</p>
+                <p className="text-sm text-red-400/80 mt-1">
+                  Please check your connection and try again.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="mt-3 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-400"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : assetsLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <SkeletonCard key={i} rows={5} ariaLabel={`Loading asset ${i}`} />
+                ))}
+              </div>
+            ) : processedAssets.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {processedAssets.map((asset) => (
               <Link
@@ -245,6 +264,8 @@ export default function Dashboard() {
             </p>
           </div>
         )}
+      </Suspense>
+    </ErrorBoundary>
       </section>
 
       <section aria-labelledby="bridge-status-heading">
@@ -259,23 +280,23 @@ export default function Dashboard() {
             View all
           </Link>
         </div>
-        {bridgesLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="bg-stellar-card border border-stellar-border rounded-lg p-6"
-              >
-                <div className="h-6 w-32 bg-stellar-border rounded animate-pulse mb-4" />
-                <div className="space-y-3">
-                  {[1, 2, 3, 4].map((j) => (
-                    <div key={j} className="h-4 bg-stellar-border rounded animate-pulse" />
-                  ))}
-                </div>
+        <ErrorBoundary onRetry={() => window.location.reload()}>
+          <Suspense
+            fallback={
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map((i) => (
+                  <SkeletonCard key={i} rows={5} ariaLabel={`Loading bridge ${i}`} />
+                ))}
               </div>
-            ))}
-          </div>
-        ) : bridgesData && bridgesData.bridges.length > 0 ? (
+            }
+          >
+            {bridgesLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map((i) => (
+                  <SkeletonCard key={i} rows={5} ariaLabel={`Loading bridge ${i}`} />
+                ))}
+              </div>
+            ) : bridgesData && bridgesData.bridges.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {bridgesData.bridges.map(
               (bridge: {
@@ -297,6 +318,8 @@ export default function Dashboard() {
             </p>
           </div>
         )}
+      </Suspense>
+    </ErrorBoundary>
       </section>
     </div>
   );

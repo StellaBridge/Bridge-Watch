@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import { SkeletonChart } from "./Skeleton";
 
 interface LiquidityDataPoint {
   dex: string;
@@ -31,18 +32,7 @@ export default function LiquidityDepthChart({
   const descId = `liquidity-chart-desc-${symbol}`;
 
   if (isLoading) {
-    return (
-      <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
-        <h3 id={titleId} className="text-lg font-semibold text-white mb-4">
-          {symbol} Liquidity Depth
-        </h3>
-        <div className="h-64 flex items-center justify-center" role="status" aria-live="polite">
-          <span className="text-stellar-text-secondary">
-            Loading liquidity data…
-          </span>
-        </div>
-      </div>
-    );
+    return <SkeletonChart height={340} ariaLabel={`${symbol} liquidity chart loading`} />;
   }
 
   if (data.length === 0) {

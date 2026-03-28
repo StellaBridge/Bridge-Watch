@@ -3,10 +3,10 @@ import { useTransactions } from "../hooks/useTransactions";
 import { exportTransactionsCsv } from "../services/api";
 import TransactionFiltersComponent from "./TransactionFilters";
 import TransactionRow, {
-  TransactionRowSkeleton,
   TransactionCard,
 } from "./TransactionRow";
 import TransactionDetail from "./TransactionDetail";
+import { SkeletonTable } from "./Skeleton";
 import type { BridgeTransaction } from "../types";
 
 export default function TransactionHistory() {
@@ -98,17 +98,21 @@ export default function TransactionHistory() {
               </tr>
             </thead>
             <tbody>
-              {isLoading
-                ? Array.from({ length: 5 }).map((_, i) => (
-                    <TransactionRowSkeleton key={i} />
-                  ))
-                : transactions.map((tx) => (
-                    <TransactionRow
-                      key={tx.id}
-                      transaction={tx}
-                      onSelect={setSelectedTx}
-                    />
-                  ))}
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-6">
+                    <SkeletonTable rows={5} columns={6} ariaLabel="Loading transaction table" />
+                  </td>
+                </tr>
+              ) : (
+                transactions.map((tx) => (
+                  <TransactionRow
+                    key={tx.id}
+                    transaction={tx}
+                    onSelect={setSelectedTx}
+                  />
+                ))
+              )}
             </tbody>
           </table>
 
