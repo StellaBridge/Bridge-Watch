@@ -66,6 +66,46 @@ const ENDPOINT_MULTIPLIERS: Record<EndpointCategory, number> = {
   websocket: 0.5,  // WebSocket handshake / upgrade limit
 };
 
+// Per-endpoint specific limits that override category multipliers
+const ENDPOINT_SPECIFIC_LIMITS: Record<string, Partial<TierLimits>> = {
+  // Health endpoints - very high limits for monitoring
+  "health": {
+    requestsPerWindow: config.RATE_LIMIT_ENDPOINT_HEALTH,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_ENDPOINT_HEALTH * 0.2),
+  },
+  // Assets endpoints - moderate limits
+  "assets": {
+    requestsPerWindow: config.RATE_LIMIT_ENDPOINT_ASSETS,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_ENDPOINT_ASSETS * 0.1),
+  },
+  // Bridges endpoints - moderate limits
+  "bridges": {
+    requestsPerWindow: config.RATE_LIMIT_ENDPOINT_BRIDGES,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_ENDPOINT_BRIDGES * 0.1),
+  },
+  // Alerts endpoints - strict limits due to importance
+  "alerts": {
+    requestsPerWindow: config.RATE_LIMIT_ENDPOINT_ALERTS,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_ENDPOINT_ALERTS * 0.05),
+  },
+  // Analytics endpoints - moderate limits
+  "analytics": {
+    requestsPerWindow: config.RATE_LIMIT_ENDPOINT_ANALYTICS,
+    windowMs: config.RATE_LIMIT_WINDOW_MS,
+    burstAllowance: Math.floor(config.RATE_LIMIT_ENDPOINT_ANALYTICS * 0.1),
+  },
+  // Config endpoints - very strict limits
+  "config": {
+    requestsPerWindow: config.RATE_LIMIT_ENDPOINT_CONFIG,
+    windowMs: config.RATE_LIMIT_WINDOW_MS * 2, // Longer window for config changes
+    burstAllowance: Math.floor(config.RATE_LIMIT_ENDPOINT_CONFIG * 0.05),
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Redis sliding-window Lua script
 //
@@ -170,6 +210,7 @@ function getRouteGroup(url: string): string {
 function getTierFromApiKey(apiKey: string | undefined): RateLimitTier {
   if (!apiKey) return "free";
   // Convention: API keys are prefixed with their tier name
+  if (apiKey.startsWith(config.RATE_LIMIT_ADMIN_API_KEY_PREFIX)) return "trusted";
   if (apiKey.startsWith("premium_")) return "premium";
   if (apiKey.startsWith("basic_")) return "basic";
   return "free";
@@ -248,10 +289,25 @@ export async function registerRateLimiting(server: FastifyInstance): Promise<voi
     const category = getEndpointCategory(request.method, request.url);
     const routeGroup = getRouteGroup(request.url);
     const tierLimits = TIER_LIMITS[tier as keyof typeof TIER_LIMITS];
-    const multiplier = ENDPOINT_MULTIPLIERS[category];
-
-    const effectiveLimit = Math.max(1, Math.floor(tierLimits.requestsPerWindow * multiplier));
-    const effectiveBurst = Math.max(0, Math.floor(tierLimits.burstAllowance * multiplier));
+    
+    // Check for endpoint-specific limits first, then fall back to category multipliers
+    const endpointSpecificLimit = ENDPOINT_SPECIFIC_LIMITS[routeGroup];
+    let effectiveLimit: number;
+    let effectiveBurst: number;
+    let effectiveWindow: number;
+    
+    if (endpointSpecificLimit && tier !== "trusted") {
+      // Use endpoint-specific limits for non-admin users
+      effectiveLimit = endpointSpecificLimit.requestsPerWindow || tierLimits.requestsPerWindow;
+      effectiveWindow = endpointSpecificLimit.windowMs || tierLimits.windowMs;
+      effectiveBurst = endpointSpecificLimit.burstAllowance || tierLimits.burstAllowance;
+    } else {
+      // Use category-based multipliers
+      const multiplier = ENDPOINT_MULTIPLIERS[category];
+      effectiveLimit = Math.max(1, Math.floor(tierLimits.requestsPerWindow * multiplier));
+      effectiveBurst = Math.max(0, Math.floor(tierLimits.burstAllowance * multiplier));
+      effectiveWindow = tierLimits.windowMs;
+    }
 
     // Track metrics
     metrics.byTier[tier]++;
@@ -263,7 +319,7 @@ export async function registerRateLimiting(server: FastifyInstance): Promise<voi
       ipKey,
       effectiveLimit,
       effectiveBurst,
-      tierLimits.windowMs
+      effectiveWindow
     );
 
     // ---- Per-API-key sliding-window check --------------------------------
@@ -274,7 +330,7 @@ export async function registerRateLimiting(server: FastifyInstance): Promise<voi
         keyKey,
         effectiveLimit,
         effectiveBurst,
-        tierLimits.windowMs
+        effectiveWindow
       );
     }
 
@@ -292,7 +348,7 @@ export async function registerRateLimiting(server: FastifyInstance): Promise<voi
     );
     reply.header(
       "X-RateLimit-Policy",
-      `${effectiveLimit};w=${Math.floor(tierLimits.windowMs / 1000)}`
+      `${effectiveLimit};w=${Math.floor(effectiveWindow / 1000)}`
     );
     reply.header("X-RateLimit-Tier", tier);
 
@@ -301,7 +357,7 @@ export async function registerRateLimiting(server: FastifyInstance): Promise<voi
       metrics.blockedRequests++;
 
       const retryAfterSec = Math.ceil(
-        (bindingResult.retryAfterMs ?? tierLimits.windowMs) / 1000
+        (bindingResult.retryAfterMs ?? effectiveWindow) / 1000
       );
       reply.header("Retry-After", String(retryAfterSec));
 

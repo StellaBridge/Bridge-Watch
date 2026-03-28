@@ -20,6 +20,9 @@ export async function buildServer() {
     logger: logger,
   });
 
+  // Register tracing middleware first (to capture all requests)
+  await registerTracing(server as any);
+
   // Register plugins
   await server.register(cors, {
     origin: true,

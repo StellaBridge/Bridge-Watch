@@ -12,6 +12,9 @@ import { metadataRoutes } from "./metadata.js";
 import { analyticsRoutes } from "./analytics.js";
 import { watchlistsRoutes } from "./watchlists.js";
 import { cacheRoutes } from "./cache.js";
+import { healthRoutes } from "./health.js";
+import { rateLimitAdminRoutes } from "./rateLimitAdmin.js";
+import { tracingAdminRoutes } from "./tracingAdmin.js";
 export async function registerRoutes(server: FastifyInstance) {
   server.register(assetsRoutes, { prefix: "/api/v1/assets" });
   server.register(bridgesRoutes, { prefix: "/api/v1/bridges" });
@@ -26,4 +29,7 @@ export async function registerRoutes(server: FastifyInstance) {
   server.register(analyticsRoutes, { prefix: "/api/v1/analytics" });
   server.register(watchlistsRoutes, { prefix: "/api/v1/watchlists" });
   server.register(cacheRoutes, { prefix: "/api/v1/cache" });
+  server.register(healthRoutes, { prefix: "/health" });
+  server.register(rateLimitAdminRoutes, { prefix: "/api/v1/admin/rate-limit" });
+  server.register(tracingAdminRoutes, { prefix: "/api/v1/admin/tracing" });
 }

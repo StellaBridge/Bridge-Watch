@@ -1,0 +1,267 @@
+# Kubernetes Deployment Example with Health Checks
+# This file demonstrates how to configure Stellar Bridge Watch with health checks
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bridge-watch
+  labels:
+    app: bridge-watch
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bridge-watch
+  template:
+    metadata:
+      labels:
+        app: bridge-watch
+    spec:
+      containers:
+      - name: bridge-watch
+        image: bridge-watch:latest
+        ports:
+        - containerPort: 3001
+          name: http
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3001"
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: bridge-watch-secrets
+              key: postgres-host
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: bridge-watch-secrets
+              key: postgres-password
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: bridge-watch-config
+              key: redis-host
+        - name: HEALTH_CHECK_TIMEOUT_MS
+          value: "5000"
+        - name: HEALTH_CHECK_MEMORY_THRESHOLD
+          value: "85"
+        - name: HEALTH_CHECK_EXTERNAL_APIS
+          value: "true"
+        
+        # Liveness Probe - Checks if the process is running
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 3001
+            scheme: HTTP
+          initialDelaySeconds: 30    # Wait 30s before first check
+          periodSeconds: 10         # Check every 10s
+          timeoutSeconds: 5          # Request timeout
+          failureThreshold: 3        # Fail after 3 consecutive failures
+          successThreshold: 1        # Success after 1 successful check
+          
+        # Readiness Probe - Checks if dependencies are ready
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 3001
+            scheme: HTTP
+          initialDelaySeconds: 5     # Wait 5s before first check
+          periodSeconds: 5          # Check every 5s
+          timeoutSeconds: 3          # Request timeout
+          failureThreshold: 3        # Fail after 3 consecutive failures
+          successThreshold: 1        # Success after 1 successful check
+          
+        # Startup Probe - Gives time for slow-starting applications
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: 3001
+            scheme: HTTP
+          initialDelaySeconds: 10    # Wait 10s before first check
+          periodSeconds: 5          # Check every 5s
+          timeoutSeconds: 3          # Request timeout
+          failureThreshold: 30       # Allow up to 150s (30 * 5) for startup
+          successThreshold: 1        # Success after 1 successful check
+          
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bridge-watch-service
+  labels:
+    app: bridge-watch
+spec:
+  selector:
+    app: bridge-watch
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bridge-watch-health
+  labels:
+    app: bridge-watch
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/path: "/health/metrics"
+    prometheus.io/port: "3001"
+spec:
+  selector:
+    app: bridge-watch
+  ports:
+  - name: http
+    port: 3001
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: bridge-watch
+  labels:
+    app: bridge-watch
+spec:
+  selector:
+    matchLabels:
+      app: bridge-watch
+  endpoints:
+  - port: http
+    path: /health/metrics
+    interval: 30s
+    scrapeTimeout: 10s
+    honorLabels: true
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bridge-watch-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: bridge-watch
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: bridge-watch-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bridge-watch
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# Network Policy to restrict access to health endpoints
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bridge-watch-netpol
+spec:
+  podSelector:
+    matchLabels:
+      app: bridge-watch
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from anywhere to main application port
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 3001
+  # Allow traffic from monitoring system to health endpoints
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 3001
+  # Allow traffic from ingress controllers
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3001
+  egress:
+  # Allow all outbound traffic (restrict as needed)
+  - {}
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bridge-watch-config
+data:
+  redis-host: "redis-service"
+  stellar-horizon-url: "https://horizon.stellar.org"
+  soroban-rpc-url: "https://soroban.stellar.org"
+  health-check-timeout-ms: "5000"
+  health-check-interval-ms: "30000"
+  health-check-memory-threshold: "85"
+  health-check-disk-threshold: "80"
+  health-check-external-apis: "true"
+
+---
+# Example Ingress configuration
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bridge-watch-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/health-check-path: /health/
+    nginx.ingress.kubernetes.io/health-check-interval: "10s"
+    nginx.ingress.kubernetes.io/health-check-timeout: "5s"
+spec:
+  rules:
+  - host: bridge-watch.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: bridge-watch-service
+            port:
+              number: 80
