@@ -1,78 +1,42 @@
 import type { FastifyInstance } from "fastify";
-import { WebsocketService } from "../../services/websocket.js";
+import { wsServer } from "../websocket/websocket.server.js";
 
-const websocketService = WebsocketService.getInstance();
-
-// WS /api/v1/ws - WebSocket for real-time updates
-// Protocol:
-// - Client sends: { type: "subscribe", topic: "prices", filter?: { symbols: ["USDC"] } }
-// - Client sends: { type: "unsubscribe", topic: "health:USDC" }
-// - Client sends: { type: "resume", clientId: "..." }
-// - Client sends: { type: "ack", messageId: "..." }
-// - Server sends: { type: "system", message: "connected", clientId: "..." }
-// - Server sends: { type: "batch", messages: [...] }
-// - Server sends: { type: "replay", messages: [...] }
-
+/**
+ * WebSocket route: ws[s]://host/api/v1/ws
+ *
+ * Connection URL parameters
+ * ─────────────────────────
+ * ?token=<secret>   Optional bearer token.  Required before subscribing to
+ *                   private channels (e.g. "alerts").  Can alternatively be
+ *                   supplied per-message in the `subscribe` payload.
+ *
+ * Inbound message format (JSON)
+ * ─────────────────────────────
+ * { "type": "subscribe",   "channel": "prices" | "health" | "alerts" | "bridges", "token"?: "…" }
+ * { "type": "unsubscribe", "channel": "prices" | "health" | "alerts" | "bridges" }
+ * { "type": "ping" }
+ *
+ * Outbound message types (JSON)
+ * ─────────────────────────────
+ * welcome          – sent once after connect; carries clientId and channel list
+ * subscribed       – ack for a successful subscribe
+ * unsubscribed     – ack for a successful unsubscribe
+ * pong             – response to an application-level ping
+ * price_update     – array of aggregated VWAP prices (channel: prices)
+ * health_update    – array of asset health scores  (channel: health)
+ * bridge_update    – array of bridge statuses      (channel: bridges)
+ * alert_triggered  – a single alert event          (channel: alerts, private)
+ * error            – describes a protocol or auth error
+ */
 export async function websocketRoutes(server: FastifyInstance) {
-  server.get("/", { websocket: true }, (socket, _request) => {
-    server.log.info("WebSocket client connected");
+  server.get(
+    "/",
+    { websocket: true },
+    (socket, request) => {
+      wsServer.handleConnection(socket as unknown as Parameters<typeof wsServer.handleConnection>[0], request);
+    }
+  );
 
-    let clientId: string | undefined;
-
-    const sendError = (message: string) => {
-      try {
-        socket.send(JSON.stringify({ type: "error", message }));
-      } catch {
-        // ignore
-      }
-    };
-
-    const bindClient = (resumeId?: string) => {
-      clientId = websocketService.addClient(socket, resumeId);
-    };
-
-    bindClient();
-
-    socket.on("message", (message: Buffer) => {
-      const data = message.toString();
-      server.log.debug(`WebSocket message received: ${data}`);
-
-      let parsed: Record<string, unknown> = {};
-      try {
-        parsed = JSON.parse(data);
-      } catch {
-        sendError("Invalid JSON");
-        return;
-      }
-
-      if (parsed.type === "subscribe" && typeof parsed.topic === "string") {
-        websocketService.subscribe(clientId!, parsed.topic, (parsed.filter as Record<string, unknown>) ?? {});
-        return;
-      }
-
-      if (parsed.type === "unsubscribe" && typeof parsed.topic === "string") {
-        websocketService.unsubscribe(clientId!, parsed.topic);
-        return;
-      }
-
-      if (parsed.type === "resume" && typeof parsed.clientId === "string") {
-        bindClient(parsed.clientId);
-        return;
-      }
-
-      if (parsed.type === "ack" && typeof parsed.messageId === "string") {
-        websocketService.receiveAck(clientId!, parsed.messageId);
-        return;
-      }
-
-      sendError("Unsupported message type or missing fields");
-    });
-
-    socket.on("close", () => {
-      if (clientId) {
-        websocketService.removeClient(clientId);
-      }
-      server.log.info("WebSocket client disconnected");
-    });
-  });
+  // Expose connection metrics for observability
+  server.get("/metrics", async () => wsServer.getMetrics());
 }

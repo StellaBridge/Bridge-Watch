@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import GlobalSearch from "./search/GlobalSearch";
 import ThemeToggle from "./ThemeToggle";
 import { SkeletonText } from "./Skeleton";
 import NotificationCenter from "./NotificationCenter";
@@ -102,9 +103,13 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
               ))}
             </div>
           </div>
+
+          {/* Right side: global search, theme toggle, watchlist, notifications, network status */}
           <div className="flex items-center gap-3">
+            <GlobalSearch />
             <ThemeToggle />
-          </div>
+            <div className="text-sm text-stellar-text-secondary hidden sm:block">Stellar Network Monitor</div>
+
           <div className="flex items-center gap-4">
             <button
               type="button"
@@ -183,6 +188,7 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
                 </svg>
               )}
             </button>
+          </div>
           </div>
         </div>
     </nav>
