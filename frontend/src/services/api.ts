@@ -1,8 +1,34 @@
-import type { Asset, HealthScore, AssetWithHealth, Bridge , BridgeStats , TransactionPage, TransactionFilters} from "../types";
+import type {
+  ApiKeyRecord,
+  Asset,
+  AssetWithHealth,
+  Bridge,
+  BridgeStats,
+  CreateApiKeyRequest,
+  CreateApiKeyResponse,
+  HealthScore,
+  TransactionFilters,
+  TransactionPage,
+} from "../types";
 const API_BASE_URL = "/api/v1";
 
-async function fetchApi<T>(endpoint: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`);
+async function fetchApi<T>(
+  endpoint: string,
+  init?: RequestInit,
+  apiKey?: string
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type") && init?.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (apiKey) {
+    headers.set("x-api-key", apiKey);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...init,
+    headers,
+  });
 
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -113,4 +139,50 @@ export function exportTransactionsCsv(filters: TransactionFilters): string {
   params.set("format", "csv");
 
   return `${API_BASE_URL}/transactions/export?${params.toString()}`;
+}
+
+// API key management
+export function listApiKeys(apiKey: string) {
+  return fetchApi<{ keys: ApiKeyRecord[] }>("/admin/api-keys", undefined, apiKey);
+}
+
+export function createApiKey(
+  apiKey: string,
+  payload: CreateApiKeyRequest
+) {
+  return fetchApi<CreateApiKeyResponse>(
+    "/admin/api-keys",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    apiKey
+  );
+}
+
+export function rotateApiKey(apiKey: string, id: string) {
+  return fetchApi<CreateApiKeyResponse>(
+    `/admin/api-keys/${id}/rotate`,
+    { method: "POST" },
+    apiKey
+  );
+}
+
+export function revokeApiKey(apiKey: string, id: string) {
+  return fetchApi<{ key: ApiKeyRecord }>(
+    `/admin/api-keys/${id}/revoke`,
+    { method: "POST" },
+    apiKey
+  );
+}
+
+export function extendApiKey(apiKey: string, id: string, extraDays: number) {
+  return fetchApi<{ key: ApiKeyRecord }>(
+    `/admin/api-keys/${id}/extend`,
+    {
+      method: "POST",
+      body: JSON.stringify({ extraDays }),
+    },
+    apiKey
+  );
 }
