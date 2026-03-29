@@ -170,6 +170,20 @@ GET  /api/v1/bridges/:bridge/stats     # Bridge-specific statistics
 WS   /api/v1/ws                        # WebSocket for real-time updates
 ```
 
+## Load Testing
+
+Bridge-Watch includes a k6-based load testing framework with scenario profiles for smoke, ramp-up, spike, and endurance testing.
+
+- Framework entry point: [load-tests/README.md](load-tests/README.md)
+- Methodology: [docs/load-testing-methodology.md](docs/load-testing-methodology.md)
+- Baselines: [docs/performance-baselines.md](docs/performance-baselines.md)
+
+Run a local smoke test (requires k6 installed):
+
+```bash
+npm run test:load
+```
+
 ## Roadmap
 
 ### Phase 1 -- MVP

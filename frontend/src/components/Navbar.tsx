@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
 import { SkeletonText } from "./Skeleton";
@@ -20,6 +20,10 @@ interface NavbarProps {
   isLoading?: boolean;
 }
 
+function isActivePath(pathname: string, to: string): boolean {
+  return pathname === to || pathname.startsWith(`${to}/`);
+}
+
 export default function Navbar({ isLoading = false }: NavbarProps) {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
@@ -27,7 +31,6 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
   const { unreadCount } = useNotificationContext();
   const location = useLocation();
   const navRef = useRef<HTMLDivElement>(null);
-  const location = useLocation();
 
   useEffect(() => {
     setMobileOpen(false);
@@ -39,13 +42,17 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
         setIsNotifOpen(false);
       }
     }
+
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   if (isLoading) {
     return (
-      <nav className="border-b border-stellar-border bg-stellar-card px-4 py-3" aria-label="Primary loading navigation">
+      <nav
+        className="border-b border-stellar-border bg-stellar-card px-4 py-3"
+        aria-label="Primary loading navigation"
+      >
         <div className="flex items-center gap-3">
           <SkeletonText width="110px" height="1rem" variant="title" />
           <div className="flex gap-2">
@@ -59,10 +66,11 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
   }
 
   return (
-    <nav className="border-b border-stellar-border bg-stellar-card sticky top-0 z-50" aria-label="Primary" ref={navRef}>
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-stellar-card focus:px-3 focus:py-2 focus:text-stellar-text-primary focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+    <>
+      <nav
+        className="sticky top-0 z-50 border-b border-stellar-border bg-stellar-card"
+        aria-label="Primary"
+        ref={navRef}
       >
         <a
           href="#main-content"
@@ -70,25 +78,25 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
         >
           Skip to content
         </a>
+
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center space-x-4 md:space-x-8">
+          <div className="flex items-center gap-4 md:gap-8">
             <Link
               to="/"
-              className="text-xl font-bold text-stellar-text-primary focus:outline-none focus:ring-2 focus:ring-stellar-blue focus:ring-offset-2 focus:ring-offset-stellar-card rounded-sm"
+              className="rounded-sm text-xl font-bold text-stellar-text-primary focus:outline-none focus:ring-2 focus:ring-stellar-blue focus:ring-offset-2 focus:ring-offset-stellar-card"
               aria-label="Bridge Watch home"
             >
               Bridge <span className="text-stellar-blue">Watch</span>
             </Link>
-            <div className="hidden space-x-4 md:flex">
-              {desktopNavItems.map((link) => (
+
+            <div className="hidden items-center space-x-2 md:flex">
+              {navLinks.map((link) => (
                 <Link
                   key={link.to}
                   to={link.to}
-                  aria-current={
-                    isNavItemActive(location.pathname, link.to) ? "page" : undefined
-                  }
+                  aria-current={isActivePath(location.pathname, link.to) ? "page" : undefined}
                   className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    isNavItemActive(location.pathname, link.to)
+                    isActivePath(location.pathname, link.to)
                       ? "bg-stellar-blue text-white"
                       : "text-stellar-text-secondary hover:text-stellar-text-primary"
                   } focus:outline-none focus:ring-2 focus:ring-stellar-blue focus:ring-offset-2 focus:ring-offset-stellar-card`}
@@ -98,10 +106,10 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
               ))}
             </div>
           </div>
+
           <div className="flex items-center gap-3">
             <ThemeToggle />
-          </div>
-          <div className="flex items-center gap-4">
+
             <button
               onClick={() => setIsWatchlistOpen(true)}
               className="relative rounded-full p-2 text-stellar-text-secondary transition-colors hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
@@ -116,10 +124,6 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
                 />
               </svg>
             </button>
-            <WatchlistSidebar
-              isOpen={isWatchlistOpen}
-              onClose={() => setIsWatchlistOpen(false)}
-            />
 
             <div className="relative">
               <button
@@ -153,21 +157,47 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
               />
             </div>
 
-            <div className="hidden sm:flex items-center gap-3 border-l border-stellar-border pl-4">
+            <div className="hidden items-center gap-3 border-l border-stellar-border pl-4 sm:flex">
               <ConnectionStatus />
             </div>
-            <HamburgerButton
-              open={mobileOpen}
-              onClick={() => setMobileOpen((current) => !current)}
-            />
+
+            <button
+              type="button"
+              onClick={() => setMobileOpen((value) => !value)}
+              className="rounded-md border border-stellar-border px-2 py-1 text-xs text-stellar-text-secondary transition-colors hover:text-white md:hidden"
+              aria-label="Toggle navigation"
+              aria-expanded={mobileOpen}
+            >
+              Menu
+            </button>
           </div>
         </div>
+
+        {mobileOpen && (
+          <div className="border-t border-stellar-border px-4 py-3 md:hidden">
+            <div className="grid grid-cols-2 gap-2">
+              {navLinks.map((link) => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`rounded-md px-3 py-2 text-sm font-medium ${
+                    isActivePath(location.pathname, link.to)
+                      ? "bg-stellar-blue text-white"
+                      : "text-stellar-text-secondary"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </nav>
-      <MobileMenu
-        open={mobileOpen}
-        pathname={location.pathname}
-        onClose={() => setMobileOpen(false)}
+
+      <WatchlistSidebar
+        isOpen={isWatchlistOpen}
+        onClose={() => setIsWatchlistOpen(false)}
       />
-    </div>
+    </>
   );
 }

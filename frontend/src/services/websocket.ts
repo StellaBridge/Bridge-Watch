@@ -2,6 +2,7 @@ import type { ConnectionState } from "../types";
 
 type MessageHandler = (data: unknown) => void;
 type ConnectionStateHandler = (state: ConnectionState) => void;
+type EventHandler = (...args: unknown[]) => void;
 
 interface WebSocketConfig {
   heartbeatInterval?: number; // ms between pings, default 30000
@@ -22,7 +23,7 @@ export class WebSocketService {
   // Connection state change listeners
   private stateHandlers: Set<ConnectionStateHandler> = new Set();
   // Generic event listeners (open, close, error, message)
-  private eventListeners: Map<string, Set<Function>> = new Map();
+  private eventListeners: Map<string, Set<EventHandler>> = new Map();
 
   private _state: ConnectionState = "disconnected";
   private reconnectAttempts = 0;
@@ -146,7 +147,7 @@ export class WebSocketService {
   /**
    * Add a generic event listener (e.g., 'open', 'close', 'error', 'message').
    */
-  on(event: string, handler: Function): void {
+  on(event: string, handler: EventHandler): void {
     if (!this.eventListeners.has(event)) {
       this.eventListeners.set(event, new Set());
     }
@@ -156,14 +157,14 @@ export class WebSocketService {
   /**
    * Remove a generic event listener.
    */
-  off(event: string, handler: Function): void {
+  off(event: string, handler: EventHandler): void {
     this.eventListeners.get(event)?.delete(handler);
   }
 
   /**
    * Emit a generic event.
    */
-  private _emit(event: string, ...args: any[]): void {
+  private _emit(event: string, ...args: unknown[]): void {
     this.eventListeners.get(event)?.forEach((handler) => handler(...args));
   }
 

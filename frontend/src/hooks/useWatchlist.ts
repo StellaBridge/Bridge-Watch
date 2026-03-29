@@ -40,7 +40,7 @@ export function useWatchlist() {
   const { data: watchlists = [], isLoading } = useQuery({
     queryKey: ["watchlists", clientId],
     queryFn: async (): Promise<Watchlist[]> => {
-      let lists = getLocalWatchlists();
+      const lists = getLocalWatchlists();
       if (lists.length === 0) {
         // Create an initial default watchlist if none exist
         const defaultList: Watchlist = {
@@ -115,7 +115,7 @@ export function useWatchlist() {
 
   const deleteWatchlist = useMutation({
     mutationFn: async (id: string) => {
-      let lists = getLocalWatchlists().filter(w => w.id !== id);
+      const lists = getLocalWatchlists().filter(w => w.id !== id);
       // Ensure there's a default
       if (lists.length > 0 && !lists.some(w => w.isDefault)) {
         lists[0].isDefault = true;

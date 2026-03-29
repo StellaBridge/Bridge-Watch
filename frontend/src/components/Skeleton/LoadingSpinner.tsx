@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-=======
-
-
->>>>>>> aec3ab8 (chore: stabilize frontend infrastructure and resolve build/test errors)
 interface LoadingSpinnerProps {
   message?: string;
   progress?: number;
