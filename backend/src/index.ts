@@ -18,7 +18,7 @@ import { swaggerOptions, swaggerUiOptions } from "./config/openapi.js";
 
 export async function buildServer() {
   const server = Fastify({
-    logger: logger,
+    logger: true,
   });
 
   // Register tracing middleware first (to capture all requests)
