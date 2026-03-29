@@ -1,0 +1,10 @@
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/arbitrary-cf902d7b252d26ba.d: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/error.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/unstructured.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/size_hint.rs
+
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/libarbitrary-cf902d7b252d26ba.rlib: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/error.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/unstructured.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/size_hint.rs
+
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/libarbitrary-cf902d7b252d26ba.rmeta: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/error.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/unstructured.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/size_hint.rs
+
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/lib.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/error.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/unstructured.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arbitrary-1.3.2/src/size_hint.rs:

@@ -1,0 +1,217 @@
+
+> frontend@0.1.0 test
+> vitest run --coverage
+
+
+ RUN  v2.1.9 /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/frontend
+      Coverage enabled with v8
+
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 6 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: require() of ES Module /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/node_modules/@exodus/bytes/encoding-lite.js from /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: require() of ES Module /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/node_modules/@exodus/bytes/encoding-lite.js from /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: require() of ES Module /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/node_modules/@exodus/bytes/encoding-lite.js from /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: require() of ES Module /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/node_modules/@exodus/bytes/encoding-lite.js from /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: require() of ES Module /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/node_modules/@exodus/bytes/encoding-lite.js from /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: require() of ES Module /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/node_modules/@exodus/bytes/encoding-lite.js from /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js not supported.
+Instead change the require of encoding-lite.js in /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js to a dynamic import() which is available in all CommonJS modules.
+ ❯ TracingChannel.traceSync node:diagnostics_channel:315:14
+ ❯ Object.<anonymous> ../node_modules/html-encoding-sniffer/lib/html-encoding-sniffer.js:2:41
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 'ERR_REQUIRE_ESM' }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  6 errors
+   Start at  01:43:13
+   Duration  14.11s (transform 14.97s, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 0ms)
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |       0 |        0 |       0 |       0 |                   
+ frontend          |       0 |        0 |       0 |       0 |                   
+  ...css.config.js |       0 |        0 |       0 |       0 | 1-6               
+  ...ind.config.js |       0 |        0 |       0 |       0 | 1-22              
+ frontend/context  |       0 |        0 |       0 |       0 |                   
+  ...cutConfig.tsx |       0 |        0 |       0 |       0 | 1-76              
+  ...utContext.tsx |       0 |        0 |       0 |       0 | 1-115             
+  ShortcutHelp.tsx |       0 |        0 |       0 |       0 | 1-88              
+  ...dShortcuts.ts |       0 |        0 |       0 |       0 | 1-91              
+ frontend/src      |       0 |        0 |       0 |       0 |                   
+  App.tsx          |       0 |        0 |       0 |       0 | 1-55              
+  main.tsx         |       0 |        0 |       0 |       0 | 1-32              
+ ...src/components |       0 |        0 |       0 |       0 |                   
+  ...istButton.tsx |       0 |        0 |       0 |       0 | 1-55              
+  BridgeCard.tsx   |       0 |        0 |       0 |       0 | 1-114             
+  ...ilterSort.tsx |       0 |        0 |       0 |       0 | 1-52              
+  ...tatusCard.tsx |       0 |        0 |       0 |       0 | 1-98              
+  ...tControls.tsx |       0 |        0 |       0 |       0 | 1-145             
+  ...ionStatus.tsx |       0 |        0 |       0 |       0 | 1-47              
+  ...htOverlay.tsx |       0 |        0 |       0 |       0 | 1-32              
+  ...ScoreCard.tsx |       0 |        0 |       0 |       0 | 1-247             
+  ...Container.tsx |       0 |        0 |       0 |       0 | 1-205             
+  Layout.tsx       |       0 |        0 |       0 |       0 | 1-17              
+  ...epthChart.tsx |       0 |        0 |       0 |       0 | 1-122             
+  Navbar.tsx       |       0 |        0 |       0 |       0 | 1-144             
+  ...ionCenter.tsx |       0 |        0 |       0 |       0 | 1-112             
+  ...ationItem.tsx |       0 |        0 |       0 |       0 | 1-68              
+  ...eferences.tsx |       0 |        0 |       0 |       0 | 1-41              
+  ...ingDialog.tsx |       0 |        0 |       0 |       0 | 1-158             
+  PriceChart.tsx   |       0 |        0 |       0 |       0 | 1-398             
+  ...rceLegend.tsx |       0 |        0 |       0 |       0 | 1-51              
+  PrintButton.tsx  |       0 |        0 |       0 |       0 | 1-81              
+  Sparkline.tsx    |       0 |        0 |       0 |       0 | 1-224             
+  ...neTooltip.tsx |       0 |        0 |       0 |       0 | 1-45              
+  ThemeToggle.tsx  |       0 |        0 |       0 |       0 | 1-36              
+  ...ionDetail.tsx |       0 |        0 |       0 |       0 | 1-223             
+  ...onFilters.tsx |       0 |        0 |       0 |       0 | 1-161             
+  ...onHistory.tsx |       0 |        0 |       0 |       0 | 1-238             
+  ...actionRow.tsx |       0 |        0 |       0 |       0 | 1-173             
+  ...stManager.tsx |       0 |        0 |       0 |       0 | 1-209             
+  ...stSidebar.tsx |       0 |        0 |       0 |       0 | 1-178             
+ ...ents/DataTable |       0 |        0 |       0 |       0 |                   
+  ColumnFilter.tsx |       0 |        0 |       0 |       0 | 1-143             
+  ColumnToggle.tsx |       0 |        0 |       0 |       0 | 1-29              
+  DataTable.tsx    |       0 |        0 |       0 |       0 | 1-232             
+  TableBody.tsx    |       0 |        0 |       0 |       0 | 1-233             
+  TableExport.tsx  |       0 |        0 |       0 |       0 | 1-90              
+  TableHeader.tsx  |       0 |        0 |       0 |       0 | 1-170             
+  ...agination.tsx |       0 |        0 |       0 |       0 | 1-79              
+  index.ts         |       0 |        0 |       0 |       0 | 1-8               
+  types.ts         |       0 |        0 |       0 |       0 | 1-43              
+  useDataTable.ts  |       0 |        0 |       0 |       0 | 1-76              
+ ...omponents/Form |       0 |        0 |       0 |       0 |                   
+  ...x.stories.tsx |       0 |        0 |       0 |       0 | 1-47              
+  Checkbox.tsx     |       0 |        0 |       0 |       0 | 1-96              
+  FormError.tsx    |       0 |        0 |       0 |       0 | 1-27              
+  FormGroup.tsx    |       0 |        0 |       0 |       0 | 1-37              
+  FormHelpText.tsx |       0 |        0 |       0 |       0 | 1-25              
+  FormLabel.tsx    |       0 |        0 |       0 |       0 | 1-38              
+  ...t.stories.tsx |       0 |        0 |       0 |       0 | 1-74              
+  Input.tsx        |       0 |        0 |       0 |       0 | 1-78              
+  ...s.stories.tsx |       0 |        0 |       0 |       0 | 1-33              
+  Radio.tsx        |       0 |        0 |       0 |       0 | 1-47              
+  ...p.stories.tsx |       0 |        0 |       0 |       0 | 1-49              
+  RadioGroup.tsx   |       0 |        0 |       0 |       0 | 1-72              
+  ...t.stories.tsx |       0 |        0 |       0 |       0 | 1-58              
+  Select.tsx       |       0 |        0 |       0 |       0 | 1-100             
+  index.ts         |       0 |        0 |       0 |       0 | 1-10              
+  types.ts         |       0 |        0 |       0 |       0 | 1-38              
+ ...nents/Skeleton |       0 |        0 |       0 |       0 |                   
+  ...rBoundary.tsx |       0 |        0 |       0 |       0 | 1-63              
+  ...ngSpinner.tsx |       0 |        0 |       0 |       0 | 1-38              
+  ...tonAvatar.tsx |       0 |        0 |       0 |       0 | 1-24              
+  SkeletonCard.tsx |       0 |        0 |       0 |       0 | 1-51              
+  ...etonChart.tsx |       0 |        0 |       0 |       0 | 1-37              
+  ...etonTable.tsx |       0 |        0 |       0 |       0 | 1-48              
+  SkeletonText.tsx |       0 |        0 |       0 |       0 | 1-42              
+  index.ts         |       0 |        0 |       0 |       0 | 1-7               
+ ...ents/liquidity |       0 |        0 |       0 |       0 |                   
+  ...tyByVenue.tsx |       0 |        0 |       0 |       0 | 1-105             
+  ...epthChart.tsx |       0 |        0 |       0 |       0 | 1-183             
+  ...dityTrend.tsx |       0 |        0 |       0 |       0 | 1-97              
+  PairSelector.tsx |       0 |        0 |       0 |       0 | 1-39              
+  ...alculator.tsx |       0 |        0 |       0 |       0 | 1-111             
+  index.ts         |       0 |        0 |       0 |       0 | 1-6               
+  venueColors.ts   |       0 |        0 |       0 |       0 | 1-8               
+ ...nd/src/context |       0 |        0 |       0 |       0 |                   
+  ...onContext.tsx |       0 |        0 |       0 |       0 | 1-71              
+  ...text.types.ts |       0 |        0 |       0 |       0 | 1-26              
+  ...ntextValue.ts |       0 |        0 |       0 |       0 | 1-4               
+ ...d/src/contexts |       0 |        0 |       0 |       0 |                   
+  ...etContext.tsx |       0 |        0 |       0 |       0 | 1-84              
+ ...tend/src/hooks |       0 |        0 |       0 |       0 |                   
+  useAssets.ts     |       0 |        0 |       0 |       0 | 1-48              
+  useBridges.ts    |       0 |        0 |       0 |       0 | 1-39              
+  useField.ts      |       0 |        0 |       0 |       0 | 1-54              
+  ...niteScroll.ts |       0 |        0 |       0 |       0 | 1-218             
+  useLiquidity.ts  |       0 |        0 |       0 |       0 | 1-197             
+  ...orageState.ts |       0 |        0 |       0 |       0 | 1-28              
+  ...ionContext.ts |       0 |        0 |       0 |       0 | 1-11              
+  ...ifications.ts |       0 |        0 |       0 |       0 | 1-37              
+  ...Comparison.ts |       0 |        0 |       0 |       0 | 1-142             
+  usePrices.ts     |       0 |        0 |       0 |       0 | 1-30              
+  ...rklineData.ts |       0 |        0 |       0 |       0 | 1-65              
+  ...ansactions.ts |       0 |        0 |       0 |       0 | 1-69              
+  useWatchlist.ts  |       0 |        0 |       0 |       0 | 1-212             
+  useWebSocket.ts  |       0 |        0 |       0 |       0 | 1-45              
+ ...tend/src/pages |       0 |        0 |       0 |       0 |                   
+  Analytics.tsx    |       0 |        0 |       0 |       0 | 1-293             
+  AssetDetail.tsx  |       0 |        0 |       0 |       0 | 1-127             
+  Bridges.tsx      |       0 |        0 |       0 |       0 | 1-133             
+  Dashboard.tsx    |       0 |        0 |       0 |       0 | 1-326             
+  Landing.tsx      |       0 |        0 |       0 |       0 | 1-587             
+  ...Dashboard.tsx |       0 |        0 |       0 |       0 | 1-157             
+  Reports.tsx      |       0 |        0 |       0 |       0 | 1-607             
+  Settings.tsx     |       0 |        0 |       0 |       0 | 1-93              
+  Transactions.tsx |       0 |        0 |       0 |       0 | 1-30              
+  Watchlist.tsx    |       0 |        0 |       0 |       0 | 1-160             
+ ...d/src/services |       0 |        0 |       0 |       0 |                   
+  api.ts           |       0 |        0 |       0 |       0 | 1-116             
+  websocket.ts     |       0 |        0 |       0 |       0 | 1-336             
+ ...tend/src/theme |       0 |        0 |       0 |       0 |                   
+  ThemeContext.tsx |       0 |        0 |       0 |       0 | 1-13              
+  ...eProvider.tsx |       0 |        0 |       0 |       0 | 1-70              
+  themeStorage.ts  |       0 |        0 |       0 |       0 | 1-30              
+  useTheme.ts      |       0 |        0 |       0 |       0 | 1-10              
+ ...tend/src/types |       0 |        0 |       0 |       0 |                   
+  index.ts         |       0 |        0 |       0 |       0 | 1-136             
+  liquidity.ts     |       0 |        0 |       0 |       0 | 1-72              
+  watchlist.ts     |       0 |        0 |       0 |       0 | 1-8               
+-------------------|---------|----------|---------|---------|-------------------
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/frontend
+npm error workspace frontend@0.1.0
+npm error location /home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/frontend
+npm error command failed
+npm error command sh -c vitest run --coverage

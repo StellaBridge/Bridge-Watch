@@ -1,0 +1,10 @@
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/wasmi_arena-8572d09b139d4f3e.d: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/component_vec.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/dedup.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/guarded.rs
+
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/libwasmi_arena-8572d09b139d4f3e.rlib: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/component_vec.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/dedup.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/guarded.rs
+
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/libwasmi_arena-8572d09b139d4f3e.rmeta: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/component_vec.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/dedup.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/guarded.rs
+
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/lib.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/component_vec.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/dedup.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasmi_arena-0.4.1/src/guarded.rs:

@@ -1,0 +1,7 @@
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/soroban_builtin_sdk_macros-0b89028c70987b01.d: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/derive_fn.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/derive_type.rs
+
+/home/stealth_dev/Documents/PROJECTS/DRIPS PROJECT/task 12-stellabridge/Bridge-Watch/contracts/soroban/target/debug/deps/libsoroban_builtin_sdk_macros-0b89028c70987b01.so: /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/lib.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/derive_fn.rs /home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/derive_type.rs
+
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/lib.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/derive_fn.rs:
+/home/stealth_dev/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-builtin-sdk-macros-21.2.1/src/derive_type.rs:

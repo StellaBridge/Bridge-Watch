@@ -89,6 +89,7 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <div className="text-sm text-stellar-text-secondary">Stellar Network Monitor</div>
+          </div>
 
           <div className="flex items-center gap-4">
             <button
