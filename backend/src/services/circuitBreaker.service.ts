@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
@@ -6,6 +5,7 @@ import { logger } from "../utils/logger.js";
 export interface CircuitBreakerConfig {
   contractId: string;
   network: string;
+  SOROBAN_RPC_URL?: string;
 }
 
 export enum PauseLevel {
@@ -39,7 +39,8 @@ class CircuitBreakerService {
 
   constructor(config: CircuitBreakerConfig) {
     this.contractId = config.contractId;
-    this.server = new StellarSdk.SorobanRpc.Server(config.SOROBAN_RPC_URL, {
+    const rpcUrl = config.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
+    this.server = new StellarSdk.SorobanRpc.Server(rpcUrl, {
       allowHttp: config.network === "development",
     });
     this.networkPassphrase = config.network === "mainnet"
@@ -89,12 +90,12 @@ class CircuitBreakerService {
         .build();
 
       const result = await this.server.simulateTransaction(tx);
-      if (result.result) {
-        return StellarSdk.xdr.ScVal.fromXDR(result.result.retval, 'base64').value() === 1;
+      if ((result as any).result) {
+        return StellarSdk.xdr.ScVal.fromXDR((result as any).result.retval, 'base64').value() === 1;
       }
       return false;
     } catch (error) {
-      logger.error("Circuit breaker check failed:", error);
+      logger.error({ error }, "Circuit breaker check failed");
       // In case of error, assume not paused to avoid blocking operations
       return false;
     }
@@ -122,12 +123,12 @@ class CircuitBreakerService {
         .build();
 
       const result = await this.server.simulateTransaction(tx);
-      if (result.result) {
-        return StellarSdk.xdr.ScVal.fromXDR(result.result.retval, 'base64').value() === 1;
+      if ((result as any).result) {
+        return StellarSdk.xdr.ScVal.fromXDR((result as any).result.retval, 'base64').value() === 1;
       }
       return false;
     } catch (error) {
-      logger.error("Whitelist check failed:", error);
+      logger.error({ error }, "Whitelist check failed");
       return false;
     }
   }
@@ -152,12 +153,12 @@ class CircuitBreakerService {
         .build();
 
       const result = await this.server.simulateTransaction(tx);
-      if (result.result) {
-        return StellarSdk.xdr.ScVal.fromXDR(result.result.retval, 'base64').value() === 1;
+      if ((result as any).result) {
+        return StellarSdk.xdr.ScVal.fromXDR((result as any).result.retval, 'base64').value() === 1;
       }
       return false;
     } catch (error) {
-      logger.error("Asset whitelist check failed:", error);
+      logger.error({ error }, "Asset whitelist check failed");
       return false;
     }
   }
@@ -171,7 +172,8 @@ class CircuitBreakerService {
     identifier: string | undefined,
     reason: string
   ): Promise<void> {
-    const contract = new StellarSdk.Contract(this.contractId);
+    // Contract instance creation for potential future use or verification
+    new StellarSdk.Contract(this.contractId);
 
     let operation: StellarSdk.xdr.Operation;
     switch (scope) {
@@ -180,7 +182,7 @@ class CircuitBreakerService {
           contract: this.contractId,
           function: "pause_global",
           args: [
-            StellarSdk.xdr.ScVal.scvAddress(signer.publicKey()),
+            StellarSdk.xdr.ScVal.scvAddress(new StellarSdk.Address(signer.publicKey()).toScAddress()),
             StellarSdk.xdr.ScVal.scvString(reason),
           ],
         });
@@ -191,7 +193,7 @@ class CircuitBreakerService {
           contract: this.contractId,
           function: "pause_bridge",
           args: [
-            StellarSdk.xdr.ScVal.scvAddress(signer.publicKey()),
+            StellarSdk.xdr.ScVal.scvAddress(new StellarSdk.Address(signer.publicKey()).toScAddress()),
             StellarSdk.xdr.ScVal.scvString(identifier),
             StellarSdk.xdr.ScVal.scvString(reason),
           ],
@@ -203,7 +205,7 @@ class CircuitBreakerService {
           contract: this.contractId,
           function: "pause_asset",
           args: [
-            StellarSdk.xdr.ScVal.scvAddress(signer.publicKey()),
+            StellarSdk.xdr.ScVal.scvAddress(new StellarSdk.Address(signer.publicKey()).toScAddress()),
             StellarSdk.xdr.ScVal.scvString(identifier),
             StellarSdk.xdr.ScVal.scvString(reason),
           ],
@@ -228,13 +230,14 @@ class CircuitBreakerService {
    * Request recovery from pause
    */
   async requestRecovery(signer: StellarSdk.Keypair, pauseId: number): Promise<void> {
-    const contract = new StellarSdk.Contract(this.contractId);
+    // Contract instance creation for potential future use or verification
+    new StellarSdk.Contract(this.contractId);
 
     const operation = StellarSdk.Operation.invokeContractFunction({
       contract: this.contractId,
       function: "request_recovery",
       args: [
-        StellarSdk.xdr.ScVal.scvAddress(signer.publicKey()),
+        StellarSdk.xdr.ScVal.scvAddress(new StellarSdk.Address(signer.publicKey()).toScAddress()),
         StellarSdk.xdr.ScVal.scvU32(pauseId),
       ],
     });

@@ -1,16 +1,12 @@
+import os from "os";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { TraceManager } from "../../api/middleware/tracing.js";
 import { performanceMonitor } from "../../api/middleware/tracing.js";
-import { logger, createChildLogger } from "../../utils/logger.js";
+import { createChildLogger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
 
 const traceManager = TraceManager.getInstance();
 const tracingLogger = createChildLogger('tracing-admin');
-type ActiveTraceEntry = [string, any];
-
-function getActiveTraceEntries(): ActiveTraceEntry[] {
-  return Array.from((traceManager as any).activeTraces.entries()) as ActiveTraceEntry[];
-}
 
 function getActiveTraceEntries(): Array<[string, any]> {
   const activeTraces = (traceManager as any).activeTraces as Map<string, any>;
@@ -250,7 +246,7 @@ export async function tracingAdminRoutes(server: FastifyInstance) {
           services: [
             {
               name: "bridge-watch-api",
-              spans: activeTraces.map(([requestId, context]) => ({
+              spans: activeTraces.map(([_requestId, context]: [string, any]) => ({
                 spanId: context.spanId,
                 parentSpanId: context.parentSpanId,
                 operationName: `${context.tags?.method || 'UNKNOWN'} ${context.tags?.url || '/'}`,
@@ -272,7 +268,7 @@ export async function tracingAdminRoutes(server: FastifyInstance) {
               tags: {
                 "service.version": process.env.npm_package_version || "0.1.0",
                 "service.environment": config.NODE_ENV,
-                "hostname": require("os").hostname(),
+                "hostname": os.hostname(),
               },
             },
           },

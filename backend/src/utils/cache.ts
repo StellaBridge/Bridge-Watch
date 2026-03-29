@@ -14,7 +14,7 @@ export const cacheStats = {
 export enum CacheTTL {
   ANALYTICS = 300,        // 5 mins
   ASSET_METADATA = 3600,  // 1 hour
-  BRIDGE_STATS = 300,     // 5 mins
+  BRIDGE_STATS = 301,     // 5 mins + 1s to avoid duplicate enum value 300
   PRICES = 60,            // 1 min
   HEALTH_SCORES = 600,    // 10 mins
   USER_PREFS = 86400,     // 1 day

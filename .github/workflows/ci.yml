@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  workflow_dispatch:
   push:
     branches: [main, develop]
   pull_request:
@@ -44,8 +43,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         working-directory: backend
@@ -54,7 +51,6 @@ jobs:
       - name: Lint backend
         working-directory: backend
         run: npm run lint
-        continue-on-error: true
 
       - name: Build backend
         working-directory: backend
@@ -102,7 +98,6 @@ jobs:
       - name: Run backend tests
         working-directory: backend
         run: npm run test -- --coverage
-        continue-on-error: true
         env:
           NODE_ENV: test
           POSTGRES_HOST: localhost
@@ -132,8 +127,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         working-directory: frontend
@@ -203,36 +196,14 @@ jobs:
       - name: Run clippy
         working-directory: contracts
         run: cargo clippy --workspace --all-targets -- -D warnings
-        continue-on-error: true
 
       - name: Build contracts
         working-directory: contracts
         run: cargo build --workspace --target wasm32-unknown-unknown --release
-        continue-on-error: true
 
       - name: Run contract tests
         working-directory: contracts
         run: cargo test --workspace
-        continue-on-error: true
-
-      - name: Run relay integration test suite
-        working-directory: contracts
-        run: cargo test -p bridge-watch-contracts --test relay_contract.integration
-
-      - name: Generate contract coverage (best effort)
-        working-directory: contracts
-        run: |
-          cargo install cargo-llvm-cov --locked
-          cargo llvm-cov -p bridge-watch-contracts --lcov --output-path lcov-contracts.info --tests
-        continue-on-error: true
-
-      - name: Upload contract coverage report
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./contracts/lcov-contracts.info
-          flags: contracts
-          token: ${{ secrets.CODECOV_TOKEN }}
-        continue-on-error: true
 
       - name: Upload contract artifacts
         uses: actions/upload-artifact@v4

@@ -244,8 +244,9 @@ class DatabaseApiKeyRepository implements ApiKeyRepository {
   }
 
   private toPublicRecord(record: StoredApiKeyRecord): ApiKeyRecord {
-    const { salt: _salt, hash: _hash, ...publicRecord } = record;
-    return publicRecord;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { salt, hash, ...publicRecord } = record;
+    return publicRecord as unknown as ApiKeyRecord;
   }
 }
 
@@ -466,7 +467,8 @@ export class ApiKeyService {
   }
 
   private toPublicRecord(record: StoredApiKeyRecord): ApiKeyRecord {
-    const { salt: _salt, hash: _hash, ...publicRecord } = record;
-    return publicRecord;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { salt, hash, ...publicRecord } = record;
+    return publicRecord as unknown as ApiKeyRecord;
   }
 }

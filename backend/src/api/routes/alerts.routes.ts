@@ -359,7 +359,7 @@ export async function alertsRoutes(server: FastifyInstance) {
     },
     async (request: FastifyRequest<{ Querystring: any }>) => {
       const query = AlertHistoryQuerySchema.parse(request.query);
-      const { limit, offset, page } = getPaginationParams(query);
+      const { limit, page } = getPaginationParams(query);
       const events = await alertService.getRecentAlerts(limit);
       const total = events.length;
       return formatPaginatedResponse(events, total, page, limit);

@@ -17,7 +17,7 @@ export async function healthRoutes(server: FastifyInstance) {
   // Simple health check (backward compatibility)
   server.get(
     "/",
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    async (_request: FastifyRequest, _reply: FastifyReply) => {
       return { 
         status: "ok", 
         timestamp: new Date().toISOString(),

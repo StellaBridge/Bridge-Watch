@@ -15,14 +15,6 @@ interface NavbarProps {
   isLoading?: boolean;
 }
 
-function linkClass(active: boolean) {
-  return `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-    active
-      ? "bg-stellar-blue text-white"
-      : "text-stellar-text-secondary hover:text-stellar-text-primary"
-  } focus:outline-none focus:ring-2 focus:ring-stellar-blue focus:ring-offset-2 focus:ring-offset-stellar-card`;
-}
-
 export default function Navbar({ isLoading = false }: NavbarProps) {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -31,7 +23,6 @@ export default function Navbar({ isLoading = false }: NavbarProps) {
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { unreadCount } = useNotificationContext();
-  const location = useLocation();
   const navRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

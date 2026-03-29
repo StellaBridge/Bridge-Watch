@@ -1,12 +1,9 @@
 import { FastifyInstance, FastifyPluginOptions, FastifyRequest, FastifyReply } from "fastify";
 import { JobQueue } from "../../workers/queue.js";
 import { logger } from "../../utils/logger.js";
-import { authMiddleware } from "../middleware/auth.js";
 
 export default async function jobsRoutes(fastify: FastifyInstance, _options: FastifyPluginOptions) {
   const jobQueue = JobQueue.getInstance();
-  const requireRead = authMiddleware({ requiredScopes: ["jobs:read"] });
-  const requireTrigger = authMiddleware({ requiredScopes: ["jobs:trigger"] });
 
   fastify.get(
     "/monitor",

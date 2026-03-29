@@ -8,7 +8,6 @@ import { logger } from "./utils/logger.js";
 import { registerRoutes } from "./api/routes/index.js";
 import { registerTracing } from "./api/middleware/tracing.js";
 import { registerValidation } from "./api/middleware/validation.js";
-import { startBridgeVerificationJob } from "./jobs/verification.job.js";
 import {
   registerRateLimiting,
   getRateLimitMetrics,

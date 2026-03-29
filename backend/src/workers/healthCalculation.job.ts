@@ -1,6 +1,5 @@
 import { Job } from "bullmq";
 import { HealthService } from "../services/health.service.js";
-import { SUPPORTED_ASSETS } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 
 const healthService = new HealthService();

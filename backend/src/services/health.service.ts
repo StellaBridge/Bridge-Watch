@@ -6,7 +6,6 @@ import { AlertService } from "./alert.service.js";
 import { HealthScoreModel, HealthScoreRecord } from "../database/models/healthScore.model.js";
 import { ScoreCalculator, ScoreComponents } from "../utils/scoreCalculator.js";
 import { SUPPORTED_ASSETS } from "../config/index.js";
-import { config } from "../config/index.js";
 
 export interface HealthScore {
   symbol: string;

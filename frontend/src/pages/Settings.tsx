@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import NotificationPreferences from "../components/NotificationPreferences";
 import { usePreferences } from "../context/PreferencesContext";
 import { useToast } from "../context/ToastContext";
