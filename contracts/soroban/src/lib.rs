@@ -6284,9 +6284,10 @@ impl BridgeWatchContract {
             13. trigger_periodic_stats() - Trigger batch computation"
         )
     }
+}
 
-    #[cfg(test)]
-    mod tests {
+#[cfg(test)]
+mod tests {
         use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events;

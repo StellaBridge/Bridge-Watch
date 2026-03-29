@@ -61,8 +61,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: backend/package-lock.json
 
       - name: Install backend dependencies
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
