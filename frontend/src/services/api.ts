@@ -31,9 +31,26 @@ async function fetchApi<T>(
   });
 
   if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
+    let detail = "";
+    try {
+      const body = (await response.json()) as { error?: string; message?: string };
+      detail = body.error ?? body.message ?? "";
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    const suffix = detail ? `: ${detail}` : "";
+    throw new Error(`API error: ${response.status} ${response.statusText}${suffix}`);
   }
 
+  return response.json();
+}
+
+/** Root health endpoint (not under /api/v1). */
+export async function getServerHealth(): Promise<{ status: string; timestamp: string }> {
+  const response = await fetch("/health");
+  if (!response.ok) {
+    throw new Error(`Health check failed: ${response.status} ${response.statusText}`);
+  }
   return response.json();
 }
 

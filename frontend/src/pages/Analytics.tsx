@@ -122,8 +122,8 @@ export default function Analytics() {
                         aria-pressed={selected}
                         className={`rounded-md border px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-stellar-blue ${
                           selected
-                            ? "border-stellar-blue bg-stellar-blue/20 text-white"
-                            : "border-stellar-border bg-stellar-dark text-stellar-text-secondary hover:text-white"
+                            ? "border-stellar-blue bg-stellar-blue/20 text-stellar-text-primary"
+                            : "border-stellar-border bg-stellar-card text-stellar-text-secondary hover:text-stellar-text-primary"
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
                         {asset.symbol}

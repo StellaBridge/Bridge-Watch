@@ -184,3 +184,7 @@ body {
   animation: skeleton-shimmer 1.6s infinite;
 }
 
+.reduce-motion .skeleton::after {
+  animation: none;
+}
+
