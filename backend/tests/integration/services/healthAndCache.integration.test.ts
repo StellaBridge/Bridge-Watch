@@ -1,12 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { FastifyInstance } from "fastify";
 import { buildServer } from "../../../src/index.js";
 import { mockExternalApis, restoreExternalApisMock } from "../../helpers/externalApiMock.js";
 import { CacheService } from "../../../src/utils/cache.js";
 import { flushRedis } from "../../helpers/redis.js";
 
 describe("Health + cache integration", () => {
-  let server: FastifyInstance;
+  let server: Awaited<ReturnType<typeof buildServer>>;
 
   beforeAll(async () => {
     server = await buildServer();

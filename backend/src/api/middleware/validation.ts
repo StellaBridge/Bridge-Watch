@@ -87,7 +87,7 @@ export async function registerValidation(server: FastifyInstance): Promise<void>
 
       // Log validation results
       const validationTime = Date.now() - startTime;
-      validationLogger.info('Request validation completed', {
+      validationLogger.info({
         path: request.url,
         method: request.method,
         dataType,
@@ -96,7 +96,7 @@ export async function registerValidation(server: FastifyInstance): Promise<void>
         warningCount: result.warnings.length,
         validationTime,
         correlationId: context.correlationId,
-      });
+      }, 'Request validation completed');
 
       // If validation failed and not admin bypass, return error
       if (!result.isValid && !result.metadata.bypassUsed) {
@@ -119,10 +119,11 @@ export async function registerValidation(server: FastifyInstance): Promise<void>
       }
 
     } catch (error) {
-      validationLogger.error('Validation middleware error', error as Error, {
+      validationLogger.error({
+        err: error,
         path: request.url,
         method: request.method,
-      });
+      }, 'Validation middleware error');
 
       // In strict mode, fail on validation errors
       if (config.VALIDATION_STRICT_MODE) {
@@ -135,10 +136,10 @@ export async function registerValidation(server: FastifyInstance): Promise<void>
       }
 
       // In non-strict mode, log warning and continue
-      validationLogger.warn('Validation error ignored (non-strict mode)', {
+      validationLogger.warn({
         path: request.url,
         method: request.method,
-      });
+      }, 'Validation error ignored (non-strict mode)');
     }
   });
 

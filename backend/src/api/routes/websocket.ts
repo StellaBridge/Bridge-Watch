@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { WebsocketService } from "../services/websocket.js";
+import { WebsocketService } from "../../services/websocket.js";
 
 const websocketService = WebsocketService.getInstance();
 

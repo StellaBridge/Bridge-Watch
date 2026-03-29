@@ -35,7 +35,7 @@ const alertRuleResponse = {
 export async function alertsRoutes(server: FastifyInstance) {
   const alertService = new AlertService();
 
-  server.addHook("preHandler", authMiddleware);
+  server.addHook("preHandler", authMiddleware());
 
   server.get<{ Querystring: { owner: string } }>(
     "/rules",

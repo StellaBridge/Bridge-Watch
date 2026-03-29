@@ -4,7 +4,7 @@
 mod relay;
 
 use relay::{
-    BatchRelayItem, ChainId, ChainConfig, CrossChainRelayContract, CrossChainRelayContractClient,
+    BatchRelayItem, ChainConfig, ChainId, CrossChainRelayContract, CrossChainRelayContractClient,
     MessagePriority, MessageStatus, RelayError, StateProof,
 };
 use soroban_sdk::{
@@ -35,7 +35,10 @@ fn make_signature(env: &Env, message_id: &BytesN<32>, public_key: &BytesN<32>) -
     payload[..32].copy_from_slice(&message_id.to_array());
     payload[32..].copy_from_slice(&public_key.to_array());
 
-    let digest: BytesN<32> = env.crypto().sha256(&Bytes::from_slice(env, &payload)).into();
+    let digest: BytesN<32> = env
+        .crypto()
+        .sha256(&Bytes::from_slice(env, &payload))
+        .into();
     let d = digest.to_array();
 
     let mut out = [0u8; 64];

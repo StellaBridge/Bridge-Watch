@@ -887,7 +887,12 @@ impl BridgeWatchContract {
             paused: status.paused,
             active: status.active,
             timestamp,
-            expires_at: Self::resolve_expiration(&env, &asset_code, ExpirationKind::Asset, timestamp),
+            expires_at: Self::resolve_expiration(
+                &env,
+                &asset_code,
+                ExpirationKind::Asset,
+                timestamp,
+            ),
         };
 
         env.storage()
@@ -981,7 +986,12 @@ impl BridgeWatchContract {
             price,
             source: source.clone(),
             timestamp,
-            expires_at: Self::resolve_expiration(&env, &asset_code, ExpirationKind::Price, timestamp),
+            expires_at: Self::resolve_expiration(
+                &env,
+                &asset_code,
+                ExpirationKind::Price,
+                timestamp,
+            ),
         };
 
         env.storage()
@@ -1368,7 +1378,12 @@ impl BridgeWatchContract {
             paused: false,
             active: true,
             timestamp,
-            expires_at: Self::resolve_expiration(&env, &asset_code, ExpirationKind::Asset, timestamp),
+            expires_at: Self::resolve_expiration(
+                &env,
+                &asset_code,
+                ExpirationKind::Asset,
+                timestamp,
+            ),
         };
 
         env.storage()
@@ -1397,12 +1412,8 @@ impl BridgeWatchContract {
         }
         status.paused = true;
         status.timestamp = env.ledger().timestamp();
-        status.expires_at = Self::resolve_expiration(
-            &env,
-            &asset_code,
-            ExpirationKind::Asset,
-            status.timestamp,
-        );
+        status.expires_at =
+            Self::resolve_expiration(&env, &asset_code, ExpirationKind::Asset, status.timestamp);
         env.storage()
             .persistent()
             .set(&DataKey::AssetHealth(asset_code.clone()), &status);
@@ -1423,12 +1434,8 @@ impl BridgeWatchContract {
         }
         status.paused = false;
         status.timestamp = env.ledger().timestamp();
-        status.expires_at = Self::resolve_expiration(
-            &env,
-            &asset_code,
-            ExpirationKind::Asset,
-            status.timestamp,
-        );
+        status.expires_at =
+            Self::resolve_expiration(&env, &asset_code, ExpirationKind::Asset, status.timestamp);
         env.storage()
             .persistent()
             .set(&DataKey::AssetHealth(asset_code.clone()), &status);
@@ -1448,12 +1455,8 @@ impl BridgeWatchContract {
         status.active = false;
         status.paused = false;
         status.timestamp = env.ledger().timestamp();
-        status.expires_at = Self::resolve_expiration(
-            &env,
-            &asset_code,
-            ExpirationKind::Asset,
-            status.timestamp,
-        );
+        status.expires_at =
+            Self::resolve_expiration(&env, &asset_code, ExpirationKind::Asset, status.timestamp);
         env.storage()
             .persistent()
             .set(&DataKey::AssetHealth(asset_code.clone()), &status);
@@ -1635,8 +1638,10 @@ impl BridgeWatchContract {
             .instance()
             .set(&DataKey::MismatchThreshold, &threshold_bps);
 
-        env.events()
-            .publish((symbol_short!("thresh_up"), symbol_short!("mismatch")), threshold_bps);
+        env.events().publish(
+            (symbol_short!("thresh_up"), symbol_short!("mismatch")),
+            threshold_bps,
+        );
         Self::emit_contract_event(
             &env,
             BridgeWatchEvent::ThresholdUpdated {
@@ -2103,12 +2108,7 @@ impl BridgeWatchContract {
     }
 
     /// Configure a per-asset TTL override for asset-bound records.
-    pub fn set_asset_expiration_ttl(
-        env: Env,
-        caller: Address,
-        asset_code: String,
-        ttl_secs: u64,
-    ) {
+    pub fn set_asset_expiration_ttl(env: Env, caller: Address, asset_code: String, ttl_secs: u64) {
         caller.require_auth();
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
         let authorized =
@@ -2143,16 +2143,16 @@ impl BridgeWatchContract {
     }
 
     /// Manually extend current record expirations for an asset.
-    pub fn extend_expiration(
-        env: Env,
-        caller: Address,
-        asset_code: String,
-        extra_secs: u64,
-    ) {
+    pub fn extend_expiration(env: Env, caller: Address, asset_code: String, extra_secs: u64) {
         Self::check_permission(&env, &caller, AdminRole::AssetManager);
         let now = env.ledger().timestamp();
-        let updated_expiration =
-            |current: u64| if current > now { current + extra_secs } else { now + extra_secs };
+        let updated_expiration = |current: u64| {
+            if current > now {
+                current + extra_secs
+            } else {
+                now + extra_secs
+            }
+        };
 
         if let Some(mut record) = env
             .storage()
@@ -2307,9 +2307,10 @@ impl BridgeWatchContract {
                     }
                 }
             }
-            env.storage()
-                .persistent()
-                .set(&DataKey::PriceHistory(asset_code.clone()), &filtered_history);
+            env.storage().persistent().set(
+                &DataKey::PriceHistory(asset_code.clone()),
+                &filtered_history,
+            );
         }
 
         let bridge_ids: Vec<String> = env
@@ -5719,7 +5720,9 @@ impl BridgeWatchContract {
         for i in 0..count {
             let value = values.get(i).unwrap();
             let volume = volumes.get(i).unwrap();
-            weighted_sum = weighted_sum.checked_add(value * volume).unwrap_or(weighted_sum);
+            weighted_sum = weighted_sum
+                .checked_add(value * volume)
+                .unwrap_or(weighted_sum);
             total_volume = total_volume.checked_add(volume).unwrap_or(total_volume);
         }
 
@@ -5745,7 +5748,9 @@ impl BridgeWatchContract {
         let mut sum_squared_diff: i128 = 0;
         for v in values.iter() {
             let diff = v - mean;
-            sum_squared_diff = sum_squared_diff.checked_add(diff * diff).unwrap_or(sum_squared_diff);
+            sum_squared_diff = sum_squared_diff
+                .checked_add(diff * diff)
+                .unwrap_or(sum_squared_diff);
         }
 
         // Variance = sum_squared_diff / count
@@ -5793,9 +5798,8 @@ impl BridgeWatchContract {
         }
 
         // Annualization factor scaled by PRECISION
-        let annualization_factor = Self::integer_sqrt(
-            (SECONDS_PER_YEAR as i128 * 10_000) / period_secs as i128,
-        );
+        let annualization_factor =
+            Self::integer_sqrt((SECONDS_PER_YEAR as i128 * 10_000) / period_secs as i128);
 
         // Annualized volatility
         (stddev_returns * annualization_factor) / 100
@@ -5965,9 +5969,10 @@ impl BridgeWatchContract {
             .get(&DataKey::AssetStatistics(asset_code.clone()))
             .unwrap_or_else(|| Vec::new(&env));
         stats_history.push_back(stats.clone());
-        env.storage()
-            .persistent()
-            .set(&DataKey::AssetStatistics(asset_code.clone()), &stats_history);
+        env.storage().persistent().set(
+            &DataKey::AssetStatistics(asset_code.clone()),
+            &stats_history,
+        );
 
         // Emit event
         env.events().publish(
@@ -5982,11 +5987,7 @@ impl BridgeWatchContract {
     ///
     /// Returns the most recent statistics for the specified period, or None
     /// if no statistics have been computed.
-    pub fn get_statistics(
-        env: Env,
-        asset_code: String,
-        period: StatPeriod,
-    ) -> Option<Statistics> {
+    pub fn get_statistics(env: Env, asset_code: String, period: StatPeriod) -> Option<Statistics> {
         let stats_history: Vec<Statistics> = env
             .storage()
             .persistent()
@@ -6042,7 +6043,8 @@ impl BridgeWatchContract {
             }
 
             // Check last stats computation time
-            let existing_stats = Self::get_statistics(env.clone(), asset_code.clone(), StatPeriod::Day);
+            let existing_stats =
+                Self::get_statistics(env.clone(), asset_code.clone(), StatPeriod::Day);
             let should_compute = match existing_stats {
                 Some(stats) => now.saturating_sub(stats.timestamp) >= 3600, // 1 hour minimum
                 None => true,
@@ -6232,11 +6234,7 @@ impl BridgeWatchContract {
     ///
     /// `smoothing_factor` is a value between 0 and 10_000 representing
     /// the smoothing constant alpha (where alpha = smoothing_factor / 10_000).
-    pub fn calculate_ema(
-        env: Env,
-        values: Vec<i128>,
-        smoothing_factor: i128,
-    ) -> i128 {
+    pub fn calculate_ema(env: Env, values: Vec<i128>, smoothing_factor: i128) -> i128 {
         let n = values.len();
         if n == 0 {
             return 0;
@@ -6281,13 +6279,14 @@ impl BridgeWatchContract {
             10. calculate_rolling_statistics(values, window, step) - Rolling window stats\n\
             11. compute_statistics(asset, period) - Full statistics computation\n\
             12. get_statistics(asset, period) - Retrieve stored statistics\n\
-            13. trigger_periodic_stats() - Trigger batch computation"
+            13. trigger_periodic_stats() - Trigger batch computation",
         )
     }
+}
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events;
     use soroban_sdk::testutils::Ledger;

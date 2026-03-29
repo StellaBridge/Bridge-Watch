@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { validationService, type ValidationResult, type BatchValidationResult } from "../../services/validation.service.js";
-import { logger, createChildLogger } from "../../utils/logger.js";
+import { validationService } from "../../services/validation.service.js";
+import { createChildLogger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
 
 const validationAdminLogger = createChildLogger('validation-admin');
@@ -38,7 +38,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           },
         };
       } catch (error) {
-        validationAdminLogger.error("Failed to get validation metrics", error as Error);
+        validationAdminLogger.error({ err: error }, "Failed to get validation metrics");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -60,7 +60,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
     }
   >(
     "/validate",
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request, reply) => {
       try {
         const { data, dataType, operation = "create", existingData } = request.body;
         
@@ -86,20 +86,20 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           context
         );
 
-        validationAdminLogger.info("Admin validation performed", {
+        validationAdminLogger.info({
           dataType,
           operation,
           isValid: result.isValid,
           errorCount: result.errors.length,
           warningCount: result.warnings.length,
-        });
+        }, "Admin validation performed");
 
         return {
           success: true,
           data: result,
         };
       } catch (error) {
-        validationAdminLogger.error("Validation failed", error as Error);
+        validationAdminLogger.error({ err: error }, "Validation failed");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -120,7 +120,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
     }
   >(
     "/validate/batch",
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request, reply) => {
       try {
         const { items, dataType, batchSize = 100 } = request.body;
         
@@ -162,20 +162,20 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           context
         );
 
-        validationAdminLogger.info("Admin batch validation performed", {
+        validationAdminLogger.info({
           dataType,
           totalItems: result.totalItems,
           validItems: result.validItems,
           invalidItems: result.invalidItems,
           dataQualityScore: result.summary.dataQualityScore,
-        });
+        }, "Admin batch validation performed");
 
         return {
           success: true,
           data: result,
         };
       } catch (error) {
-        validationAdminLogger.error("Batch validation failed", error as Error);
+        validationAdminLogger.error({ err: error }, "Batch validation failed");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -202,7 +202,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           data: validationConfig,
         };
       } catch (error) {
-        validationAdminLogger.error("Failed to get validation config", error as Error);
+        validationAdminLogger.error({ err: error }, "Failed to get validation config");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -227,7 +227,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           timestamp: new Date().toISOString(),
         };
       } catch (error) {
-        validationAdminLogger.error("Failed to reset validation metrics", error as Error);
+        validationAdminLogger.error({ err: error }, "Failed to reset validation metrics");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -247,7 +247,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
     }
   >(
     "/report",
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request, reply) => {
       try {
         const { dataType, timeRange } = request.query;
         const metrics = validationService.getMetrics();
@@ -276,7 +276,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           data: report,
         };
       } catch (error) {
-        validationAdminLogger.error("Failed to generate validation report", error as Error);
+        validationAdminLogger.error({ err: error }, "Failed to generate validation report");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -295,7 +295,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
     }
   >(
     "/export",
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request, reply) => {
       try {
         const { format = "json" } = request.query;
         const metrics = validationService.getMetrics();
@@ -329,7 +329,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           }, null, 2);
         }
       } catch (error) {
-        validationAdminLogger.error("Failed to export validation data", error as Error);
+        validationAdminLogger.error({ err: error }, "Failed to export validation data");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -360,7 +360,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           },
         };
       } catch (error) {
-        validationAdminLogger.error("Validation admin health check failed", error as Error);
+        validationAdminLogger.error({ err: error }, "Validation admin health check failed");
         return reply.status(503).send({
           success: false,
           status: "unhealthy",
@@ -381,7 +381,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
     }
   >(
     "/rules/:dataType",
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request, reply) => {
       try {
         const { dataType } = request.params;
         
@@ -402,7 +402,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           data: rulesInfo,
         };
       } catch (error) {
-        validationAdminLogger.error("Failed to get validation rules", error as Error);
+        validationAdminLogger.error({ err: error }, "Failed to get validation rules");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
@@ -422,7 +422,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
     }
   >(
     "/test",
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request, reply) => {
       try {
         const { dataType, sampleData } = request.body;
         
@@ -458,7 +458,7 @@ export async function validationAdminRoutes(server: FastifyInstance) {
           },
         };
       } catch (error) {
-        validationAdminLogger.error("Validation test failed", error as Error);
+        validationAdminLogger.error({ err: error }, "Validation test failed");
         return reply.status(500).send({
           success: false,
           error: "Internal Server Error",
