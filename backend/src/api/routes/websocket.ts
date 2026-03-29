@@ -1,45 +1,42 @@
 import type { FastifyInstance } from "fastify";
+import { wsServer } from "../websocket/websocket.server.js";
 
-// WS /api/v1/ws - WebSocket for real-time updates
-
+/**
+ * WebSocket route: ws[s]://host/api/v1/ws
+ *
+ * Connection URL parameters
+ * ─────────────────────────
+ * ?token=<secret>   Optional bearer token.  Required before subscribing to
+ *                   private channels (e.g. "alerts").  Can alternatively be
+ *                   supplied per-message in the `subscribe` payload.
+ *
+ * Inbound message format (JSON)
+ * ─────────────────────────────
+ * { "type": "subscribe",   "channel": "prices" | "health" | "alerts" | "bridges", "token"?: "…" }
+ * { "type": "unsubscribe", "channel": "prices" | "health" | "alerts" | "bridges" }
+ * { "type": "ping" }
+ *
+ * Outbound message types (JSON)
+ * ─────────────────────────────
+ * welcome          – sent once after connect; carries clientId and channel list
+ * subscribed       – ack for a successful subscribe
+ * unsubscribed     – ack for a successful unsubscribe
+ * pong             – response to an application-level ping
+ * price_update     – array of aggregated VWAP prices (channel: prices)
+ * health_update    – array of asset health scores  (channel: health)
+ * bridge_update    – array of bridge statuses      (channel: bridges)
+ * alert_triggered  – a single alert event          (channel: alerts, private)
+ * error            – describes a protocol or auth error
+ */
 export async function websocketRoutes(server: FastifyInstance) {
-  server.get("/", { websocket: true }, (socket, _request) => {
-    server.log.info("WebSocket client connected");
+  server.get(
+    "/",
+    { websocket: true },
+    (socket, request) => {
+      wsServer.handleConnection(socket as unknown as Parameters<typeof wsServer.handleConnection>[0], request);
+    }
+  );
 
-    socket.on("message", (message: Buffer) => {
-      const data = message.toString();
-      server.log.debug(`WebSocket message received: ${data}`);
-
-      try {
-        const parsed = JSON.parse(data);
-
-        // Handle subscription requests
-        if (parsed.type === "subscribe") {
-          // TODO: Add client to subscription channel (e.g., asset price updates)
-          socket.send(
-            JSON.stringify({
-              type: "subscribed",
-              channel: parsed.channel,
-            })
-          );
-        }
-
-        if (parsed.type === "unsubscribe") {
-          // TODO: Remove client from subscription channel
-          socket.send(
-            JSON.stringify({
-              type: "unsubscribed",
-              channel: parsed.channel,
-            })
-          );
-        }
-      } catch {
-        socket.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
-      }
-    });
-
-    socket.on("close", () => {
-      server.log.info("WebSocket client disconnected");
-    });
-  });
+  // Expose connection metrics for observability
+  server.get("/metrics", async () => wsServer.getMetrics());
 }

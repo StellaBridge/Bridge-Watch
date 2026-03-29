@@ -97,6 +97,13 @@ const envSchema = z.object({
   HORIZON_TIMEOUT_MS: z.coerce.number().default(500),
   REDIS_CACHE_TTL_SEC: z.coerce.number().default(30),
 
+  // WebSocket
+  /**
+   * Secret token required to subscribe to private WebSocket channels (e.g.
+   * "alerts").  When absent, private-channel authentication is disabled and
+   * any token is rejected.  Set this to a strong random string in production.
+   */
+  WS_AUTH_SECRET: z.string().optional(),
   // Health Score Weights
   HEALTH_WEIGHT_LIQUIDITY: z.coerce.number().default(0.25),
   HEALTH_WEIGHT_PRICE: z.coerce.number().default(0.25),

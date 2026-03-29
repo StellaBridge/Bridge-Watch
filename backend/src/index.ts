@@ -7,6 +7,7 @@ import { config } from "./config/index.js";
 import { logger } from "./utils/logger.js";
 import { registerRoutes } from "./api/routes/index.js";
 import { startBridgeVerificationJob } from "./jobs/verification.job.js";
+import { wsServer } from "./api/websocket/websocket.server.js";
 import {
   registerRateLimiting,
   getRateLimitMetrics,
@@ -33,7 +34,12 @@ export async function buildServer() {
   // Sliding-window Redis rate limiting (replaces the simple @fastify/rate-limit global)
   await registerRateLimiting(server as any);
 
-  await server.register(websocket);
+  // Enable permessage-deflate compression for WebSocket frames.
+  await server.register(websocket, {
+    options: {
+      perMessageDeflate: true,
+    },
+  });
 
   // Register routes
   await registerRoutes(server as any);
@@ -114,6 +120,20 @@ async function start() {
     server.log.error(err);
     process.exit(1);
   }
+
+  // ─── Graceful shutdown ──────────────────────────────────────────────────────
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, "Shutdown signal received");
+
+    await wsServer.shutdown();
+
+    await server.close();
+    logger.info("Server closed");
+    process.exit(0);
+  };
+
+  process.once("SIGTERM", () => { shutdown("SIGTERM").catch(() => process.exit(1)); });
+  process.once("SIGINT",  () => { shutdown("SIGINT").catch(() => process.exit(1)); });
 }
 
 if (process.env.NODE_ENV !== "test") {
