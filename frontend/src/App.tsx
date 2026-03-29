@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
+import { GlobalErrorBoundary } from "./components/ErrorBoundary";
 import { NotificationProvider } from "./context/NotificationContext";
 import { useNotifications } from "./hooks/useNotifications";
 
@@ -22,6 +23,7 @@ function NotificationInitializer() {
 
 function App() {
   return (
+    <GlobalErrorBoundary>
     <NotificationProvider>
       <NotificationInitializer />
       <Suspense
@@ -48,6 +50,7 @@ function App() {
         </Routes>
       </Suspense>
     </NotificationProvider>
+    </GlobalErrorBoundary>
   );
 }
 

@@ -1,7 +1,6 @@
 import { redis } from "../utils/redis.js";
 import { logger } from "../utils/logger.js";
-import { config } from "../config/index.js";
-import type { RateLimitTier, EndpointCategory, RateLimitMetrics } from "../api/middleware/rateLimit.middleware.js";
+import type { RateLimitTier, EndpointCategory } from "../api/middleware/rateLimit.middleware.js";
 
 export interface RateLimitStats {
   totalRequests: number;
@@ -384,23 +383,23 @@ export class RateLimitService {
     }
   }
 
-  private async getTopIPs(startTime: number, endTime: number, limit: number): Promise<Array<{ ip: string; requests: number; blocked: number }>> {
+  private async getTopIPs(_startTime: number, _endTime: number, _limit: number): Promise<Array<{ ip: string; requests: number; blocked: number }>> {
     // Implementation would scan Redis keys for IP patterns and aggregate
     // This is a placeholder - actual implementation would depend on data structure
     return [];
   }
 
-  private async getTopApiKeys(startTime: number, endTime: number, limit: number): Promise<Array<{ apiKey: string; tier: RateLimitTier; requests: number; blocked: number }>> {
+  private async getTopApiKeys(_startTime: number, _endTime: number, _limit: number): Promise<Array<{ apiKey: string; tier: RateLimitTier; requests: number; blocked: number }>> {
     // Implementation would scan Redis keys for API key patterns and aggregate
     return [];
   }
 
-  private async getEndpointStats(startTime: number, endTime: number): Promise<Array<{ endpoint: string; category: EndpointCategory; requests: number; blocked: number }>> {
+  private async getEndpointStats(_startTime: number, _endTime: number): Promise<Array<{ endpoint: string; category: EndpointCategory; requests: number; blocked: number }>> {
     // Implementation would aggregate endpoint statistics
     return [];
   }
 
-  private async getTierDistribution(startTime: number, endTime: number): Promise<Record<RateLimitTier, number>> {
+  private async getTierDistribution(_startTime: number, _endTime: number): Promise<Record<RateLimitTier, number>> {
     // Implementation would aggregate tier distribution
     return { free: 0, basic: 0, premium: 0, trusted: 0 };
   }

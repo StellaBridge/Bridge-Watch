@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import Navbar from "./Navbar";
 import { Breadcrumb } from "./Breadcrumb";
+import { ComponentErrorBoundary } from "./ErrorBoundary";
 
 export default function Layout() {
   const { pathname } = useLocation();
@@ -16,7 +17,9 @@ export default function Layout() {
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 focus:outline-none"
       >
         {showBreadcrumbs && <Breadcrumb />}
-        <Outlet />
+        <ComponentErrorBoundary context="PageContent" severity="high">
+          <Outlet />
+        </ComponentErrorBoundary>
       </main>
     </div>
   );

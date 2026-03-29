@@ -1,6 +1,7 @@
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
 import { circuitBreakerQueue } from "../workers/circuitBreaker.worker.js";
+import { getMetricsService } from "./metrics.service.js";
 
 export type AlertType =
   | "price_deviation"
@@ -518,6 +519,14 @@ export class AlertService {
       webhook_delivered: false,
       on_chain_event_id: event.onChainEventId,
     });
+    
+    // Record alert metric
+    const metricsService = getMetricsService();
+    metricsService.alertsTriggered.inc({
+      alert_type: event.alertType,
+      priority: event.priority,
+      bridge_id: 'unknown', // AlertEvent doesn't have bridgeId, could be extracted from metric or rule
+    });
   }
 
   private async markRuleTriggered(ruleId: string, at: Date): Promise<void> {
@@ -570,7 +579,7 @@ export class AlertService {
 
   private async triggerCircuitBreaker(
     event: AlertEvent,
-    rule: AlertRule
+    _rule: AlertRule
   ): Promise<void> {
     // Map alert types to circuit breaker trigger data
     const severity = event.priority === "critical" ? "high" :

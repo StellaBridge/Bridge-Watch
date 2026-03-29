@@ -1,0 +1,92 @@
+# Alertmanager Configuration for Stellar Bridge Watch
+
+global:
+  # The smarthost and SMTP sender used for mail notifications.
+  smtp_smarthost: "smtp.example.com:587"
+  smtp_from: "alerts@stellar-bridge-watch.com"
+  smtp_auth_username: "alerts@stellar-bridge-watch.com"
+  smtp_auth_password: "password"
+
+# The root route on which each incoming alert enters.
+route:
+  # The labels by which incoming alerts are grouped together.
+  group_by: ["alertname", "bridge_id", "priority"]
+
+  # When a new group of alerts is created by an incoming alert, wait at
+  # least 'group_wait' to send the initial notification.
+  group_wait: 10s
+
+  # When the first notification was sent, wait 'group_interval' to send a batch
+  # of new alerts that started firing for that group.
+  group_interval: 10s
+
+  # If an alert has successfully been sent, wait 'repeat_interval' to
+  # resend them.
+  repeat_interval: 3h
+
+  # A default receiver
+  receiver: "team-notifications"
+
+  # Child routes
+  routes:
+    # Critical alerts go to PagerDuty
+    - match:
+        severity: critical
+      receiver: "pagerduty"
+      continue: true
+
+    # Bridge health alerts
+    - match:
+        alertname: LowBridgeHealth
+      receiver: "bridge-team"
+      continue: true
+
+    # Database alerts
+    - match_re:
+        alertname: "(HighDatabaseLatency|DatabaseConnectionPoolExhausted)"
+      receiver: "database-team"
+
+# Inhibition rules allow to mute a set of alerts given that another alert is firing.
+inhibit_rules:
+  # Inhibit low priority alerts if critical alert is firing
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["bridge_id"]
+
+receivers:
+  # Default notification channel
+  - name: "team-notifications"
+    slack_configs:
+      - api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+        channel: "#alerts"
+        title: "Stellar Bridge Watch Alert"
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+
+    email_configs:
+      - to: "team@stellar-bridge-watch.com"
+        headers:
+          Subject: "[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}"
+
+  # PagerDuty for critical alerts
+  - name: "pagerduty"
+    pagerduty_configs:
+      - service_key: "YOUR_PAGERDUTY_SERVICE_KEY"
+        description: "{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}"
+
+  # Bridge team notifications
+  - name: "bridge-team"
+    slack_configs:
+      - api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+        channel: "#bridge-monitoring"
+        title: "Bridge Health Alert"
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'
+
+  # Database team notifications
+  - name: "database-team"
+    slack_configs:
+      - api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+        channel: "#database-alerts"
+        title: "Database Alert"
+        text: '{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}'

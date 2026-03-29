@@ -1,0 +1,244 @@
+groups:
+  - name: stellar_bridge_watch_alerts
+    interval: 30s
+    rules:
+      # HTTP/API Alerts
+      - alert: HighHTTPErrorRate
+        expr: |
+          rate(http_requests_total{status_code=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High HTTP 5xx error rate detected"
+          description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      - alert: HighHTTPLatency
+        expr: |
+          histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High HTTP request latency (p95)"
+          description: "95th percentile latency is {{ $value }}s (threshold: 2s)"
+
+      - alert: TooManyActiveConnections
+        expr: |
+          http_active_connections > 1000
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "Too many active HTTP connections"
+          description: "Active connections: {{ $value }} (threshold: 1000)"
+
+      # Database Alerts
+      - alert: HighDatabaseLatency
+        expr: |
+          histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High database query latency"
+          description: "95th percentile query latency is {{ $value }}s (threshold: 1s)"
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          db_connections_idle < 2
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Only {{ $value }} idle connections remaining"
+
+      - alert: HighDatabaseErrorRate
+        expr: |
+          rate(db_query_errors_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "High database error rate"
+          description: "Database error rate: {{ $value | humanize }} errors/sec"
+
+      # Bridge Monitoring Alerts
+      - alert: LowBridgeHealth
+        expr: |
+          bridge_health_score < 80
+        for: 10m
+        labels:
+          severity: critical
+          component: bridge
+        annotations:
+          summary: "Bridge {{ $labels.bridge_name }} health score is low"
+          description: "Health score: {{ $value }} (threshold: 80)"
+
+      - alert: BridgeVerificationFailureRate
+        expr: |
+          rate(bridge_verification_failure_total[5m]) / rate(bridge_verifications_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: bridge
+        annotations:
+          summary: "High bridge verification failure rate"
+          description: "Failure rate: {{ $value | humanizePercentage }} for {{ $labels.bridge_name }}"
+
+      - alert: NoBridgeVerifications
+        expr: |
+          rate(bridge_verifications_total[10m]) == 0
+        for: 15m
+        labels:
+          severity: critical
+          component: bridge
+        annotations:
+          summary: "No bridge verifications in the last 15 minutes"
+          description: "Bridge verification job may be stuck or failing"
+
+      - alert: CircuitBreakerTripped
+        expr: |
+          increase(circuit_breaker_trips_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: bridge
+        annotations:
+          summary: "Circuit breaker tripped for {{ $labels.bridge_id }}"
+          description: "Reason: {{ $labels.reason }}"
+
+      # Queue/Job Alerts
+      - alert: HighQueueJobFailureRate
+        expr: |
+          rate(queue_jobs_failed_total[5m]) / rate(queue_jobs_completed_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "High queue job failure rate"
+          description: "Failure rate: {{ $value | humanizePercentage }} for {{ $labels.job_type }}"
+
+      - alert: QueueJobsStuck
+        expr: |
+          queue_jobs_waiting > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "Many jobs waiting in queue"
+          description: "{{ $value }} jobs waiting for {{ $labels.job_type }}"
+
+      - alert: LongRunningJob
+        expr: |
+          histogram_quantile(0.95, rate(queue_job_duration_seconds_bucket[5m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+          component: queue
+        annotations:
+          summary: "Jobs taking too long to complete"
+          description: "95th percentile duration: {{ $value }}s for {{ $labels.job_type }}"
+
+      # Cache Alerts
+      - alert: LowCacheHitRate
+        expr: |
+          rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m])) < 0.7
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Hit rate: {{ $value | humanizePercentage }} for {{ $labels.cache_key }}"
+
+      # System Resource Alerts
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes / 1024 / 1024 / 1024 > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage: {{ $value | humanize }}GB (threshold: 2GB)"
+
+      - alert: HighCPUUsage
+        expr: |
+          rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage: {{ $value | humanizePercentage }}"
+
+      - alert: EventLoopLag
+        expr: |
+          nodejs_eventloop_lag_seconds > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High Node.js event loop lag"
+          description: "Event loop lag: {{ $value }}s (threshold: 0.1s)"
+
+      # Alert System Alerts
+      - alert: HighAlertRate
+        expr: |
+          rate(alerts_triggered_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: alerts
+        annotations:
+          summary: "High rate of alerts being triggered"
+          description: "Alert rate: {{ $value | humanize }} alerts/sec"
+
+      # Rate Limiting Alerts
+      - alert: HighRateLimitHitRate
+        expr: |
+          rate(api_key_rate_limit_hits_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High rate limit hit rate"
+          description: "Rate limit hits: {{ $value | humanize }}/sec for tier {{ $labels.tier }}"
+
+      # WebSocket Alerts
+      - alert: TooManyWebSocketConnections
+        expr: |
+          websocket_connections_active > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "Too many active WebSocket connections"
+          description: "Active connections: {{ $value }} (threshold: 10000)"
+
+      # Service Health
+      - alert: ServiceDown
+        expr: |
+          up{job="stellar-bridge-watch"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Stellar Bridge Watch service is down"
+          description: "The service has been down for more than 1 minute"

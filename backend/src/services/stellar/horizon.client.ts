@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Stellar Horizon API client wrapper
  *
@@ -75,8 +74,8 @@ export interface AccountInfo {
   }>;
   subentryCount: number;
   lastModifiedLedger: number;
-  thresholds: StellarSdk.Horizon.AccountThresholds;
-  flags: StellarSdk.Horizon.Flags;
+  thresholds: any;
+  flags: any;
 }
 
 export interface AssetInfo {
@@ -595,10 +594,10 @@ export class HorizonClient {
       .payments()
       .cursor(cursor)
       .stream({
-        onmessage: (payment: StellarSdk.Horizon.ServerApi.PaymentOperationRecord) => {
+        onmessage: ((payment: StellarSdk.Horizon.ServerApi.PaymentOperationRecord) => {
           onPayment(payment);
-        },
-        onerror: (err: Error) => {
+        }) as any,
+        onerror: ((err: Error) => {
           const wrapped = new HorizonError(
             `Payment stream error: ${(err as Error).message}`,
             "STREAM_ERROR",
@@ -606,7 +605,7 @@ export class HorizonClient {
           );
           logger.error({ err }, "Horizon payment stream error");
           onError?.(wrapped);
-        },
+        }) as any,
       });
 
     const closer = () => {
@@ -636,10 +635,10 @@ export class HorizonClient {
       .forAccount(accountId)
       .cursor(cursor)
       .stream({
-        onmessage: (tx: StellarSdk.Horizon.ServerApi.TransactionRecord) => {
+        onmessage: ((tx: StellarSdk.Horizon.ServerApi.TransactionRecord) => {
           onTransaction(tx);
-        },
-        onerror: (err: Error) => {
+        }) as any,
+        onerror: ((err: Error) => {
           const wrapped = new HorizonError(
             `Transaction stream error for ${accountId}: ${(err as Error).message}`,
             "STREAM_ERROR",
@@ -647,7 +646,7 @@ export class HorizonClient {
           );
           logger.error({ accountId, err }, "Horizon transaction stream error");
           onError?.(wrapped);
-        },
+        }) as any,
       });
 
     const closer = () => {
@@ -675,10 +674,10 @@ export class HorizonClient {
       .ledgers()
       .cursor(cursor)
       .stream({
-        onmessage: (ledger: StellarSdk.Horizon.ServerApi.LedgerRecord) => {
+        onmessage: ((ledger: StellarSdk.Horizon.ServerApi.LedgerRecord) => {
           onLedger(ledger);
-        },
-        onerror: (err: Error) => {
+        }) as any,
+        onerror: ((err: Error) => {
           const wrapped = new HorizonError(
             `Ledger stream error: ${(err as Error).message}`,
             "STREAM_ERROR",
@@ -686,7 +685,7 @@ export class HorizonClient {
           );
           logger.error({ err }, "Horizon ledger stream error");
           onError?.(wrapped);
-        },
+        }) as any,
       });
 
     const closer = () => {
@@ -770,8 +769,8 @@ function mapOrderbook(
   raw: StellarSdk.Horizon.ServerApi.OrderbookRecord,
 ): OrderbookInfo {
   return {
-    base: raw.base as OrderbookInfo["base"],
-    counter: raw.counter as OrderbookInfo["counter"],
+    base: (raw.base as unknown) as OrderbookInfo["base"],
+    counter: (raw.counter as unknown) as OrderbookInfo["counter"],
     bids: raw.bids.map((b: { price: string; amount: string }) => ({ price: b.price, amount: b.amount })),
     asks: raw.asks.map((a: { price: string; amount: string }) => ({ price: a.price, amount: a.amount })),
   };
@@ -781,15 +780,15 @@ function mapLiquidityPool(
   raw: StellarSdk.Horizon.ServerApi.LiquidityPoolRecord,
 ): LiquidityPoolInfo {
   return {
-    id: raw.id,
-    feeBp: raw.fee_bp,
-    totalTrustlines: raw.total_trustlines,
-    totalShares: raw.total_shares,
+    id: raw.id as string,
+    feeBp: Number((raw.fee_bp as unknown)),
+    totalTrustlines: Number((raw.total_trustlines as unknown)),
+    totalShares: raw.total_shares as string,
     reserves: raw.reserves.map((r: { asset: string; amount: string }) => ({
       asset: r.asset,
       amount: r.amount,
     })),
-    lastModifiedLedger: raw.last_modified_ledger,
+    lastModifiedLedger: (raw as any).last_modified_ledger || 0,
   };
 }
 
@@ -797,16 +796,16 @@ function mapTransaction(
   raw: StellarSdk.Horizon.ServerApi.TransactionRecord,
 ): TransactionInfo {
   return {
-    id: raw.id,
-    hash: raw.hash,
-    ledger: raw.ledger,
-    createdAt: raw.created_at,
-    sourceAccount: raw.source_account,
-    fee: raw.fee_charged,
-    operationCount: raw.operation_count,
-    successful: raw.successful,
-    memo: raw.memo,
-    memoType: raw.memo_type,
+    id: raw.id as string,
+    hash: raw.hash as unknown as string,
+    ledger: Number((raw as any).ledger),
+    createdAt: raw.created_at as string,
+    sourceAccount: raw.source_account as string,
+    fee: (raw.fee_charged as unknown as string),
+    operationCount: raw.operation_count as number,
+    successful: raw.successful as boolean,
+    memo: raw.memo as string,
+    memoType: String((raw.memo_type as unknown)),
   };
 }
 

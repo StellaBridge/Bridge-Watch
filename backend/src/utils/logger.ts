@@ -1,3 +1,4 @@
+import os from "os";
 import pino from "pino";
 import { config } from "../config/index.js";
 
@@ -112,7 +113,7 @@ const baseConfig = {
     service: 'bridge-watch-api',
     version: process.env.npm_package_version || '0.1.0',
     environment: config.NODE_ENV,
-    hostname: require('os').hostname(),
+    hostname: os.hostname(),
     pid: process.pid,
   },
 };

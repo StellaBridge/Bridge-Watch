@@ -17,6 +17,8 @@ import { healthRoutes } from "./health.js";
 import { rateLimitAdminRoutes } from "./rateLimitAdmin.js";
 import { tracingAdminRoutes } from "./tracingAdmin.js";
 import { validationAdminRoutes } from "./validationAdmin.js";
+import { metricsRoutes } from "./metrics.js";
+
 export async function registerRoutes(server: FastifyInstance) {
   server.register(assetsRoutes, { prefix: "/api/v1/assets" });
   server.register(bridgesRoutes, { prefix: "/api/v1/bridges" });
@@ -36,4 +38,5 @@ export async function registerRoutes(server: FastifyInstance) {
   server.register(rateLimitAdminRoutes, { prefix: "/api/v1/admin/rate-limit" });
   server.register(tracingAdminRoutes, { prefix: "/api/v1/admin/tracing" });
   server.register(validationAdminRoutes, { prefix: "/api/v1/admin/validation" });
+  server.register(metricsRoutes, { prefix: "/metrics" });
 }

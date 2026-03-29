@@ -149,17 +149,6 @@ const envSchema = z.object({
   VALIDATION_ERROR_THRESHOLD: z.coerce.number().default(0.1), // 10% error rate threshold
   VALIDATION_WARNING_THRESHOLD: z.coerce.number().default(0.3), // 30% warning threshold
   VALIDATION_DATA_QUALITY_THRESHOLD: z.coerce.number().default(70), // 70% quality score threshold
-
-  // Backup Configuration
-  BACKUP_DIR: z.string().default("./backups"),
-  BACKUP_RETENTION_DAYS: z.coerce.number().default(30),
-  BACKUP_ENCRYPTION_KEY: z.string().optional(),
-  BACKUP_VERIFY: z.string().default("true"),
-  BACKUP_COMPRESSION: z.string().default("true"),
-  BACKUP_S3_BUCKET: z.string().optional(),
-  BACKUP_S3_REGION: z.string().default("us-east-1"),
-  BACKUP_S3_ACCESS_KEY: z.string().optional(),
-  BACKUP_S3_SECRET_KEY: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

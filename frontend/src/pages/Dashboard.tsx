@@ -5,6 +5,7 @@ import { useBridges } from "../hooks/useBridges";
 import { useWebSocket } from "../hooks/useWebSocket";
 import HealthScoreCard from "../components/HealthScoreCard";
 import BridgeStatusCard from "../components/BridgeStatusCard";
+import { QuickStatsWidget } from "../components/QuickStats";
 import OnboardingDialog from "../components/OnboardingDialog";
 import {
   SkeletonCard,
@@ -141,6 +142,12 @@ export default function Dashboard() {
           </button>
         )}
       </header>
+
+      <QuickStatsWidget
+        assets={assetsData ?? []}
+        bridges={bridgesData?.bridges ?? []}
+        isLoading={assetsLoading || bridgesLoading}
+      />
 
       <section aria-labelledby="asset-health-heading">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">

@@ -128,7 +128,7 @@ export class AnalyticsService {
             .avg("overall_score as avg")
             .where("time", ">=", knex.raw("NOW() - INTERVAL '1 hour'"))
             .first(),
-        ]);
+        ] as any);
 
         const stats: ProtocolStats = {
           totalValueLocked: tvlResult?.total || "0",
@@ -186,7 +186,7 @@ export class AnalyticsService {
                 .where("stat_date", ">=", knex.raw("CURRENT_DATE - INTERVAL '2 days'"))
                 .where("stat_date", "<", knex.raw("CURRENT_DATE - INTERVAL '1 day'"))
                 .first(),
-            ]);
+            ] as any);
 
             const currentVolume = parseFloat(volumeStats?.volume_24h || "0");
             const prevVolume = parseFloat(previousVolume?.total || "0") + parseFloat(previousVolume?.total_out || "0");
@@ -383,7 +383,7 @@ export class AnalyticsService {
         let previousValue = 0;
 
         switch (metric) {
-          case "health_score":
+          case "health_score": {
             if (!symbol) throw new Error("Symbol required for health_score metric");
             const [current, previous] = await Promise.all([
               knex("health_scores")
@@ -401,8 +401,9 @@ export class AnalyticsService {
             currentValue = Number(current?.value || 0);
             previousValue = Number(previous?.value || 0);
             break;
+          }
 
-          case "tvl":
+          case "tvl": {
             if (bridgeName) {
               const bridge = await knex("bridges")
                 .select("total_value_locked")
@@ -420,8 +421,9 @@ export class AnalyticsService {
               previousValue = currentValue * 0.95;
             }
             break;
+          }
 
-          case "volume":
+          case "volume": {
             const volumeQuery = knex("bridge_volume_stats")
               .sum("inflow_amount as inflow")
               .sum("outflow_amount as outflow");
@@ -440,6 +442,7 @@ export class AnalyticsService {
             currentValue = parseFloat(currentVol?.inflow || "0") + parseFloat(currentVol?.outflow || "0");
             previousValue = parseFloat(previousVol?.inflow || "0") + parseFloat(previousVol?.outflow || "0");
             break;
+          }
 
           default:
             throw new Error(`Unknown metric: ${metric}`);

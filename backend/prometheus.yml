@@ -1,0 +1,69 @@
+# Prometheus Configuration for Stellar Bridge Watch
+
+global:
+  scrape_interval: 15s # How frequently to scrape targets
+  evaluation_interval: 15s # How frequently to evaluate rules
+
+  # Attach these labels to any time series or alerts when communicating with
+  # external systems (federation, remote storage, Alertmanager).
+  external_labels:
+    monitor: "stellar-bridge-watch"
+    environment: "production"
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "prometheus-alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Stellar Bridge Watch Application
+  - job_name: "stellar-bridge-watch"
+
+    # Override the global default and scrape targets from this job every 15 seconds.
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+    # Metrics path defaults to '/metrics'
+    metrics_path: "/metrics"
+
+    # Scheme defaults to 'http'.
+    scheme: http
+
+    static_configs:
+      - targets: ["localhost:3001"]
+        labels:
+          service: "backend"
+          component: "api"
+
+    # Optional: Add relabeling rules
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: "stellar-bridge-watch-backend"
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Node Exporter (optional - for system metrics)
+  # - job_name: 'node'
+  #   static_configs:
+  #     - targets: ['localhost:9100']
+
+  # PostgreSQL Exporter (optional - for database metrics)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['localhost:9187']
+
+  # Redis Exporter (optional - for cache metrics)
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['localhost:9121']

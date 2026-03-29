@@ -1,0 +1,151 @@
+name: Load Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Load test profile"
+        type: choice
+        required: true
+        default: smoke
+        options:
+          - smoke
+          - ramp
+          - spike
+          - endurance
+      base_url:
+        description: "Optional external base URL (if empty, workflow starts local backend)"
+        required: false
+        default: ""
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - backend/**
+      - load-tests/**
+      - .github/workflows/load-testing.yml
+
+jobs:
+  load-test:
+    name: k6 Load Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg15
+        env:
+          POSTGRES_DB: bridge_watch_test
+          POSTGRES_USER: bridge_watch
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install backend dependencies
+        if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
+        working-directory: backend
+        run: npm ci
+
+      - name: Build backend
+        if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
+        working-directory: backend
+        run: npm run build
+
+      - name: Start backend
+        if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
+        working-directory: backend
+        run: |
+          NODE_ENV=test \
+          PORT=3001 \
+          POSTGRES_HOST=localhost \
+          POSTGRES_PORT=5432 \
+          POSTGRES_DB=bridge_watch_test \
+          POSTGRES_USER=bridge_watch \
+          POSTGRES_PASSWORD=test_password \
+          REDIS_HOST=localhost \
+          REDIS_PORT=6379 \
+          node dist/index.js > ../load-tests/results/backend.log 2>&1 &
+          echo $! > ../load-tests/results/backend.pid
+
+      - name: Wait for backend health
+        if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3001/health > /dev/null; then
+              echo "Backend is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend failed to become healthy"
+          exit 1
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run k6 load test
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            export PROFILE="smoke"
+            export BASE_URL="http://127.0.0.1:3001"
+          else
+            export PROFILE="${{ github.event.inputs.profile }}"
+            if [ -n "${{ github.event.inputs.base_url }}" ]; then
+              export BASE_URL="${{ github.event.inputs.base_url }}"
+            else
+              export BASE_URL="http://127.0.0.1:3001"
+            fi
+          fi
+          export SUMMARY_JSON="load-tests/results/summary.json"
+          export SUMMARY_TXT="load-tests/results/summary.txt"
+          k6 run load-tests/scenarios/api-load.js
+
+      - name: Generate load report
+        run: |
+          node load-tests/scripts/generate-report.mjs \
+            load-tests/results/summary.json \
+            load-tests/results/report.md
+
+      - name: Capture backend process snapshot
+        if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
+        run: |
+          ps -o pid,%cpu,%mem,rss,etime,command -p "$(cat load-tests/results/backend.pid)" > load-tests/results/backend-process.txt || true
+
+      - name: Upload load test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results
+          path: |
+            load-tests/results/summary.json
+            load-tests/results/summary.txt
+            load-tests/results/report.md
+            load-tests/results/backend.log
+            load-tests/results/backend-process.txt
+
+      - name: Stop backend
+        if: ${{ always() && (github.event_name == 'pull_request' || github.event.inputs.base_url == '') }}
+        run: |
+          if [ -f load-tests/results/backend.pid ]; then
+            kill "$(cat load-tests/results/backend.pid)" || true
+          fi
