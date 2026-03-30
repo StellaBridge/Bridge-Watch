@@ -1,4 +1,4 @@
-import { BaseChannel } from "./index.js";
+import { BaseChannel } from "./base.channel.js";
 import { AlertService } from "../../../services/alert.service.js";
 import { logger } from "../../../utils/logger.js";
 import type { IBroadcaster, AlertTriggeredMessage } from "../types.js";

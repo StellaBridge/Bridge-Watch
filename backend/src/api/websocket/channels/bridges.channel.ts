@@ -1,4 +1,4 @@
-import { BaseChannel } from "./index.js";
+import { BaseChannel } from "./base.channel.js";
 import { BridgeService } from "../../../services/bridge.service.js";
 import { logger } from "../../../utils/logger.js";
 import type { IBroadcaster, BridgeUpdateMessage } from "../types.js";

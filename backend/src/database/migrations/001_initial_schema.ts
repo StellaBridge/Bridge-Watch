@@ -1,8 +1,17 @@
 import type { Knex } from "knex";
 
+// TimescaleDB operations (CREATE EXTENSION, create_hypertable) must run outside
+// of transaction blocks in some environments. Setting transaction: false ensures
+// Knex does not wrap this migration in an automatic transaction.
+export const config = { transaction: false };
+
 export async function up(knex: Knex): Promise<void> {
-  // Enable TimescaleDB extension
-  await knex.raw("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE");
+  // Enable TimescaleDB extension (gracefully skip if unavailable)
+  try {
+    await knex.raw("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE");
+  } catch {
+    // TimescaleDB may not be installed; tables will be created as regular tables
+  }
 
   // Monitored assets table
   await knex.schema.createTable("assets", (table) => {
@@ -40,10 +49,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(["symbol", "time"]);
   });
 
-  // Convert prices to TimescaleDB hypertable
-  await knex.raw(
-    "SELECT create_hypertable('prices', 'time', if_not_exists => TRUE)"
-  );
+  // Convert prices to TimescaleDB hypertable (gracefully skip if TimescaleDB unavailable)
+  try {
+    await knex.raw(
+      "SELECT create_hypertable('prices', 'time', if_not_exists => TRUE)"
+    );
+  } catch {
+    // Table remains as a regular PostgreSQL table
+  }
 
   // Health scores time-series table (hypertable)
   await knex.schema.createTable("health_scores", (table) => {
@@ -58,10 +71,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(["symbol", "time"]);
   });
 
-  // Convert health_scores to TimescaleDB hypertable
-  await knex.raw(
-    "SELECT create_hypertable('health_scores', 'time', if_not_exists => TRUE)"
-  );
+  // Convert health_scores to TimescaleDB hypertable (gracefully skip if TimescaleDB unavailable)
+  try {
+    await knex.raw(
+      "SELECT create_hypertable('health_scores', 'time', if_not_exists => TRUE)"
+    );
+  } catch {
+    // Table remains as a regular PostgreSQL table
+  }
 }
 
 export async function down(knex: Knex): Promise<void> {

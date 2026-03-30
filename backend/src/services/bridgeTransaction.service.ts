@@ -109,7 +109,7 @@ export class BridgeTransactionService {
       db("bridge_transactions")
         .where({ bridge_name: bridgeName, status: "confirmed" })
         .select(db.raw("AVG(EXTRACT(EPOCH FROM (confirmed_at - submitted_at))) as avg"))
-        .first(),
+        .first() as unknown as Promise<{ avg: string | null } | undefined>,
     ]);
 
     return {

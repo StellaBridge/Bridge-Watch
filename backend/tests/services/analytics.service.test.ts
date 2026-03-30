@@ -2,6 +2,50 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { AnalyticsService } from "../../src/services/analytics.service.js";
 import { CacheService } from "../../src/utils/cache.js";
 
+const createQueryBuilder = (rows: any[] = []) => {
+  const builder: any = {
+    select: () => builder,
+    sum: () => builder,
+    avg: () => builder,
+    count: () => builder,
+    countDistinct: () => builder,
+    where: () => builder,
+    orderBy: () => builder,
+    groupBy: () => builder,
+    limit: () => builder,
+    first: async () => rows[0] ?? {},
+    clone: () => builder,
+    then: (resolve: (value: any) => any) => resolve(rows),
+  };
+  return builder;
+};
+
+const mockKnex = vi.hoisted(() =>
+  Object.assign(
+    (table: string) => {
+      switch (table) {
+        case "bridges":
+        case "assets":
+        case "bridge_volume_stats":
+        case "health_scores":
+        case "liquidity_snapshots":
+          return createQueryBuilder([]);
+        default:
+          return createQueryBuilder([]);
+      }
+    },
+    {
+      raw: vi.fn(() => ({})),
+    }
+  )
+);
+
+vi.mock("../../src/database/connection.js", () => {
+  return {
+    getDatabase: () => mockKnex,
+  };
+});
+
 // We mock CacheService so we don't have to worry about Redis internals here.
 vi.mock("../../src/utils/cache.js", () => {
   return {

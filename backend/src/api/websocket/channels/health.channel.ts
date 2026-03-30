@@ -1,4 +1,4 @@
-import { BaseChannel } from "./index.js";
+import { BaseChannel } from "./base.channel.js";
 import { HealthService } from "../../../services/health.service.js";
 import { SUPPORTED_ASSETS } from "../../../config/index.js";
 import { logger } from "../../../utils/logger.js";

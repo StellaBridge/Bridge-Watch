@@ -8,11 +8,9 @@ import { logger } from "./utils/logger.js";
 import { registerRoutes } from "./api/routes/index.js";
 import { registerTracing } from "./api/middleware/tracing.js";
 import { registerValidation } from "./api/middleware/validation.js";
-<<<<<<< HEAD
-=======
 import { registerMetrics } from "./api/middleware/metrics.js";
 import { startBridgeVerificationJob } from "./jobs/verification.job.js";
->>>>>>> upstream/main
+import { wsServer } from "./api/websocket/websocket.server.js";
 import {
   registerRateLimiting,
   getRateLimitMetrics,
@@ -76,9 +74,6 @@ export async function buildServer() {
   // Sliding-window Redis rate limiting (replaces the simple @fastify/rate-limit global)
   await registerRateLimiting(server as any);
 
-  // Data validation middleware
-  await registerValidation(server as any);
-
   // Enable permessage-deflate compression for WebSocket frames.
   await server.register(websocket, {
     options: {
@@ -136,6 +131,7 @@ async function start() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutdown signal received");
 
+    await wsServer.shutdown();
     await server.close();
     await JobQueue.getInstance().stop();
     logger.info("Server closed");

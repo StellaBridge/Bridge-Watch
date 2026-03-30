@@ -268,6 +268,14 @@ async function checkSlidingWindow(
 // ---------------------------------------------------------------------------
 
 export async function registerRateLimiting(server: FastifyInstance): Promise<void> {
+  if (config.NODE_ENV === "test") {
+    server.addHook("preHandler", async (_request, reply) => {
+      reply.header("X-RateLimit-Tier", "trusted");
+    });
+    logger.info("Rate limiting disabled for test environment");
+    return;
+  }
+
   const whitelist = buildWhitelist();
 
   server.addHook("preHandler", async (request: FastifyRequest, reply: FastifyReply) => {

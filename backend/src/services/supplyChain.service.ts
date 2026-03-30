@@ -125,38 +125,38 @@ function simulateChainMetrics(chainId: string): {
   healthScore: number;
   assets: AssetSupply[];
 } {
-  const base: Record<string, { total: number; locked: number; health: number; assets: AssetSupply[] }> = {
-    stellar:   { total: 4_200_000_000, locked: 1_800_000_000, health: 94, assets: [
+  const base: Record<string, { totalSupplyUsd: number; lockedSupplyUsd: number; healthScore: number; assets: AssetSupply[] }> = {
+    stellar:   { totalSupplyUsd: 4_200_000_000, lockedSupplyUsd: 1_800_000_000, healthScore: 94, assets: [
       { symbol: "USDC", lockedAmount: 950_000_000, mintedAmount: 0 },
       { symbol: "USDT", lockedAmount: 620_000_000, mintedAmount: 0 },
       { symbol: "WBTC", lockedAmount: 180_000_000, mintedAmount: 0 },
       { symbol: "WETH", lockedAmount: 50_000_000, mintedAmount: 0 },
     ]},
-    ethereum:  { total: 12_000_000_000, locked: 3_200_000_000, health: 98, assets: [
+    ethereum:  { totalSupplyUsd: 12_000_000_000, lockedSupplyUsd: 3_200_000_000, healthScore: 98, assets: [
       { symbol: "USDC", lockedAmount: 1_800_000_000, mintedAmount: 950_000_000 },
       { symbol: "USDT", lockedAmount: 900_000_000, mintedAmount: 620_000_000 },
       { symbol: "WBTC", lockedAmount: 350_000_000, mintedAmount: 180_000_000 },
       { symbol: "WETH", lockedAmount: 150_000_000, mintedAmount: 50_000_000 },
     ]},
-    polygon:   { total: 1_900_000_000, locked: 420_000_000, health: 91, assets: [
+    polygon:   { totalSupplyUsd: 1_900_000_000, lockedSupplyUsd: 420_000_000, healthScore: 91, assets: [
       { symbol: "USDC", lockedAmount: 280_000_000, mintedAmount: 200_000_000 },
       { symbol: "USDT", lockedAmount: 140_000_000, mintedAmount: 100_000_000 },
     ]},
-    bsc:       { total: 2_100_000_000, locked: 540_000_000, health: 87, assets: [
+    bsc:       { totalSupplyUsd: 2_100_000_000, lockedSupplyUsd: 540_000_000, healthScore: 87, assets: [
       { symbol: "USDC", lockedAmount: 210_000_000, mintedAmount: 0 },
       { symbol: "USDT", lockedAmount: 330_000_000, mintedAmount: 0 },
     ]},
-    avalanche: { total: 980_000_000, locked: 280_000_000, health: 89, assets: [
+    avalanche: { totalSupplyUsd: 980_000_000, lockedSupplyUsd: 280_000_000, healthScore: 89, assets: [
       { symbol: "USDC", lockedAmount: 180_000_000, mintedAmount: 0 },
       { symbol: "WBTC", lockedAmount: 60_000_000, mintedAmount: 0 },
       { symbol: "WETH", lockedAmount: 40_000_000, mintedAmount: 0 },
     ]},
-    tron:      { total: 3_500_000_000, locked: 1_100_000_000, health: 82, assets: [
+    tron:      { totalSupplyUsd: 3_500_000_000, lockedSupplyUsd: 1_100_000_000, healthScore: 82, assets: [
       { symbol: "USDT", lockedAmount: 900_000_000, mintedAmount: 0 },
       { symbol: "USDC", lockedAmount: 200_000_000, mintedAmount: 0 },
     ]},
   };
-  return base[chainId] ?? { total: 0, locked: 0, health: 0, assets: [] };
+  return base[chainId] ?? { totalSupplyUsd: 0, lockedSupplyUsd: 0, healthScore: 0, assets: [] };
 }
 
 function simulateBridgeMetrics(bridgeId: string): {
@@ -164,16 +164,16 @@ function simulateBridgeMetrics(bridgeId: string): {
   status: "healthy" | "degraded" | "offline";
   latencyMs: number;
 } {
-  const base: Record<string, { vol: number; status: "healthy" | "degraded" | "offline"; latency: number }> = {
-    "stellar-ethereum-allbridge":       { vol: 18_500_000, status: "healthy",  latency: 180 },
-    "stellar-polygon-allbridge":        { vol: 5_200_000,  status: "healthy",  latency: 210 },
-    "stellar-bsc-allbridge":            { vol: 7_800_000,  status: "degraded", latency: 450 },
-    "stellar-tron-ultrastellar":        { vol: 12_000_000, status: "healthy",  latency: 120 },
-    "ethereum-polygon-pos":             { vol: 45_000_000, status: "healthy",  latency: 240 },
-    "ethereum-avalanche-avalanche-bridge":{ vol: 22_000_000, status: "healthy", latency: 195 },
-    "stellar-avalanche-allbridge":      { vol: 3_100_000,  status: "offline",  latency: 0 },
+  const base: Record<string, { volume24hUsd: number; status: "healthy" | "degraded" | "offline"; latencyMs: number }> = {
+    "stellar-ethereum-allbridge":       { volume24hUsd: 18_500_000, status: "healthy",  latencyMs: 180 },
+    "stellar-polygon-allbridge":        { volume24hUsd: 5_200_000,  status: "healthy",  latencyMs: 210 },
+    "stellar-bsc-allbridge":            { volume24hUsd: 7_800_000,  status: "degraded", latencyMs: 450 },
+    "stellar-tron-ultrastellar":        { volume24hUsd: 12_000_000, status: "healthy",  latencyMs: 120 },
+    "ethereum-polygon-pos":             { volume24hUsd: 45_000_000, status: "healthy",  latencyMs: 240 },
+    "ethereum-avalanche-avalanche-bridge":{ volume24hUsd: 22_000_000, status: "healthy", latencyMs: 195 },
+    "stellar-avalanche-allbridge":      { volume24hUsd: 3_100_000,  status: "offline",  latencyMs: 0 },
   };
-  return base[bridgeId] ?? { vol: 0, status: "offline", latency: 0 };
+  return base[bridgeId] ?? { volume24hUsd: 0, status: "offline", latencyMs: 0 };
 }
 
 // ---------------------------------------------------------------------------

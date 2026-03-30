@@ -711,10 +711,26 @@ export class ValidationService {
         };
       }
 
-      // Schema validation
+      // Data normalization (runs first so normalized data is schema-validated)
+      const normalizer = this.normalizers[dataType];
+      if (normalizer) {
+        const beforeNormalization = { ...normalizedData };
+        normalizedData = normalizer(normalizedData);
+        
+        // Track all fields that the normalizer processed (existed in original input)
+        Object.keys(normalizedData).forEach(key => {
+          if (key in beforeNormalization) {
+            normalizedFields.push(key);
+          }
+        });
+        
+        rulesApplied.push("normalization");
+      }
+
+      // Schema validation (runs on normalized data)
       const schema = this.schemas[dataType];
       if (schema) {
-        const result = schema.safeParse(data);
+        const result = schema.safeParse(normalizedData);
         if (!result.success) {
           result.error.errors.forEach((error) => {
             errors.push({
@@ -730,22 +746,6 @@ export class ValidationService {
           normalizedData = result.data;
           rulesApplied.push("schema_validation");
         }
-      }
-
-      // Data normalization
-      const normalizer = this.normalizers[dataType];
-      if (normalizer) {
-        const beforeNormalization = { ...normalizedData };
-        normalizedData = normalizer(normalizedData);
-        
-        // Track normalized fields
-        Object.keys(normalizedData).forEach(key => {
-          if (beforeNormalization[key] !== normalizedData[key]) {
-            normalizedFields.push(key);
-          }
-        });
-        
-        rulesApplied.push("normalization");
       }
 
       // Custom validation rules

@@ -76,7 +76,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
         working-directory: backend
         run: |
-          NODE_ENV=test \
+          NODE_ENV=development \
           PORT=3001 \
           POSTGRES_HOST=localhost \
           POSTGRES_PORT=5432 \
@@ -92,7 +92,7 @@ jobs:
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
         run: |
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:3001/health > /dev/null; then
+            if curl -fsS http://127.0.0.1:3001/api/v1/health > /dev/null; then
               echo "Backend is healthy"
               exit 0
             fi

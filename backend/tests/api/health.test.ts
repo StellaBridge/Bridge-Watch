@@ -18,7 +18,7 @@ describe("Health Check Endpoints", () => {
     it("should return simple health status", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/",
+        url: "/api/v1/health/",
       });
 
       expect(response.statusCode).toBe(200);
@@ -36,7 +36,7 @@ describe("Health Check Endpoints", () => {
     it("should return liveness status", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/live",
+        url: "/api/v1/health/live",
       });
 
       expect(response.statusCode).toBe(200);
@@ -52,7 +52,7 @@ describe("Health Check Endpoints", () => {
     it("should return readiness status", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/ready",
+        url: "/api/v1/health/ready",
       });
 
       expect([200, 503]).toContain(response.statusCode);
@@ -72,7 +72,7 @@ describe("Health Check Endpoints", () => {
     it("should return comprehensive system health", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/detailed",
+        url: "/api/v1/health/detailed",
       });
 
       expect([200, 503]).toContain(response.statusCode);
@@ -118,7 +118,7 @@ describe("Health Check Endpoints", () => {
     it("should return individual component health for database", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/components/database",
+        url: "/api/v1/health/components/database",
       });
 
       expect([200, 503]).toContain(response.statusCode);
@@ -133,7 +133,7 @@ describe("Health Check Endpoints", () => {
     it("should return individual component health for redis", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/components/redis",
+        url: "/api/v1/health/components/redis",
       });
 
       expect([200, 503]).toContain(response.statusCode);
@@ -148,7 +148,7 @@ describe("Health Check Endpoints", () => {
     it("should return individual component health for external-apis", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/components/external-apis",
+        url: "/api/v1/health/components/external-apis",
       });
 
       expect([200, 503]).toContain(response.statusCode);
@@ -163,7 +163,7 @@ describe("Health Check Endpoints", () => {
     it("should return individual component health for system", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/components/system",
+        url: "/api/v1/health/components/system",
       });
 
       expect([200, 503]).toContain(response.statusCode);
@@ -178,7 +178,7 @@ describe("Health Check Endpoints", () => {
     it("should return 404 for invalid component", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/components/invalid",
+        url: "/api/v1/health/components/invalid",
       });
 
       expect(response.statusCode).toBe(404);
@@ -194,7 +194,7 @@ describe("Health Check Endpoints", () => {
     it("should return Prometheus-style metrics", async () => {
       const response = await server.inject({
         method: "GET",
-        url: "/health/metrics",
+        url: "/api/v1/health/metrics",
       });
 
       expect([200, 503]).toContain(response.statusCode);
