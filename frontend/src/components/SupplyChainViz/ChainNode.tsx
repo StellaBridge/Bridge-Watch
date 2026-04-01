@@ -31,7 +31,7 @@ export default function ChainNode({
   onSelect,
   onHover,
 }: Props) {
-  const { x, y, color, label, healthScore, totalSupplyUsd } = node;
+  const { position: { x, y }, color, label, healthScore, totalSupplyUsd } = node;
   const ringRadius = RADIUS + 6;
   const hc = healthColor(healthScore);
   const opacity = isDimmed ? 0.25 : 1;

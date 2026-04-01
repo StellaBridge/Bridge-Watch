@@ -4,36 +4,26 @@ import { getBridges, getBridgeStats } from "../services/api";
 import { wsService } from "../services/websocket";
 import type { Bridge } from "../types";
 
-export function useBridges() {
-  const queryClient = useQueryClient();
+type QueryRefreshOptions = {
+  refetchInterval?: number | false;
+  refetchOnWindowFocus?: boolean;
+};
 
-  useEffect(() => {
-    const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3000/ws";
-    wsService.connect(WS_URL);
-
-    const unsubscribe = wsService.subscribe("bridges", (data: unknown) => {
-      const bridgeData = data as { bridges: Bridge[] };
-      if (bridgeData.bridges) {
-        queryClient.setQueryData(["bridges"], bridgeData);
-      }
-    });
-
-    return () => {
-      unsubscribe();
-      wsService.disconnect();
-    };
-  }, [queryClient]);
-
+export function useBridges(options?: QueryRefreshOptions) {
   return useQuery({
     queryKey: ["bridges"],
     queryFn: getBridges,
+    refetchInterval: options?.refetchInterval,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus,
   });
 }
 
-export function useBridgeStats(bridgeName: string) {
+export function useBridgeStats(bridgeName: string, options?: QueryRefreshOptions) {
   return useQuery({
     queryKey: ["bridge-stats", bridgeName],
     queryFn: () => getBridgeStats(bridgeName),
     enabled: !!bridgeName,
+    refetchInterval: options?.refetchInterval,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus,
   });
 }

@@ -1,20 +1,40 @@
-import { Suspense } from "react";
-import { useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { useAssetsWithHealth } from "../hooks/useAssets";
 import { usePricesForSymbols } from "../hooks/usePrices";
 import { useLocalStorageState } from "../hooks/useLocalStorageState";
+import { useRefreshControls } from "../hooks/useRefreshControls";
+import RefreshControls from "../components/RefreshControls";
 import { SkeletonCard, ErrorBoundary } from "../components/Skeleton";
 
 const MAX_COMPARE_ASSETS = 3;
 
 export default function Analytics() {
-  const { data: assetsData, isLoading, error } = useAssetsWithHealth();
+  const refreshControls = useRefreshControls({
+    viewId: "analytics",
+    targets: [
+      { id: "assets", label: "Assets", queryKey: ["assets-with-health"] },
+      { id: "prices", label: "Prices", queryKey: ["prices"] },
+    ],
+    defaultIntervalMs: 30_000,
+  });
+
+  const { data: assetsData, isLoading, error, refetch: refetchAssets } = useAssetsWithHealth({
+    refetchInterval: refreshControls.preferences.autoRefreshEnabled
+      ? refreshControls.preferences.refreshIntervalMs
+      : false,
+    refetchOnWindowFocus: refreshControls.preferences.refreshOnFocus,
+  });
   const [selectedSymbols, setSelectedSymbols] = useLocalStorageState<string[]>(
     "bridge-watch:analytics-compare:v1",
     []
   );
 
-  const priceQueries = usePricesForSymbols(selectedSymbols);
+  const priceQueries = usePricesForSymbols(selectedSymbols, {
+    refetchInterval: refreshControls.preferences.autoRefreshEnabled
+      ? refreshControls.preferences.refreshIntervalMs
+      : false,
+    refetchOnWindowFocus: refreshControls.preferences.refreshOnFocus,
+  });
   const selectedAssets = useMemo(
     () => (assetsData ?? []).filter((asset) => selectedSymbols.includes(asset.symbol)),
     [assetsData, selectedSymbols]
@@ -38,15 +58,39 @@ export default function Analytics() {
     });
   };
 
+  const refreshTargets = [
+    { id: "assets", label: "Assets", refetch: refetchAssets },
+    {
+      id: "prices",
+      label: "Prices",
+      refetch: () => Promise.all(priceQueries.map((query) => query.refetch())),
+    },
+  ];
+
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-3xl font-bold text-stellar-text-primary">Analytics</h1>
         <p className="mt-2 text-stellar-text-secondary">
-          Historical trends, cross-asset comparisons, and ecosystem health
-          metrics
+          Historical trends, cross-asset comparisons, and ecosystem health metrics
         </p>
       </header>
+
+      <RefreshControls
+        autoRefreshEnabled={refreshControls.preferences.autoRefreshEnabled}
+        onAutoRefreshEnabledChange={refreshControls.setAutoRefreshEnabled}
+        refreshIntervalMs={refreshControls.preferences.refreshIntervalMs}
+        onRefreshIntervalChange={refreshControls.setRefreshIntervalMs}
+        refreshOnFocus={refreshControls.preferences.refreshOnFocus}
+        onRefreshOnFocusChange={refreshControls.setRefreshOnFocus}
+        targets={refreshTargets}
+        selectedTargetIds={refreshControls.preferences.selectedTargetIds}
+        onSelectedTargetIdsChange={refreshControls.setSelectedTargetIds}
+        onRefresh={refreshControls.refreshNow}
+        onCancelRefresh={refreshControls.cancelRefresh}
+        isRefreshing={refreshControls.isRefreshing}
+        lastUpdatedAt={refreshControls.lastUpdatedAt}
+      />
 
       <ErrorBoundary onRetry={() => window.location.reload()}>
         <Suspense
@@ -79,9 +123,7 @@ export default function Analytics() {
 
       <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-xl font-semibold text-stellar-text-primary">
-            Asset Comparison
-          </h2>
+          <h2 className="text-xl font-semibold text-white">Asset Comparison</h2>
           <p className="text-sm text-stellar-text-secondary">
             Select up to {MAX_COMPARE_ASSETS} assets for side-by-side comparison.
           </p>
@@ -132,9 +174,7 @@ export default function Analytics() {
                   })}
                 </div>
               ) : (
-                <p className="text-stellar-text-secondary">
-                  No assets are available for comparison yet.
-                </p>
+                <p className="text-stellar-text-secondary">No assets are available for comparison yet.</p>
               )}
             </Suspense>
           </ErrorBoundary>
@@ -142,9 +182,7 @@ export default function Analytics() {
 
         <div className="mt-6">
           {selectedAssets.length === 0 ? (
-            <p className="text-stellar-text-secondary">
-              Select at least one asset to view comparison metrics.
-            </p>
+            <p className="text-stellar-text-secondary">Select at least one asset to view comparison metrics.</p>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {selectedAssets.map((asset, index) => {
@@ -164,27 +202,19 @@ export default function Analytics() {
                     <dl className="mt-4 space-y-2 text-sm">
                       <div className="flex justify-between gap-3">
                         <dt className="text-stellar-text-secondary">Health Score</dt>
-                        <dd className="text-stellar-text-primary font-medium">
-                          {asset.health?.overallScore ?? "--"}
-                        </dd>
+                        <dd className="text-white font-medium">{asset.health?.overallScore ?? "--"}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt className="text-stellar-text-secondary">Trend</dt>
-                        <dd className="text-stellar-text-primary font-medium">
-                          {asset.health?.trend ?? "--"}
-                        </dd>
+                        <dd className="text-white font-medium">{asset.health?.trend ?? "--"}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt className="text-stellar-text-secondary">VWAP</dt>
-                        <dd className="text-stellar-text-primary font-medium">
-                          {typeof vwap === "number" ? `$${vwap.toFixed(4)}` : "--"}
-                        </dd>
+                        <dd className="text-white font-medium">{typeof vwap === "number" ? `$${vwap.toFixed(4)}` : "--"}</dd>
                       </div>
                       <div className="flex justify-between gap-3">
                         <dt className="text-stellar-text-secondary">Price Sources</dt>
-                        <dd className="text-stellar-text-primary font-medium">
-                          {query?.data?.sources?.length ?? 0}
-                        </dd>
+                        <dd className="text-white font-medium">{query?.data?.sources?.length ?? 0}</dd>
                       </div>
                     </dl>
 
@@ -203,28 +233,20 @@ export default function Analytics() {
         </div>
       </div>
 
-      {/* Volume Analytics */}
       <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-stellar-text-primary mb-4">
-          Bridge Volume Analytics
-        </h2>
+        <h2 className="text-xl font-semibold text-white mb-4">Bridge Volume Analytics</h2>
         <div className="h-64 flex items-center justify-center">
           <p className="text-stellar-text-secondary">
-            Volume analytics will render here once bridge monitoring data is
-            collected
+            Volume analytics will render here once bridge monitoring data is collected
           </p>
         </div>
       </div>
 
-      {/* Liquidity Distribution */}
       <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-stellar-text-primary mb-4">
-          Liquidity Distribution Across DEXs
-        </h2>
+        <h2 className="text-xl font-semibold text-white mb-4">Liquidity Distribution Across DEXs</h2>
         <div className="h-64 flex items-center justify-center">
           <p className="text-stellar-text-secondary">
-            DEX liquidity distribution charts will render here once data is
-            aggregated
+            DEX liquidity distribution charts will render here once data is aggregated
           </p>
         </div>
       </div>

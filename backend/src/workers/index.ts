@@ -5,6 +5,7 @@ import { processHealthCalculation } from "./healthCalculation.job.js";
 import { processBridgeVerification } from "./bridgeVerification.job.js";
 import { processAnalyticsAggregation } from "./analyticsAggregation.worker.js";
 import { logger } from "../utils/logger.js";
+import { initSupplyVerificationJob } from "../jobs/supplyVerification.job.js";
 
 export async function initJobSystem() {
   const jobQueue = JobQueue.getInstance();
@@ -28,6 +29,9 @@ export async function initJobSystem() {
         logger.warn({ jobName: job.name }, "Unknown job name in worker");
     }
   });
+
+  // Initialize supply verification job system (dedicated queue and worker)
+  await initSupplyVerificationJob();
 
   // Schedule repeatable jobs
   // price-collection: every 30 seconds

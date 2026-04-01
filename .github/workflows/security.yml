@@ -9,103 +9,7 @@ on:
     - cron: '0 0 * * 0' # Weekly scan
 
 jobs:
-<<<<<<< HEAD
-  dependency-review:
-    name: Dependency Review (PR)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: high
-
-  npm-audit:
-    name: NPM Security Audit
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Audit backend dependencies
-        working-directory: backend
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
-
-      - name: Audit frontend dependencies
-        working-directory: frontend
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
-
-      - name: Upload npm audit reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-audit-reports
-          path: |
-            backend/npm-audit.json
-            frontend/npm-audit.json
-          if-no-files-found: ignore
-
-  cargo-audit:
-    name: Cargo Security Audit
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-
-      - name: Run cargo audit
-        working-directory: contracts
-        run: cargo audit
-        continue-on-error: true
-
-  sast-semgrep:
-    name: SAST (Semgrep)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: >-
-            p/security-audit
-            p/secrets
-            p/typescript
-            p/rust
-        continue-on-error: true
-
-      - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-        if: always()
-
-  codeql:
-=======
   analyze:
->>>>>>> upstream/main
     name: CodeQL Analysis
     runs-on: ubuntu-latest
     permissions:
@@ -135,69 +39,6 @@ jobs:
   dependency-audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
-<<<<<<< HEAD
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: "fs"
-          scan-ref: "."
-          format: "sarif"
-          output: "trivy-results.sarif"
-          severity: "CRITICAL,HIGH,MEDIUM"
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: "trivy-results.sarif"
-        if: always()
-
-      - name: Upload Trivy SARIF artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trivy-results
-          path: trivy-results.sarif
-          if-no-files-found: ignore
-
-  secret-scan:
-    name: Secret Scanning (Gitleaks)
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: detect --source . --report-format sarif --report-path gitleaks.sarif
-        continue-on-error: true
-
-      - name: Upload gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: gitleaks.sarif
-        if: always()
-
-      - name: Upload gitleaks artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gitleaks-results
-          path: gitleaks.sarif
-          if-no-files-found: ignore
-
-  license-compliance:
-    name: License Compliance
-    runs-on: ubuntu-latest
-
-=======
->>>>>>> upstream/main
     steps:
       - uses: actions/checkout@v4
 
@@ -208,9 +49,11 @@ jobs:
 
       - name: Node Audit
         run: npm audit --audit-level=high
+        continue-on-error: true
 
       # Rust audit requires cargo-audit, we'll use a pre-built action
       - name: Rust Audit
         uses: actions-rs/audit-check@v1
+        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

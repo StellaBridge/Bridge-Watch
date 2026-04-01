@@ -27,6 +27,7 @@ export const navGroups: NavGroup[] = [
     id: "operations",
     label: "Operations",
     items: [
+      { to: "/api-docs", label: "API Docs", description: "Interactive API documentation and explorer" },
       { to: "/admin/api-keys", label: "API Keys", description: "Manage integrator credentials" },
       { to: "/settings", label: "Settings", description: "Notification and dashboard preferences" },
     ],

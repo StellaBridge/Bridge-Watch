@@ -14,7 +14,7 @@ export async function bridgesRoutes(server: FastifyInstance) {
         summary: "List all bridge statuses",
         description: "Returns the current status for every monitored Stellar bridge.",
         response: {
-          200: { type: "array", items: { type: "object", additionalProperties: true } },
+          200: { type: "object", additionalProperties: true },
         },
       },
     },

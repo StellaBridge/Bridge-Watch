@@ -1,55 +1,23 @@
-import { useState, useMemo } from "react";
-import { useBridges, useBridgeStats } from "../hooks/useBridges";
-import BridgeCard from "../components/BridgeCard";
-import BridgeFilterSort from "../components/BridgeFilterSort";
-import type { Bridge } from "../types";
-
+import { Suspense } from "react";
+import { useBridges } from "../hooks/useBridges";
+import { useRefreshControls } from "../hooks/useRefreshControls";
+import BridgeStatusCard from "../components/BridgeStatusCard";
+import RefreshControls from "../components/RefreshControls";
+import { SkeletonCard, ErrorBoundary } from "../components/Skeleton";
 
 export default function Bridges() {
-  const { data, isLoading } = useBridges();
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("name");
-
-  const bridges = data?.bridges || [];
-
-  const bridgesWithStats = bridges.map((bridge: Bridge) => {
-    const { data: stats } = useBridgeStats(bridge.name);
-    return { bridge, stats: stats || null };
+  const refreshControls = useRefreshControls({
+    viewId: "bridges",
+    targets: [{ id: "bridges", label: "Bridge status", queryKey: ["bridges"] }],
+    defaultIntervalMs: 30_000,
   });
 
-  const filteredAndSortedBridges = useMemo(() => {
-    let filtered = bridgesWithStats;
-
-    if (statusFilter !== "all") {
-      filtered = filtered.filter(({ bridge }) => bridge.status === statusFilter);
-    }
-
-    const sorted = [...filtered].sort((a, b) => {
-      switch (sortBy) {
-        case "tvl":
-          return b.bridge.totalValueLocked - a.bridge.totalValueLocked;
-        case "volume":
-          return (b.stats?.volume24h || 0) - (a.stats?.volume24h || 0);
-        case "health": {
-          const getScore = (bridge: Bridge) => {
-            let score = 100;
-            if (bridge.status === "down") score -= 50;
-            else if (bridge.status === "degraded") score -= 25;
-            else if (bridge.status === "unknown") score -= 15;
-            if (bridge.mismatchPercentage > 1) score -= 30;
-            else if (bridge.mismatchPercentage > 0.5) score -= 15;
-            return Math.max(0, score);
-          };
-          return getScore(b.bridge) - getScore(a.bridge);
-        }
-        case "name":
-        default:
-          return a.bridge.name.localeCompare(b.bridge.name);
-      }
-    });
-
-    return sorted;
-  }, [bridgesWithStats, statusFilter, sortBy]);
+  const { data, isLoading, refetch } = useBridges({
+    refetchInterval: refreshControls.preferences.autoRefreshEnabled
+      ? refreshControls.preferences.refreshIntervalMs
+      : false,
+    refetchOnWindowFocus: refreshControls.preferences.refreshOnFocus,
+  });
 
   return (
     <div className="space-y-8">
@@ -60,67 +28,71 @@ export default function Bridges() {
         </p>
       </div>
 
-      {isLoading ? (
-        <p className="text-stellar-text-secondary">Loading bridge data...</p>
-      ) : bridges.length > 0 ? (
-        <>
-          <BridgeFilterSort
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            sortBy={sortBy}
-            onSortByChange={setSortBy}
-          />
+      <RefreshControls
+        autoRefreshEnabled={refreshControls.preferences.autoRefreshEnabled}
+        onAutoRefreshEnabledChange={refreshControls.setAutoRefreshEnabled}
+        refreshIntervalMs={refreshControls.preferences.refreshIntervalMs}
+        onRefreshIntervalChange={refreshControls.setRefreshIntervalMs}
+        refreshOnFocus={refreshControls.preferences.refreshOnFocus}
+        onRefreshOnFocusChange={refreshControls.setRefreshOnFocus}
+        targets={[{ id: "bridges", label: "Bridge status", refetch }]}
+        selectedTargetIds={refreshControls.preferences.selectedTargetIds}
+        onSelectedTargetIdsChange={refreshControls.setSelectedTargetIds}
+        onRefresh={refreshControls.refreshNow}
+        onCancelRefresh={refreshControls.cancelRefresh}
+        isRefreshing={refreshControls.isRefreshing}
+        lastUpdatedAt={refreshControls.lastUpdatedAt}
+      />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredAndSortedBridges.map(({ bridge, stats }) => (
-              <BridgeCard key={bridge.name} bridge={bridge} stats={stats} />
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="bg-stellar-card border border-stellar-border rounded-lg px-8 py-8 md:py-16 text-center">
-          <p className="text-stellar-text-secondary">
-            No bridge data available. Bridge monitoring will populate this page
-            once configured and running.
-          </p>
-        </div>
-      )}
+      <ErrorBoundary onRetry={() => window.location.reload()}>
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <SkeletonCard key={i} rows={6} ariaLabel={`Loading bridge card ${i}`} />
+              ))}
+            </div>
+          }
+        >
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <SkeletonCard key={i} rows={6} ariaLabel={`Loading bridge card ${i}`} />
+              ))}
+            </div>
+          ) : data && data.bridges.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {data.bridges.map((bridge) => (
+                <BridgeStatusCard key={bridge.name} {...bridge} />
+              ))}
+            </div>
+          ) : (
+            <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
+              <p className="text-stellar-text-secondary">
+                No bridge data available. Bridge monitoring will populate this page once configured and running.
+              </p>
+            </div>
+          )}
+        </Suspense>
+      </ErrorBoundary>
 
-      {/* Bridge Performance Table */}
       <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-stellar-text-primary mb-4">
-          Bridge Performance
-        </h2>
+        <h2 className="text-xl font-semibold text-white mb-4">Bridge Performance</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <caption className="sr-only">
-              Bridge performance metrics table
-            </caption>
+            <caption className="sr-only">Bridge performance metrics table</caption>
             <thead>
               <tr className="text-left text-stellar-text-secondary border-b border-stellar-border">
-                <th scope="col" className="pb-3 pr-4">
-                  Bridge
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  24h Volume
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  7d Volume
-                </th>
-                <th scope="col" className="pb-3 pr-4">
-                  Avg Transfer Time
-                </th>
-                <th scope="col" className="pb-3">
-                  30d Uptime
-                </th>
+                <th scope="col" className="pb-3 pr-4">Bridge</th>
+                <th scope="col" className="pb-3 pr-4">24h Volume</th>
+                <th scope="col" className="pb-3 pr-4">7d Volume</th>
+                <th scope="col" className="pb-3 pr-4">Avg Transfer Time</th>
+                <th scope="col" className="pb-3">30d Uptime</th>
               </tr>
             </thead>
             <tbody className="text-stellar-text-primary">
               <tr>
-                <td
-                  colSpan={5}
-                  className="py-6 text-center text-stellar-text-secondary"
-                >
+                <td colSpan={5} className="py-6 text-center text-stellar-text-secondary">
                   Performance data will appear once bridge monitoring is active
                 </td>
               </tr>

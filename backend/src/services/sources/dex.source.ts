@@ -290,7 +290,7 @@ export class DexSource {
     );
 
     const results: DexPriceResult[] = [];
-    for (const [idx, symbol] of symbols.entries()) {
+    for (const [, symbol] of symbols.entries()) {
       const mint = JUPITER_MINTS[symbol];
       const item = body.data?.[mint];
       if (!item?.price) continue;

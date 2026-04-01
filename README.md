@@ -284,3 +284,33 @@ If you are building on Stellar and want to collaborate:
 - Submit a pull request
 
 Together, we can build the monitoring infrastructure the Stellar ecosystem needs.
+
+## Data Refresh Controls
+
+The frontend now includes per-view refresh controls in Dashboard, Analytics, Bridges, Transactions, and Asset Detail pages.
+
+### What users can control
+
+- **Manual refresh:** trigger an immediate fetch for selected data groups.
+- **Auto refresh:** turn polling on/off per view.
+- **Refresh interval:** choose 10s, 30s, 60s, or 5m per view.
+- **Refresh scope:** refresh all datasets in a view or select only specific datasets (for example assets, bridges, prices, or transactions).
+- **Refresh on focus:** optionally fetch new data when the browser tab regains focus.
+- **Cancel refresh:** stop active refresh jobs from the control bar.
+
+### Visibility and feedback
+
+- **Last updated timestamp** is displayed in each control bar.
+- **Refresh in progress indicator** is shown with animated icon and button state while refresh is running.
+
+### Persistence behavior
+
+Refresh preferences are persisted to browser `localStorage` per view using scoped keys:
+
+- `bridge-watch:refresh-preferences:dashboard:v1`
+- `bridge-watch:refresh-preferences:analytics:v1`
+- `bridge-watch:refresh-preferences:bridges:v1`
+- `bridge-watch:refresh-preferences:transactions:v1`
+- `bridge-watch:refresh-preferences:asset-detail-<SYMBOL>:v1`
+
+This preserves each view's refresh behavior across reloads and sessions.

@@ -11,7 +11,6 @@
 
 import { redis } from "../../utils/redis.js";
 import { logger } from "../../utils/logger.js";
-import { config } from "../../config/index.js";
 import { withRetry } from "../../utils/retry.js";
 
 // ---------------------------------------------------------------------------

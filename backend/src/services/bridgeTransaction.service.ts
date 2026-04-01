@@ -116,7 +116,7 @@ export class BridgeTransactionService {
       bridgeName,
       totalTransactions: Number(counts?.total_transactions || 0),
       totalVolume: counts?.total_volume ? String(counts.total_volume) : "0",
-      averageConfirmationTimeSeconds: Number(timing?.avg || 0),
+      averageConfirmationTimeSeconds: Number((timing as any)?.avg || 0),
       pendingTransactions: Number(
         await db("bridge_transactions").where({ bridge_name: bridgeName, status: "pending" }).count("id as count").first().then((row: any) => Number(row?.count || 0)),
       ),

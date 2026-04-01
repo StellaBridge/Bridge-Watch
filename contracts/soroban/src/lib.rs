@@ -91,6 +91,8 @@ mod keys {
     pub const CONFIG_KEYS: &str = "config_keys";
     pub const CONFIG_AUDIT_LOG: &str = "config_audit_log";
     pub const ASSET_STATISTICS: &str = "asset_statistics";
+    pub const EXPIRATIONPOLICY: &str = "expiration_policy";
+    pub const CLEANUPSTATS: &str = "cleanup_stats";
 }
 
 #[contracttype]
@@ -779,6 +781,8 @@ pub enum DataKey {
     ConfigAuditLog(ConfigCategory, String),
     /// Historical statistics for an asset.
     AssetStatistics(String),
+    /// Per-asset TTL override for expiration.
+    AssetExpirationTtl(String),
 }
 
 #[contracttype]
@@ -1939,16 +1943,16 @@ impl BridgeWatchContract {
 
         env.storage()
             .persistent()
-            .set(&DataKey::LiquidityDepthCurrent(asset_pair.clone()), &record);
+            .set(&DataKey::LiquidityDepth(asset_pair.clone()), &record);
 
         let mut history: Vec<LiquidityDepth> = env
             .storage()
             .persistent()
-            .get(&DataKey::LiquidityDepthHistory(asset_pair.clone()))
+            .get(&DataKey::LiquidityHistory(asset_pair.clone()))
             .unwrap_or_else(|| Vec::new(&env));
         history.push_back(record);
         env.storage().persistent().set(
-            &DataKey::LiquidityDepthHistory(asset_pair.clone()),
+            &DataKey::LiquidityHistory(asset_pair.clone()),
             &history,
         );
 
@@ -1983,7 +1987,7 @@ impl BridgeWatchContract {
     pub fn get_aggregated_liquidity_depth(env: Env, asset_pair: String) -> Option<LiquidityDepth> {
         env.storage()
             .persistent()
-            .get(&DataKey::LiquidityDepthCurrent(asset_pair))
+            .get(&DataKey::LiquidityDepth(asset_pair))
     }
 
     /// Return historical liquidity depth snapshots for an asset pair.
@@ -1999,7 +2003,7 @@ impl BridgeWatchContract {
         let history: Vec<LiquidityDepth> = env
             .storage()
             .persistent()
-            .get(&DataKey::LiquidityDepthHistory(asset_pair))
+            .get(&DataKey::LiquidityHistory(asset_pair))
             .unwrap_or_else(|| Vec::new(&env));
 
         let mut filtered = Vec::new(&env);
@@ -2027,7 +2031,7 @@ impl BridgeWatchContract {
             let current: Option<LiquidityDepth> = env
                 .storage()
                 .persistent()
-                .get(&DataKey::LiquidityDepthCurrent(pair));
+                .get(&DataKey::LiquidityDepth(pair));
             if let Some(record) = current {
                 records.push_back(record);
             }
@@ -2343,7 +2347,7 @@ impl BridgeWatchContract {
                 .persistent()
                 .get::<String, AssetHealth>(&format!("asset_health:{}", asset_code.clone().into()))
             {
-                if Self::is_expired(now, record.expires_at) {
+                if Self::is_past(now, record.expires_at) {
                     env.storage()
                         .persistent()
                         .remove(&format!("asset_health:{}", asset_code.clone().into()));
@@ -2356,7 +2360,7 @@ impl BridgeWatchContract {
                 .persistent()
                 .get::<String, PriceRecord>(&format!("price_record:{}", asset_code.clone().into()))
             {
-                if removed_records < max_records && Self::is_expired(now, record.expires_at) {
+                if removed_records < max_records && Self::is_past(now, record.expires_at) {
                     env.storage()
                         .persistent()
                         .remove(&format!("price_record:{}", asset_code.clone().into()));
@@ -2372,7 +2376,7 @@ impl BridgeWatchContract {
                         asset_code.clone().into()
                     ))
             {
-                if removed_records < max_records && Self::is_expired(now, record.expires_at) {
+                if removed_records < max_records && Self::is_past(now, record.expires_at) {
                     env.storage()
                         .persistent()
                         .remove(&format!("deviation_alert:{}", asset_code.clone().into()));
@@ -2388,7 +2392,7 @@ impl BridgeWatchContract {
                         asset_code.clone().into()
                     ))
             {
-                if removed_records < max_records && Self::is_expired(now, record.expires_at) {
+                if removed_records < max_records && Self::is_past(now, record.expires_at) {
                     env.storage().persistent().remove(&format!(
                         "health_score_result:{}",
                         asset_code.clone().into()
@@ -2404,7 +2408,7 @@ impl BridgeWatchContract {
                 .unwrap_or_else(|| Vec::new(&env));
             let mut filtered_history = Vec::new(&env);
             for entry in history.iter() {
-                if !Self::is_expired(now, entry.expires_at) {
+                if !Self::is_past(now, entry.expires_at) {
                     filtered_history.push_back(entry);
                 } else {
                     trimmed_history_records += 1;
@@ -2438,7 +2442,7 @@ impl BridgeWatchContract {
                 .unwrap_or_else(|| Vec::new(&env));
             let mut filtered = Vec::new(&env);
             for entry in history.iter() {
-                if !Self::is_expired(now, entry.expires_at) {
+                if !Self::is_past(now, entry.expires_at) {
                     filtered.push_back(entry);
                 } else {
                     trimmed_history_records += 1;
@@ -2468,12 +2472,12 @@ impl BridgeWatchContract {
             if let Some(record) = env
                 .storage()
                 .persistent()
-                .get::<String, LiquidityDepth>(&DataKey::LiquidityDepthCurrent(asset_pair.clone()))
+                .get::<String, LiquidityDepth>(&DataKey::LiquidityDepth(asset_pair.clone()))
             {
-                if removed_records < max_records && Self::is_expired(now, record.expires_at) {
+                if removed_records < max_records && Self::is_past(now, record.expires_at) {
                     env.storage()
                         .persistent()
-                        .remove(&DataKey::LiquidityDepthCurrent(asset_pair.clone()));
+                        .remove(&DataKey::LiquidityDepth(asset_pair.clone()));
                     removed_records += 1;
                 }
             }
@@ -2481,11 +2485,11 @@ impl BridgeWatchContract {
             let history: Vec<LiquidityDepth> = env
                 .storage()
                 .persistent()
-                .get(&DataKey::LiquidityDepthHistory(asset_pair.clone()))
+                .get(&DataKey::LiquidityHistory(asset_pair.clone()))
                 .unwrap_or_else(|| Vec::new(&env));
             let mut filtered = Vec::new(&env);
             for entry in history.iter() {
-                if !Self::is_expired(now, entry.expires_at) {
+                if !Self::is_past(now, entry.expires_at) {
                     filtered.push_back(entry);
                 } else {
                     trimmed_history_records += 1;
@@ -2502,7 +2506,7 @@ impl BridgeWatchContract {
             }
             env.storage()
                 .persistent()
-                .set(&DataKey::LiquidityDepthHistory(asset_pair), &filtered);
+                .set(&DataKey::LiquidityHistory(asset_pair), &filtered);
         }
 
         let stats = CleanupStats {
@@ -3463,7 +3467,7 @@ impl BridgeWatchContract {
     ) {
         Self::assert_admin_or_super_admin_retention(&env, &caller);
 
-        let key = DataKey::AssetRetentionOverride(asset_code.clone(), data_type.clone());
+        let key = DataKey::AssetRetentionOvr(asset_code.clone(), data_type.clone());
         match retention_secs {
             Some(value) => {
                 if value == 0 {
@@ -3491,7 +3495,7 @@ impl BridgeWatchContract {
     ) -> Option<u64> {
         env.storage()
             .persistent()
-            .get(&DataKey::AssetRetentionOverride(asset_code, data_type))
+            .get(&DataKey::AssetRetentionOvr(asset_code, data_type))
     }
 
     /// Run gradual historical cleanup across all retention-enabled data buckets.
@@ -3742,7 +3746,7 @@ impl BridgeWatchContract {
         let (old_value, new_version) = if let Some(existing) = env
             .storage()
             .instance()
-            .get::<String, ConfigEntry>(&storage_key)
+            .get::<DataKey, ConfigEntry>(&storage_key)
         {
             (existing.value.value, existing.version + 1)
         } else {
@@ -3979,7 +3983,7 @@ impl BridgeWatchContract {
             if env
                 .storage()
                 .instance()
-                .get::<String, ConfigEntry>(&key)
+                .get::<DataKey, ConfigEntry>(&key)
                 .is_none()
             {
                 Self::set_config(
@@ -4155,7 +4159,7 @@ impl BridgeWatchContract {
         let proposal_id: u64 = env
             .storage()
             .instance()
-            .get::<String, u64>(&keys::UPGRADE_PROPOSAL_COUNTER)
+            .get::<&str, u64>(&keys::UPGRADE_PROPOSAL_COUNTER)
             .unwrap_or(0)
             + 1;
 
@@ -4511,6 +4515,7 @@ impl BridgeWatchContract {
             bridge_uptime_score,
             weights,
             timestamp: env.ledger().timestamp(),
+            expires_at: 0,
         }
     }
 
@@ -4579,6 +4584,7 @@ impl BridgeWatchContract {
             paused: status.paused,
             active: status.active,
             timestamp,
+            expires_at: Self::resolve_expiration(&env, &asset_code, ExpirationKind::Asset, timestamp),
         };
 
         let result = HealthScoreResult {
@@ -4588,6 +4594,7 @@ impl BridgeWatchContract {
             bridge_uptime_score,
             weights,
             timestamp,
+            expires_at: Self::resolve_expiration(&env, &asset_code, ExpirationKind::HealthResult, timestamp),
         };
 
         env.storage().persistent().set(
@@ -5032,14 +5039,14 @@ impl BridgeWatchContract {
                 let mut archived_records: Vec<SupplyMismatch> = env
                     .storage()
                     .persistent()
-                    .get(&DataKey::ArchivedSupplyMismatches(bridge_id.clone()))
+                    .get(&DataKey::ArchivedMismatches(bridge_id.clone()))
                     .unwrap_or_else(|| Vec::new(env));
                 for record in removed.iter() {
                     archived_records.push_back(record);
                     archived += 1;
                 }
                 env.storage().persistent().set(
-                    &DataKey::ArchivedSupplyMismatches(bridge_id),
+                    &DataKey::ArchivedMismatches(bridge_id),
                     &archived_records,
                 );
             }
@@ -5071,7 +5078,7 @@ impl BridgeWatchContract {
             let history: Vec<LiquidityDepth> = env
                 .storage()
                 .persistent()
-                .get(&DataKey::LiquidityDepthHistory(pair.clone()))
+                .get(&DataKey::LiquidityHistory(pair.clone()))
                 .unwrap_or_else(|| Vec::new(env));
             if history.len() <= 1 {
                 continue;
@@ -5109,20 +5116,20 @@ impl BridgeWatchContract {
 
             env.storage()
                 .persistent()
-                .set(&DataKey::LiquidityDepthHistory(pair.clone()), &kept);
+                .set(&DataKey::LiquidityHistory(pair.clone()), &kept);
 
             if policy.archive_before_delete {
                 let mut archived_history: Vec<LiquidityDepth> = env
                     .storage()
                     .persistent()
-                    .get(&DataKey::ArchivedLiquidityDepthHistory(pair.clone()))
+                    .get(&DataKey::ArchivedLiquidityHistory(pair.clone()))
                     .unwrap_or_else(|| Vec::new(env));
                 for snapshot in removed.iter() {
                     archived_history.push_back(snapshot);
                     archived += 1;
                 }
                 env.storage().persistent().set(
-                    &DataKey::ArchivedLiquidityDepthHistory(pair),
+                    &DataKey::ArchivedLiquidityHistory(pair),
                     &archived_history,
                 );
             }
@@ -5211,7 +5218,7 @@ impl BridgeWatchContract {
             Some(code) => env
                 .storage()
                 .persistent()
-                .get(&DataKey::AssetRetentionOverride(
+                .get(&DataKey::AssetRetentionOvr(
                     code.clone(),
                     data_type.clone(),
                 ))
@@ -5222,6 +5229,62 @@ impl BridgeWatchContract {
 
     fn is_expired(now: u64, timestamp: u64, retention_secs: u64) -> bool {
         now.saturating_sub(timestamp) > retention_secs
+    }
+
+    fn is_past(now: u64, expires_at: u64) -> bool {
+        now > expires_at
+    }
+
+    fn load_expiration_policy(env: &Env) -> ExpirationPolicy {
+        env.storage()
+            .instance()
+            .get(&keys::EXPIRATIONPOLICY)
+            .unwrap_or(ExpirationPolicy {
+                asset_ttl_secs: 86_400,
+                price_ttl_secs: 3_600,
+                deviation_ttl_secs: 86_400,
+                mismatch_ttl_secs: 604_800,
+                liquidity_ttl_secs: 86_400,
+                preserve_latest_history: true,
+                version: 1,
+            })
+    }
+
+    fn resolve_expiration(env: &Env, _asset_code: &String, kind: ExpirationKind, timestamp: u64) -> u64 {
+        let policy = Self::load_expiration_policy(env);
+        let ttl = match kind {
+            ExpirationKind::Asset => policy.asset_ttl_secs,
+            ExpirationKind::Price => policy.price_ttl_secs,
+            ExpirationKind::Deviation => policy.deviation_ttl_secs,
+            ExpirationKind::Mismatch => policy.mismatch_ttl_secs,
+            ExpirationKind::Liquidity => policy.liquidity_ttl_secs,
+            ExpirationKind::HealthResult => policy.asset_ttl_secs,
+        };
+        timestamp.saturating_add(ttl)
+    }
+
+    fn emit_contract_event(env: &Env, event: BridgeWatchEvent) {
+        match event {
+            BridgeWatchEvent::HealthSubmitted { actor, asset_code, health_score, timestamp } => {
+                env.events().publish((symbol_short!("hlth_sub"), actor, asset_code), (health_score, timestamp));
+            }
+            BridgeWatchEvent::ThresholdUpdated { actor, scope, value, timestamp } => {
+                env.events().publish((symbol_short!("thr_upd"), actor, scope), (value, timestamp));
+            }
+            BridgeWatchEvent::RoleChanged { actor, target, granted, role, timestamp } => {
+                env.events().publish((symbol_short!("role_chg"), actor, target), (granted, role, timestamp));
+            }
+            BridgeWatchEvent::ExpirationPolicyUpdated { actor, scope, ttl_secs, timestamp } => {
+                env.events().publish((symbol_short!("exp_upd"), actor, scope), (ttl_secs, timestamp));
+            }
+            BridgeWatchEvent::ExpirationExtended { actor, scope, expires_at, timestamp } => {
+                env.events().publish((symbol_short!("exp_ext"), actor, scope), (expires_at, timestamp));
+            }
+            BridgeWatchEvent::CleanupCompleted { actor, removed_records, trimmed_history_records, timestamp } => {
+                env.events().publish((symbol_short!("cleanup"), actor), (removed_records, trimmed_history_records, timestamp));
+            }
+            _ => {}
+        }
     }
 
     fn maybe_trigger_auto_cleanup(env: &Env) {
@@ -5295,7 +5358,7 @@ impl BridgeWatchContract {
             let archived: Vec<SupplyMismatch> = env
                 .storage()
                 .persistent()
-                .get(&DataKey::ArchivedSupplyMismatches(bridge_id))
+                .get(&DataKey::ArchivedMismatches(bridge_id))
                 .unwrap_or_else(|| Vec::new(env));
             active_records += active.len();
             archived_records += archived.len();
@@ -5322,12 +5385,12 @@ impl BridgeWatchContract {
             let active: Vec<LiquidityDepth> = env
                 .storage()
                 .persistent()
-                .get(&DataKey::LiquidityDepthHistory(pair.clone()))
+                .get(&DataKey::LiquidityHistory(pair.clone()))
                 .unwrap_or_else(|| Vec::new(env));
             let archived: Vec<LiquidityDepth> = env
                 .storage()
                 .persistent()
-                .get(&DataKey::ArchivedLiquidityDepthHistory(pair))
+                .get(&DataKey::ArchivedLiquidityHistory(pair))
                 .unwrap_or_else(|| Vec::new(env));
             active_records += active.len();
             archived_records += archived.len();
@@ -5413,6 +5476,7 @@ impl BridgeWatchContract {
                 price: 0,
                 source: String::from_str(env, ""),
                 timestamp: 0,
+                expires_at: 0,
             };
             let default_result = HealthScoreResult {
                 composite_score: 0,
@@ -5421,6 +5485,7 @@ impl BridgeWatchContract {
                 bridge_uptime_score: 0,
                 weights: Self::default_health_weights(),
                 timestamp: 0,
+                expires_at: 0,
             };
 
             assets.push_back(CheckpointAssetState {
@@ -5807,7 +5872,7 @@ impl BridgeWatchContract {
     ///
     /// Returns the arithmetic mean of the provided values.
     /// Gas-efficient implementation for on-chain calculations.
-    pub fn calculate_average(env: Env, values: Vec<i128>) -> i128 {
+    pub fn calculate_average(_env: Env, values: Vec<i128>) -> i128 {
         let count = values.len() as i128;
         if count == 0 {
             return 0;
@@ -5824,7 +5889,7 @@ impl BridgeWatchContract {
     /// Calculate volume-weighted moving average.
     ///
     /// Each value is weighted by its corresponding volume.
-    pub fn volume_weighted_avg(env: Env, values: Vec<i128>, volumes: Vec<i128>) -> i128 {
+    pub fn volume_weighted_avg(_env: Env, values: Vec<i128>, volumes: Vec<i128>) -> i128 {
         if values.len() != volumes.len() {
             panic!("values and volumes must have same length");
         }
@@ -5926,7 +5991,7 @@ impl BridgeWatchContract {
     }
 
     /// Calculate min and max values in a series.
-    pub fn calculate_min_max(env: Env, values: Vec<i128>) -> (i128, i128) {
+    pub fn calculate_min_max(_env: Env, values: Vec<i128>) -> (i128, i128) {
         if values.len() == 0 {
             return (0, 0);
         }
@@ -5949,7 +6014,7 @@ impl BridgeWatchContract {
     /// Calculate median value of a sorted series.
     ///
     /// For even-length series, returns average of two middle values.
-    pub fn calculate_median(env: Env, mut values: Vec<i128>) -> i128 {
+    pub fn calculate_median(_env: Env, values: Vec<i128>) -> i128 {
         let n = values.len();
         if n == 0 {
             return 0;
@@ -6068,18 +6133,12 @@ impl BridgeWatchContract {
 
         // Create and store statistics record
         let stats = Statistics {
-            asset_code: asset_code.clone(),
             period: period.clone(),
-            average_price: average,
-            stddev_price: stddev,
-            volatility_bps: volatility,
-            min_price,
-            max_price,
-            median_price: median,
-            p25_price: p25,
-            p75_price: p75,
-            data_points,
             timestamp: now,
+            health_avg: 0,
+            liquidity_avg: 0,
+            price_volatility: volatility as u32,
+            bridge_uptime: 0,
         };
 
         // Store in history
@@ -6264,13 +6323,13 @@ impl BridgeWatchContract {
                 while j > 0 {
                     let prev = sorted.get(j - 1).unwrap();
                     if prev > key {
-                        sorted.set(j, &prev);
+                        sorted.set(j, prev);
                         j -= 1;
                     } else {
                         break;
                     }
                 }
-                sorted.set(j, &key);
+                sorted.set(j, key);
             }
             return sorted.get(k).unwrap();
         }
@@ -6354,7 +6413,7 @@ impl BridgeWatchContract {
     ///
     /// `smoothing_factor` is a value between 0 and 10_000 representing
     /// the smoothing constant alpha (where alpha = smoothing_factor / 10_000).
-    pub fn calculate_ema(env: Env, values: Vec<i128>, smoothing_factor: i128) -> i128 {
+    pub fn calculate_ema(_env: Env, values: Vec<i128>, smoothing_factor: i128) -> i128 {
         let n = values.len();
         if n == 0 {
             return 0;
