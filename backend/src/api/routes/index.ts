@@ -7,6 +7,8 @@ import { circuitBreakerRoutes } from "./circuitBreaker.js";
 import { preferencesRoutes } from "./preferences.js";
 import { apiKeysRoutes } from "./apiKeys.js";
 import jobsRoutes from "./jobs.js";
+import { webhooksRoutes } from "./webhooks.js";
+
 import { configRoutes } from "./config.js";
 import { aggregationRoutes } from "./aggregation.js";
 import { metadataRoutes } from "./metadata.js";
@@ -30,6 +32,7 @@ export async function registerRoutes(server: FastifyInstance) {
   server.register(preferencesRoutes, { prefix: "/api/v1/preferences" });
   server.register(apiKeysRoutes, { prefix: "/api/v1/admin/api-keys" });
   server.register(jobsRoutes, { prefix: "/api/v1/jobs" });
+  server.register(webhooksRoutes, { prefix: "/api/v1/webhooks" });
   server.register(configRoutes, { prefix: "/api/v1/config" });
   server.register(aggregationRoutes, { prefix: "/api/v1/aggregation" });
   server.register(metadataRoutes, { prefix: "/api/v1/metadata" });

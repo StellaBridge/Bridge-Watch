@@ -270,6 +270,71 @@ CREATE INDEX alert_events_rule_time_idx  ON alert_events (rule_id, time DESC);
 SELECT create_hypertable('alert_events', 'time', if_not_exists => TRUE);
 SELECT add_retention_policy('alert_events', INTERVAL '90 days', if_not_exists => TRUE);
 
+-- =============================================================================
+-- WEBHOOK TABLES
+-- =============================================================================
+
+-- webhook_endpoints
+-- Registered webhook endpoints for external notifications.
+CREATE TABLE webhook_endpoints (
+  id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_address           TEXT        NOT NULL,
+  url                     TEXT        NOT NULL,
+  name                    TEXT        NOT NULL,
+  description             TEXT,
+  secret                  TEXT        NOT NULL,
+  secret_rotated_at       TIMESTAMPTZ,
+  is_active               BOOLEAN     NOT NULL DEFAULT TRUE,
+  rate_limit_per_minute   INTEGER     NOT NULL DEFAULT 60,
+  custom_headers          JSONB       NOT NULL DEFAULT '{}',
+  filter_event_types      JSONB       NOT NULL DEFAULT '[]',
+  is_batch_delivery_enabled BOOLEAN   NOT NULL DEFAULT FALSE,
+  batch_window_ms         INTEGER     NOT NULL DEFAULT 5000,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX webhook_endpoints_owner_idx       ON webhook_endpoints (owner_address);
+CREATE INDEX webhook_endpoints_active_idx      ON webhook_endpoints (is_active);
+
+-- webhook_deliveries
+-- Individual webhook delivery attempts.
+CREATE TABLE webhook_deliveries (
+  id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  webhook_endpoint_id     UUID        NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+  event_type              TEXT        NOT NULL,
+  payload                 JSONB       NOT NULL,
+  status                  TEXT        NOT NULL DEFAULT 'pending',
+  attempts                INTEGER     NOT NULL DEFAULT 0,
+  last_attempt_at         TIMESTAMPTZ,
+  next_retry_at           TIMESTAMPTZ,
+  response_status         INTEGER,
+  response_body           TEXT,
+  error_message           TEXT,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX webhook_deliveries_endpoint_idx   ON webhook_deliveries (webhook_endpoint_id);
+CREATE INDEX webhook_deliveries_status_idx     ON webhook_deliveries (status);
+CREATE INDEX webhook_deliveries_created_idx    ON webhook_deliveries (created_at DESC);
+
+-- webhook_delivery_logs
+-- Detailed logs for each delivery attempt (useful for debugging).
+CREATE TABLE webhook_delivery_logs (
+  id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  webhook_endpoint_id     UUID        NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+  webhook_delivery_id     UUID        NOT NULL REFERENCES webhook_deliveries(id) ON DELETE CASCADE,
+  event_type              TEXT        NOT NULL,
+  request_headers         JSONB       NOT NULL,
+  request_body            TEXT        NOT NULL,
+  response_status         INTEGER,
+  response_body           TEXT,
+  duration_ms             INTEGER     NOT NULL DEFAULT 0,
+  attempt_number          INTEGER     NOT NULL DEFAULT 1,
+  error_message           TEXT,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX webhook_delivery_logs_delivery_idx ON webhook_delivery_logs (webhook_delivery_id);
+CREATE INDEX webhook_delivery_logs_endpoint_idx ON webhook_delivery_logs (webhook_endpoint_id);
+
 -- verification_results
 -- Merkle proof verification results (append-only).
 CREATE TABLE verification_results (

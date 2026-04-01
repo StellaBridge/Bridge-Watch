@@ -8,12 +8,14 @@ import { logger } from "./utils/logger.js";
 import { registerRoutes } from "./api/routes/index.js";
 import { registerValidation } from "./api/middleware/validation.js";
 import { registerMetrics } from "./api/middleware/metrics.js";
+import { startBridgeVerificationJob } from "./jobs/verification.job.js";
 import {
   registerRateLimiting,
   getRateLimitMetrics,
 } from "./api/middleware/rateLimit.middleware.js";
 import { initJobSystem } from "./workers/index.js";
 import { JobQueue } from "./workers/queue.js";
+import { initWebhookWorker, stopWebhookWorker } from "./workers/webhookDelivery.worker.js";
 import { getSupplyVerificationQueue } from "./jobs/supplyVerification.job.js";
 import { swaggerOptions, swaggerUiOptions } from "./config/openapi.js";
 import { registerCorrelationMiddleware } from "./api/middleware/correlation.middleware.js";
@@ -131,6 +133,21 @@ async function start() {
 
     // Initialize background jobs
     await initJobSystem();
+
+    // Initialize webhook delivery worker
+    await initWebhookWorker();
+
+    // Graceful shutdown
+    const shutdown = async () => {
+      logger.info("Closing server...");
+      await server.close();
+      await JobQueue.getInstance().stop();
+      await stopWebhookWorker();
+      process.exit(0);
+    };
+
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
