@@ -203,3 +203,63 @@ export function extendApiKey(apiKey: string, id: string, extraDays: number) {
     apiKey
   );
 }
+
+// Supply Chain
+export function getSupplyChainGraph() {
+  return fetchApi<import("../components/SupplyChainViz/types").SupplyChainGraph>("/supply-chain");
+}
+
+export function getSupplyChainNodes() {
+  return fetchApi<{ nodes: import("../components/SupplyChainViz/types").ChainNode[] }>("/supply-chain/nodes");
+}
+
+export function getSupplyChainEdges() {
+  return fetchApi<{ edges: import("../components/SupplyChainViz/types").BridgeEdge[] }>("/supply-chain/edges");
+}
+
+// Price Feeds
+export function getPriceFeeds() {
+  return fetchApi<{
+    prices: Array<{
+      symbol: string;
+      price: number;
+      confidence: number;
+      sources: number;
+      lastUpdated: string;
+    }>;
+  }>("/price-feeds");
+}
+
+export function getPriceFeed(symbol: string) {
+  return fetchApi<{
+    symbol: string;
+    price: number;
+    confidence: number;
+    sources: number;
+    lastUpdated: string;
+  }>(`/price-feeds/${symbol}`);
+}
+
+export function getPriceFeedComparison(symbol: string) {
+  return fetchApi<{
+    symbol: string;
+    consensus: number;
+    samples: Array<{
+      source: string;
+      price: number;
+      weight: number;
+      isOutlier: boolean;
+    }>;
+  }>(`/price-feeds/${symbol}/compare`);
+}
+
+export function getPriceFeedHealth() {
+  return fetchApi<{
+    sources: Array<{
+      name: string;
+      successRate: number;
+      avgLatencyMs: number;
+      lastSuccess: string | null;
+    }>;
+  }>("/price-feeds/health");
+}

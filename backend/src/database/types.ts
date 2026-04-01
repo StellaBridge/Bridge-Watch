@@ -13,6 +13,45 @@ export type PauseStatus = "active" | "recovering" | "resolved";
 export type TriggerStatus = "triggered" | "resolved" | "expired";
 export type RecoveryStatus = "pending" | "approved" | "executed" | "rejected";
 export type CommitmentStatus = "pending" | "verified" | "challenged" | "slashed" | "resolved";
+export type BridgeTransactionType = "mint" | "burn" | "transfer";
+export type BridgeTransactionStatus = "pending" | "confirmed" | "failed" | "cancelled" | "processing";
+
+export interface BridgeTransaction {
+  id: string;
+  bridge_name: string;
+  symbol: string;
+  transaction_type: BridgeTransactionType;
+  status: BridgeTransactionStatus;
+  correlation_id: string | null;
+  tx_hash: string;
+  source_chain: string | null;
+  source_address: string | null;
+  destination_address: string | null;
+  amount: string;
+  fee: string;
+  submitted_at: Date;
+  confirmed_at: Date | null;
+  failed_at: Date | null;
+  error_message: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export type NewBridgeTransaction = Omit<BridgeTransaction, "id" | "created_at" | "updated_at" | "confirmed_at" | "failed_at" | "error_message"> & {
+  confirmed_at?: Date | null;
+  failed_at?: Date | null;
+  error_message?: string | null;
+};
+
+export interface BridgeTransactionSummary {
+  bridgeName: string;
+  totalTransactions: number;
+  totalVolume: string;
+  averageConfirmationTimeSeconds: number;
+  pendingTransactions: number;
+  confirmedTransactions: number;
+  failedTransactions: number;
+}
 
 // ─── assets ──────────────────────────────────────────────────────────────────
 

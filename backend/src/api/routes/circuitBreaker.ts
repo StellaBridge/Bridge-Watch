@@ -146,8 +146,7 @@ export async function circuitBreakerRoutes(fastify: FastifyInstance) {
             reason: { type: "string" },
           },
         },
-        response: {
-          501: { $ref: "Error#" },
+        response: {          500: { $ref: "Error#" },          501: { $ref: "Error#" },
         },
       },
     },
@@ -180,6 +179,7 @@ export async function circuitBreakerRoutes(fastify: FastifyInstance) {
           properties: { pauseId: { type: "integer" } },
         },
         response: {
+          500: { $ref: "Error#" },
           501: { $ref: "Error#" },
         },
       },

@@ -1,12 +1,28 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NotificationProvider } from "../context/NotificationContext";
+import { WebSocketProvider } from "../contexts/WebSocketContext";
+import ThemeProvider from "../theme/ThemeProvider";
 import Navbar from "./Navbar";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
 
 describe("Navbar", () => {
   it("opens and closes the mobile navigation drawer", () => {
     render(
       <MemoryRouter>
-        <Navbar />
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
+            <WebSocketProvider>
+              <NotificationProvider>
+                <Navbar />
+              </NotificationProvider>
+            </WebSocketProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
       </MemoryRouter>
     );
 

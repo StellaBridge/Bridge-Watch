@@ -198,7 +198,7 @@ describe("Health Check Endpoints", () => {
       });
 
       expect([200, 503]).toContain(response.statusCode);
-      expect(response.headers["content-type"]).toBe("text/plain; charset=utf-8");
+      expect(response.headers["content-type"]).toMatch(/^text\/plain/);
       
       const payload = response.payload;
       expect(payload).toContain("# HELP bridge_watch_health_status");

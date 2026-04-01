@@ -21,7 +21,10 @@ export async function up(knex: Knex): Promise<void> {
 
   await knex.schema.createTable("alert_events", (table) => {
     table.timestamp("time").notNullable().defaultTo(knex.fn.now());
-    table.uuid("rule_id").notNullable().references("id").inTable("alert_rules");
+    // rule_id intentionally has no FK constraint: TimescaleDB hypertables do not
+    // support foreign-key constraints in all versions, so we track the relationship
+    // by convention rather than a DB-level constraint.
+    table.uuid("rule_id").notNullable();
     table.string("asset_code").notNullable();
     table.string("alert_type").notNullable();
     table.string("priority").notNullable();
@@ -36,9 +39,14 @@ export async function up(knex: Knex): Promise<void> {
     table.index(["rule_id", "time"]);
   });
 
-  await knex.raw(
-    "SELECT create_hypertable('alert_events', 'time', if_not_exists => TRUE)"
-  );
+  try {
+    await knex.raw(
+      "SELECT create_hypertable('alert_events', 'time', if_not_exists => TRUE)"
+    );
+  } catch {
+    // create_hypertable is a TimescaleDB extension function; if it is unavailable
+    // the table still exists as a regular PostgreSQL table, which is acceptable.
+  }
 }
 
 export async function down(knex: Knex): Promise<void> {

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { validationService, type ValidationContext } from "../../services/validation.service.js";
-import { logger, createChildLogger } from "../../utils/logger.js";
+import { createChildLogger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
 
 const validationLogger = createChildLogger('validation-middleware');

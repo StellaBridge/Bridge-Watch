@@ -31,6 +31,10 @@ Thumbs.db
 
 # Testing
 coverage/
+load-tests/results/*.json
+load-tests/results/*.txt
+load-tests/results/*.md
+load-tests/results/*.log
 
 # Docker
 docker-compose.override.yml

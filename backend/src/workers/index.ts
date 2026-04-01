@@ -4,9 +4,8 @@ import { processPriceCollection } from "./priceCollection.job.js";
 import { processHealthCalculation } from "./healthCalculation.job.js";
 import { processBridgeVerification } from "./bridgeVerification.job.js";
 import { processAnalyticsAggregation } from "./analyticsAggregation.worker.js";
-import { processBackupJob } from "./backup.worker.js";
-import { processBackupMonitoringJob } from "./backupMonitoring.worker.js";
 import { logger } from "../utils/logger.js";
+import { initSupplyVerificationJob } from "../jobs/supplyVerification.job.js";
 
 export async function initJobSystem() {
   const jobQueue = JobQueue.getInstance();
@@ -26,16 +25,13 @@ export async function initJobSystem() {
       case "analytics-aggregation":
         await processAnalyticsAggregation(job);
         break;
-      case "backup":
-        await processBackupJob(job);
-        break;
-      case "backup-monitoring":
-        await processBackupMonitoringJob(job);
-        break;
       default:
         logger.warn({ jobName: job.name }, "Unknown job name in worker");
     }
   });
+
+  // Initialize supply verification job system (dedicated queue and worker)
+  await initSupplyVerificationJob();
 
   // Schedule repeatable jobs
   // price-collection: every 30 seconds
@@ -78,22 +74,6 @@ export async function initJobSystem() {
     type: "top-performers",
     params: { performerType: "bridges", metric: "tvl", limit: 10 }
   }, "*/5 * * * *");
-
-  // Backup jobs
-  // Full backup: daily at 2:00 AM UTC
-  await jobQueue.addRepeatableJob("backup", { type: "full" }, "0 2 * * *");
-  
-  // Incremental backup: every 6 hours
-  await jobQueue.addRepeatableJob("backup", { type: "incremental" }, "0 */6 * * *");
-  
-  // Cleanup old backups: daily at 3:00 AM UTC
-  await jobQueue.addRepeatableJob("backup", { type: "cleanup" }, "0 3 * * *");
-  
-  // Backup health check: every hour
-  await jobQueue.addRepeatableJob("backup-monitoring", { type: "health_check" }, "0 * * * *");
-  
-  // Backup metrics collection: every 15 minutes
-  await jobQueue.addRepeatableJob("backup-monitoring", { type: "metrics_collection" }, "*/15 * * * *");
 
   logger.info("Scheduled job system initialized");
 }

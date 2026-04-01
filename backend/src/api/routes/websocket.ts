@@ -14,7 +14,7 @@ const websocketService = WebsocketService.getInstance();
 // - Server sends: { type: "replay", messages: [...] }
 
 export async function websocketRoutes(server: FastifyInstance) {
-  server.get("/", { websocket: true }, (socket, _request) => {
+  server.get("/", { websocket: true }, (socket: any, _request) => {
     server.log.info("WebSocket client connected");
 
     let clientId: string | undefined;

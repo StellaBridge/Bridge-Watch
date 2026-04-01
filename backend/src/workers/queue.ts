@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Queue, Worker, Job, ConnectionOptions } from "bullmq";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
@@ -38,15 +37,15 @@ export class JobQueue {
     return JobQueue.instance;
   }
 
-  public async addJob(name: string, data: any, options: any = {}) {
+  public async addJob(name: string, data: unknown, options: Record<string, any> = {}) {
     logger.info({ jobName: name }, "Adding job to queue");
     return this.queue.add(name, data, options);
   }
 
-  public async addRepeatableJob(name: string, data: any, cron: string) {
+  public async addRepeatableJob(name: string, data: unknown, cron: string) {
     logger.info({ jobName: name, cron }, "Scheduling repeatable job");
     return this.queue.add(name, data, {
-      repeat: { cron },
+      repeat: { pattern: cron },
     });
   }
 

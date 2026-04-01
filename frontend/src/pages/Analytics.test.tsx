@@ -1,7 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { axe } from "vitest-axe";
-import "@testing-library/jest-dom";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Analytics from "./Analytics";
 
 vi.mock("../hooks/useAssets", () => ({
@@ -20,6 +18,7 @@ vi.mock("../hooks/useAssets", () => ({
     ],
     isLoading: false,
     error: null,
+    refetch: vi.fn(),
   }),
 }));
 
@@ -33,12 +32,19 @@ vi.mock("../hooks/usePrices", () => ({
         lastUpdated: "now",
       },
       isLoading: false,
+      refetch: vi.fn(),
     })),
 }));
 
 describe("Analytics", () => {
-  it("renders comparison cards for selected assets", async () => {
-    const { asFragment, container } = render(<Analytics />);
+  it("renders comparison cards for selected assets", () => {
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Analytics />
+      </QueryClientProvider>
+    );
 
     // Snapshot test
     expect(asFragment()).toMatchSnapshot();
@@ -56,4 +62,3 @@ describe("Analytics", () => {
     expect(screen.getByText("Select up to 3 assets for side-by-side comparison.")).toBeInTheDocument();
   });
 });
-

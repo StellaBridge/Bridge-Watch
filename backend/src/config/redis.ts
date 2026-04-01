@@ -7,10 +7,8 @@ const redisOptions: RedisOptions = {
   host: config.REDIS_HOST,
   port: config.REDIS_PORT,
   password: config.REDIS_PASSWORD || undefined,
-  lazyConnect: true,
   maxRetriesPerRequest: 3,
   retryStrategy: (times) => {
-    // Reconnect after 100ms, 200ms, 400ms, up to 3 seconds
     const delay = Math.min(times * 100, 3000);
     return delay;
   },

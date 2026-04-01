@@ -15,7 +15,12 @@ const DEFAULT_FILTERS: TransactionFilters = {
 
 const PAGE_SIZE = 10;
 
-export function useTransactions() {
+type TransactionRefreshOptions = {
+  refetchInterval?: number | false;
+  refetchOnWindowFocus?: boolean;
+};
+
+export function useTransactions(options?: TransactionRefreshOptions) {
   const [filters, setFilters] = useState<TransactionFilters>(DEFAULT_FILTERS);
   const [page, setPage] = useState(1);
   const queryClient = useQueryClient();
@@ -23,7 +28,8 @@ export function useTransactions() {
   const query = useQuery({
     queryKey: ["transactions", filters, page],
     queryFn: () => getTransactions(filters, page, PAGE_SIZE),
-    refetchInterval: 30_000,
+    refetchInterval: options?.refetchInterval ?? 30_000,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus,
   });
 
   const updateFilters = useCallback(

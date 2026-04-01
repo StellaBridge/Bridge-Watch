@@ -5,12 +5,12 @@ const BATCH_INTERVAL_MS = 120;
 const MAX_BATCH_SIZE = 20;
 const MESSAGE_RATE_LIMIT_WINDOW_MS = 1000;
 const MAX_MESSAGES_PER_WINDOW = 20;
-const MAX_PENDING_ACKS = 100;
 
 export type WebsocketMessageType =
   | "price_update"
   | "health_score"
   | "alert_notification"
+  | "transaction_update"
   | "system"
   | "batch"
   | "replay";

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { HealthCheckService } from "../../services/healthCheck.service.js";
+import { HealthCheckService } from "../../services/health-check.service.js";
 
-const healthService = new HealthCheckService();
+const healthService = HealthCheckService.getInstance();
 
 /**
  * Health check routes for monitoring and Kubernetes probes
@@ -15,9 +15,10 @@ const healthService = new HealthCheckService();
 
 export async function healthRoutes(server: FastifyInstance) {
   // Simple health check (backward compatibility)
+  // Using empty string instead of "/" to avoid route conflicts
   server.get(
-    "/",
-    async (_request: FastifyRequest, reply: FastifyReply) => {
+    "",
+    async (_request: FastifyRequest, _reply: FastifyReply) => {
       return { 
         status: "ok", 
         timestamp: new Date().toISOString(),
@@ -36,7 +37,7 @@ export async function healthRoutes(server: FastifyInstance) {
         const liveness = await healthService.getLiveness();
         
         // Return appropriate HTTP status for Kubernetes
-        if (liveness.status === "ok") {
+        if (liveness.status === "healthy") {
           reply.code(200);
         } else {
           reply.code(503);
@@ -47,9 +48,16 @@ export async function healthRoutes(server: FastifyInstance) {
         server.log.error({ error }, "Liveness probe failed");
         reply.code(503);
         return {
-          status: "error",
+          status: "unhealthy",
           timestamp: new Date().toISOString(),
-          error: error instanceof Error ? error.message : "Unknown error",
+          uptime: 0,
+          version: process.env.npm_package_version || "0.1.0",
+          checks: {
+            database: { status: "unhealthy", message: "Liveness check failed" },
+            redis: { status: "unhealthy", message: "Liveness check failed" },
+            memory: { status: "unhealthy", message: "Liveness check failed" },
+            disk: { status: "unhealthy", message: "Liveness check failed" },
+          },
         };
       }
     }
@@ -64,7 +72,7 @@ export async function healthRoutes(server: FastifyInstance) {
         const readiness = await healthService.getReadiness();
         
         // Return appropriate HTTP status for Kubernetes
-        if (readiness.status === "ready") {
+        if (readiness.status === "healthy") {
           reply.code(200);
         } else {
           reply.code(503);
@@ -75,13 +83,16 @@ export async function healthRoutes(server: FastifyInstance) {
         server.log.error({ error }, "Readiness probe failed");
         reply.code(503);
         return {
-          status: "not_ready",
+          status: "unhealthy",
           timestamp: new Date().toISOString(),
+          uptime: 0,
+          version: process.env.npm_package_version || "0.1.0",
           checks: {
-            database: false,
-            redis: false,
+            database: { status: "unhealthy", message: "Readiness check failed" },
+            redis: { status: "unhealthy", message: "Readiness check failed" },
+            memory: { status: "unhealthy", message: "Readiness check failed" },
+            disk: { status: "unhealthy", message: "Readiness check failed" },
           },
-          error: error instanceof Error ? error.message : "Unknown error",
         };
       }
     }
@@ -93,21 +104,10 @@ export async function healthRoutes(server: FastifyInstance) {
     "/detailed",
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const health = await healthService.getSystemHealth();
+        const health = await healthService.getHealth();
         
         // Return appropriate HTTP status based on overall health
-        switch (health.status) {
-          case "healthy":
-            reply.code(200);
-            break;
-          case "degraded":
-            reply.code(200); // Still serve traffic but indicate issues
-            break;
-          case "unhealthy":
-            reply.code(503);
-            break;
-        }
-        
+        reply.code(200);
         return health;
       } catch (error) {
         server.log.error({ error }, "Detailed health check failed");
@@ -118,16 +118,10 @@ export async function healthRoutes(server: FastifyInstance) {
           uptime: process.uptime(),
           version: process.env.npm_package_version || "0.1.0",
           checks: {
-            database: { status: "unhealthy", error: "Health check failed" },
-            redis: { status: "unhealthy", error: "Health check failed" },
-            externalApis: { status: "unhealthy", error: "Health check failed" },
-            system: { status: "unhealthy", error: "Health check failed" },
-          },
-          summary: {
-            total: 4,
-            healthy: 0,
-            unhealthy: 4,
-            degraded: 0,
+            database: { status: "unhealthy", message: "Health check failed" },
+            redis: { status: "unhealthy", message: "Health check failed" },
+            memory: { status: "unhealthy", message: "Health check failed" },
+            disk: { status: "unhealthy", message: "Health check failed" },
           },
           error: error instanceof Error ? error.message : "Unknown error",
         };
@@ -145,26 +139,27 @@ export async function healthRoutes(server: FastifyInstance) {
       const { component } = request.params;
       
       try {
+        const health = await healthService.getHealth();
         let result;
         
         switch (component) {
           case "database":
-            result = await healthService.getSystemHealth().then(h => h.checks.database);
+            result = health.checks.database;
             break;
           case "redis":
-            result = await healthService.getSystemHealth().then(h => h.checks.redis);
+            result = health.checks.redis;
             break;
-          case "external-apis":
-            result = await healthService.getSystemHealth().then(h => h.checks.externalApis);
+          case "memory":
+            result = health.checks.memory;
             break;
-          case "system":
-            result = await healthService.getSystemHealth().then(h => h.checks.system);
+          case "disk":
+            result = health.checks.disk;
             break;
           default:
             reply.code(404);
             return {
               error: "Component not found",
-              validComponents: ["database", "redis", "external-apis", "system"],
+              validComponents: ["database", "redis", "memory", "disk"],
             };
         }
         
@@ -188,8 +183,7 @@ export async function healthRoutes(server: FastifyInstance) {
         return {
           status: "unhealthy",
           timestamp: new Date().toISOString(),
-          duration: 0,
-          error: error instanceof Error ? error.message : "Unknown error",
+          message: error instanceof Error ? error.message : "Unknown error",
         };
       }
     }
@@ -201,7 +195,7 @@ export async function healthRoutes(server: FastifyInstance) {
     "/metrics",
     async (_request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const health = await healthService.getSystemHealth();
+        const health = await healthService.getHealth();
         
         // Prometheus-style metrics
         const metrics = [
@@ -209,20 +203,14 @@ export async function healthRoutes(server: FastifyInstance) {
           `# TYPE bridge_watch_health_status gauge`,
           `bridge_watch_health_status{component="database"} ${health.checks.database.status === "healthy" ? 1 : health.checks.database.status === "degraded" ? 0.5 : 0}`,
           `bridge_watch_health_status{component="redis"} ${health.checks.redis.status === "healthy" ? 1 : health.checks.redis.status === "degraded" ? 0.5 : 0}`,
-          `bridge_watch_health_status{component="external_apis"} ${health.checks.externalApis.status === "healthy" ? 1 : health.checks.externalApis.status === "degraded" ? 0.5 : 0}`,
-          `bridge_watch_health_status{component="system"} ${health.checks.system.status === "healthy" ? 1 : health.checks.system.status === "degraded" ? 0.5 : 0}`,
+          `bridge_watch_health_status{component="memory"} ${health.checks.memory.status === "healthy" ? 1 : health.checks.memory.status === "degraded" ? 0.5 : 0}`,
+          `bridge_watch_health_status{component="disk"} ${health.checks.disk.status === "healthy" ? 1 : health.checks.disk.status === "degraded" ? 0.5 : 0}`,
           `bridge_watch_health_status{component="overall"} ${health.status === "healthy" ? 1 : health.status === "degraded" ? 0.5 : 0}`,
           "",
           `# HELP bridge_watch_uptime_seconds Application uptime in seconds`,
           `# TYPE bridge_watch_uptime_seconds counter`,
-          `bridge_watch_uptime_seconds ${health.uptime / 1000}`,
+          `bridge_watch_uptime_seconds ${health.uptime}`,
           "",
-          `# HELP bridge_watch_health_check_duration_seconds Health check duration in seconds`,
-          `# TYPE bridge_watch_health_check_duration_seconds gauge`,
-          `bridge_watch_health_check_duration_seconds{component="database"} ${health.checks.database.duration / 1000}`,
-          `bridge_watch_health_check_duration_seconds{component="redis"} ${health.checks.redis.duration / 1000}`,
-          `bridge_watch_health_check_duration_seconds{component="external_apis"} ${health.checks.externalApis.duration / 1000}`,
-          `bridge_watch_health_check_duration_seconds{component="system"} ${health.checks.system.duration / 1000}`,
         ];
 
         reply.type("text/plain");

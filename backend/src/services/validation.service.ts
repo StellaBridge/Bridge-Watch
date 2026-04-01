@@ -1,27 +1,5 @@
 import { z } from "zod";
-import type { 
-  Asset, 
-  Bridge, 
-  PriceRecord, 
-  HealthScoreRecord, 
-  LiquiditySnapshot,
-  BridgeVolumeStat,
-  BridgeOperator,
-  ReserveCommitment,
-  VerificationResult,
-  AlertRule,
-  AlertEvent,
-  CircuitBreakerTrigger,
-  CircuitBreakerPause,
-  UserPreference,
-  PreferenceDefault,
-  AssetType,
-  BridgeStatus,
-  AlertPriority,
-  DexName,
-  PreferenceCategory
-} from "../database/types.js";
-import { logger, createChildLogger } from "../utils/logger.js";
+import { createChildLogger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 
 // ---------------------------------------------------------------------------
@@ -66,7 +44,7 @@ export interface ValidationMetadata {
 export interface ValidationRule {
   name: string;
   description: string;
-  validator: (data: any, context: ValidationContext) => ValidationError[];
+  validator: (data: any, _context: ValidationContext) => ValidationError[];
   severity: "error" | "warning";
   enabled: boolean;
 }
@@ -123,7 +101,7 @@ const AssetSchema = z.object({
       message: "Issuer must be a valid Stellar public key (starts with G, 56 characters)"
     }),
   asset_type: z.enum(["native", "credit_alphanum4", "credit_alphanum12"], {
-    errorMap: (issue, ctx) => ({
+    errorMap: (_issue, _ctx) => ({
       message: "Asset type must be one of: native, credit_alphanum4, credit_alphanum12"
     })
   }),
@@ -145,7 +123,7 @@ const BridgeSchema = z.object({
     .min(1, "Source chain is required")
     .max(50, "Source chain must be 50 characters or less"),
   status: z.enum(["healthy", "degraded", "down", "unknown"], {
-    errorMap: (issue, ctx) => ({
+    errorMap: (_issue, _ctx) => ({
       message: "Status must be one of: healthy, degraded, down, unknown"
     })
   }),
@@ -217,7 +195,7 @@ const LiquiditySnapshotSchema = z.object({
     .min(1, "Symbol is required")
     .max(20, "Symbol must be 20 characters or less"),
   dex: z.enum(["stellarx", "phoenix", "lumenswap", "sdex", "soroswap"], {
-    errorMap: (issue, ctx) => ({
+    errorMap: (_issue, _ctx) => ({
       message: "DEX must be one of: stellarx, phoenix, lumenswap, sdex, soroswap"
     })
   }),
@@ -268,12 +246,12 @@ const AlertRuleSchema = z.object({
     .max(20, "Asset code must be 20 characters or less"),
   conditions: z.any(), // JSON validation would be more complex
   condition_op: z.enum(["AND", "OR"], {
-    errorMap: (issue, ctx) => ({
+    errorMap: (_issue, _ctx) => ({
       message: "Condition operator must be AND or OR"
     })
   }),
   priority: z.enum(["low", "medium", "high", "critical"], {
-    errorMap: (issue, ctx) => ({
+    errorMap: (_issue, _ctx) => ({
       message: "Priority must be one of: low, medium, high, critical"
     })
   }),
@@ -298,7 +276,7 @@ class CustomValidationRules {
     {
       name: "native_asset_no_issuer",
       description: "Native assets should not have an issuer",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         if (data.asset_type === "native" && data.issuer) {
           errors.push({
@@ -317,7 +295,7 @@ class CustomValidationRules {
     {
       name: "non_native_asset_requires_issuer",
       description: "Non-native assets must have an issuer",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         if (data.asset_type !== "native" && !data.issuer) {
           errors.push({
@@ -335,7 +313,7 @@ class CustomValidationRules {
     {
       name: "bridge_provider_consistency",
       description: "Bridge provider requires source chain",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         if (data.bridge_provider && !data.source_chain) {
           errors.push({
@@ -357,7 +335,7 @@ class CustomValidationRules {
     {
       name: "bridge_supply_consistency",
       description: "Supply values should be consistent with bridge status",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         const stellarSupply = parseFloat(data.supply_on_stellar);
         const sourceSupply = parseFloat(data.supply_on_source);
@@ -379,7 +357,7 @@ class CustomValidationRules {
     {
       name: "tvl_reasonableness",
       description: "TVL should be reasonable for bridge status",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         const tvl = parseFloat(data.total_value_locked);
         
@@ -405,7 +383,7 @@ class CustomValidationRules {
     {
       name: "price_volatility_check",
       description: "Check for extreme price volatility",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         const price = parseFloat(data.price);
         
@@ -439,7 +417,7 @@ class CustomValidationRules {
     {
       name: "timestamp_freshness",
       description: "Check if price data is not too old",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         const now = new Date();
         const priceTime = new Date(data.time);
@@ -467,7 +445,7 @@ class CustomValidationRules {
     {
       name: "score_consistency",
       description: "Health scores should be internally consistent",
-      validator: (data: any, context: ValidationContext) => {
+      validator: (data: any, _context: ValidationContext) => {
         const errors: ValidationError[] = [];
         const scores = [
           data.liquidity_depth_score,
@@ -690,10 +668,10 @@ export class ValidationService {
   /**
    * Validate a single data item
    */
-  async validate<T>(
+  async validate(
     data: any,
     dataType: keyof typeof this.schemas,
-    context: ValidationContext
+    _context: ValidationContext
   ): Promise<ValidationResult> {
     const startTime = Date.now();
     const errors: ValidationError[] = [];
@@ -705,10 +683,10 @@ export class ValidationService {
 
     try {
       // Check for admin bypass
-      if (context.isAdmin && config.VALIDATION_ADMIN_BYPASS) {
+      if (_context.isAdmin && config.VALIDATION_ADMIN_BYPASS) {
         this.validationLogger.warn("Admin bypass used for validation", {
           dataType,
-          correlationId: context.correlationId,
+          correlationId: _context.correlationId,
         });
         
         return {
@@ -774,7 +752,7 @@ export class ValidationService {
       const customRules = this.customRules[dataType] || [];
       for (const rule of customRules) {
         if (rule.enabled) {
-          const ruleErrors = rule.validator(normalizedData, context);
+          const ruleErrors = rule.validator(normalizedData, _context);
           if (rule.severity === "error") {
             errors.push(...ruleErrors);
           } else {
@@ -794,7 +772,7 @@ export class ValidationService {
       let duplicateCheck = false;
       const duplicateDetector = this.duplicateDetectors[dataType];
       if (duplicateDetector) {
-        const duplicateResult = await duplicateDetector(normalizedData, context);
+        const duplicateResult = await duplicateDetector(normalizedData, _context);
         duplicateCheck = true;
         
         if (duplicateResult.isDuplicate) {
@@ -841,7 +819,7 @@ export class ValidationService {
     } catch (error) {
       this.validationLogger.error("Validation failed with error", error as Error, {
         dataType,
-        correlationId: context.correlationId,
+        correlationId: _context.correlationId,
       });
 
       return {
@@ -869,14 +847,14 @@ export class ValidationService {
   /**
    * Validate multiple items in batch
    */
-  async validateBatch<T>(
+  async validateBatch(
     items: any[],
     dataType: keyof typeof this.schemas,
-    context: ValidationContext & { batchSize?: number }
+    _context: ValidationContext & { batchSize?: number }
   ): Promise<BatchValidationResult> {
     const startTime = Date.now();
     const results: ValidationResult[] = [];
-    const batchSize = context.batchSize || 100;
+    const batchSize = _context.batchSize || 100;
     
     let validItems = 0;
     let invalidItems = 0;
@@ -889,7 +867,7 @@ export class ValidationService {
       
       const batchPromises = batch.map(async (item, index) => {
         const itemContext = {
-          ...context,
+          ..._context,
           batchIndex: i + index,
         };
         

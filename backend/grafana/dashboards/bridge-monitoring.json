@@ -1,0 +1,172 @@
+{
+  "dashboard": {
+    "title": "Stellar Bridge Watch - Bridge Monitoring",
+    "tags": ["stellar", "bridge", "verification"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Bridge Verification Rate",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "rate(bridge_verifications_total[5m])",
+            "legendFormat": "{{bridge_name}} - {{asset}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "format": "ops", "label": "Verifications/sec" },
+          { "format": "short" }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Bridge Verification Success vs Failure",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "rate(bridge_verification_success_total[5m])",
+            "legendFormat": "Success - {{bridge_name}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(bridge_verification_failure_total[5m])",
+            "legendFormat": "Failure - {{bridge_name}}",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Bridge Health Score Over Time",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "bridge_health_score",
+            "legendFormat": "{{bridge_name}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "format": "short", "label": "Health Score", "max": 100, "min": 0 },
+          { "format": "short" }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": { "params": [80], "type": "lt" },
+              "operator": { "type": "and" },
+              "query": { "params": ["A", "5m", "now"] },
+              "reducer": { "params": [], "type": "avg" },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "1m",
+          "handler": 1,
+          "name": "Bridge Health Score Alert",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 4,
+        "title": "Verification Failure Reasons",
+        "type": "piechart",
+        "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum by (reason) (increase(bridge_verification_failure_total[1h]))",
+            "legendFormat": "{{reason}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Bridge Verification Success Rate (%)",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "sum(rate(bridge_verification_success_total[5m])) / sum(rate(bridge_verifications_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 90, "color": "yellow" },
+                { "value": 95, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Circuit Breaker Status",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "rate(circuit_breaker_trips_total[5m])",
+            "legendFormat": "{{bridge_id}} - {{reason}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Asset Price Tracking",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "asset_price_usd",
+            "legendFormat": "{{symbol}} ({{source}})",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "format": "currencyUSD", "label": "Price" },
+          { "format": "short" }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Total Value Locked (TVL)",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 32, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "expr": "liquidity_tvl_usd",
+            "legendFormat": "{{symbol}} on {{dex}} ({{chain}})",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          { "format": "currencyUSD", "label": "TVL" },
+          { "format": "short" }
+        ]
+      }
+    ]
+  }
+}

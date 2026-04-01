@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { AlertService } from "../../services/alert.service.js";
+import { AlertService, type AlertCondition } from "../../services/alert.service.js";
 import { authMiddleware } from "../middleware/auth.js";
 import {
   getPaginationParams,
@@ -99,7 +99,7 @@ export async function alertsRoutes(server: FastifyInstance) {
         return reply.status(400).send({ error: "ownerAddress required" });
       }
       const rule = await alertService.createRule(
-        ownerAddress, data.name, data.assetCode, data.conditions,
+        ownerAddress, data.name, data.assetCode, data.conditions as AlertCondition[],
         data.conditionOp, data.priority, data.cooldownSeconds, data.webhookUrl,
       );
       return reply.status(201).send({ rule });
@@ -136,7 +136,7 @@ export async function alertsRoutes(server: FastifyInstance) {
       if (!ownerAddress) {
         return reply.status(400).send({ error: "ownerAddress required" });
       }
-      const createdRules = await alertService.bulkCreateRules(ownerAddress, rules);
+      const createdRules = await alertService.bulkCreateRules(ownerAddress, rules as Parameters<typeof alertService.bulkCreateRules>[1]);
       return reply.status(201).send({ rules: createdRules });
     },
   );
@@ -189,7 +189,7 @@ export async function alertsRoutes(server: FastifyInstance) {
       if (!ownerAddress) {
         return reply.status(400).send({ error: "ownerAddress required" });
       }
-      const updatedRules = await alertService.bulkUpdateRules(ownerAddress, updates);
+      const updatedRules = await alertService.bulkUpdateRules(ownerAddress, updates as Parameters<typeof alertService.bulkUpdateRules>[1]);
       return { rules: updatedRules };
     },
   );
@@ -227,7 +227,7 @@ export async function alertsRoutes(server: FastifyInstance) {
       if (!ownerAddress) {
         return reply.status(400).send({ error: "ownerAddress required" });
       }
-      const rule = await alertService.updateRule(ruleId, ownerAddress, data);
+      const rule = await alertService.updateRule(ruleId, ownerAddress, data as Parameters<typeof alertService.updateRule>[2]);
       if (!rule) return reply.status(404).send({ error: "Rule not found" });
       return { rule };
     },
@@ -359,7 +359,7 @@ export async function alertsRoutes(server: FastifyInstance) {
     },
     async (request: FastifyRequest<{ Querystring: any }>) => {
       const query = AlertHistoryQuerySchema.parse(request.query);
-      const { limit, offset, page } = getPaginationParams(query);
+      const { limit, page } = getPaginationParams(query);
       const events = await alertService.getRecentAlerts(limit);
       const total = events.length;
       return formatPaginatedResponse(events, total, page, limit);

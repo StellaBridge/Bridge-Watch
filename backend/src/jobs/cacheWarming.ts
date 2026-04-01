@@ -52,7 +52,7 @@ export async function runCacheWarming() {
 }
 
 // Automatically runs if executed as script directly
-// @ts-ignore
+// @ts-expect-error - Required for direct execution script detection
 if (import.meta.url === `file://${process.argv[1]}`) {
   runCacheWarming().then(() => process.exit(0)).catch(() => process.exit(1));
 }

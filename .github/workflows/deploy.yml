@@ -1,165 +1,33 @@
-name: Deploy
+name: Deployment
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Docker Build & Push"]
+    types:
+      - completed
     branches:
       - main
       - develop
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Environment to deploy to"
-        required: true
-        type: choice
-        options:
-          - staging
-          - production
 
 jobs:
-  build-and-push:
-    name: Build and Push Docker Images
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      backend-tag: ${{ steps.meta-backend.outputs.tags }}
-      frontend-tag: ${{ steps.meta-frontend.outputs.tags }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for backend
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/backend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata for frontend
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/frontend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-        continue-on-error: true
-
   deploy-staging:
-    name: Deploy to Staging
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }}
     runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
-    environment:
-      name: staging
-      url: https://staging.stellarbridgewatch.io
-
+    environment: staging
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to staging
+      - name: Deploy to Staging
         run: |
-          echo "Deploying to staging environment..."
-          echo "Backend image: ${{ needs.build-and-push.outputs.backend-tag }}"
-          echo "Frontend image: ${{ needs.build-and-push.outputs.frontend-tag }}"
-          # Add your deployment commands here (e.g., kubectl, helm, docker-compose)
-          # Example: kubectl set image deployment/backend backend=${{ needs.build-and-push.outputs.backend-tag }}
-
-      - name: Run smoke tests
-        run: |
-          echo "Running smoke tests against staging..."
-          # Add smoke test commands here
-          # Example: curl -f https://staging.stellarbridgewatch.io/health || exit 1
-
-      - name: Notify deployment
-        if: always()
-        run: |
-          echo "Staging deployment completed with status: ${{ job.status }}"
-          # Add notification logic (Slack, Discord, etc.)
+          echo "Deploying to Staging environment..."
+          # Add your staging deployment commands here (e.g., helm upgrade, kubectl apply, ssh/scp)
+          # Example: ssh user@staging-server "docker-compose pull && docker-compose up -d"
 
   deploy-production:
-    name: Deploy to Production
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
-    environment:
-      name: production
-      url: https://stellarbridgewatch.io
-
+    environment: production
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to production
+      - name: Deploy to Production
         run: |
-          echo "Deploying to production environment..."
-          echo "Backend image: ${{ needs.build-and-push.outputs.backend-tag }}"
-          echo "Frontend image: ${{ needs.build-and-push.outputs.frontend-tag }}"
-          # Add your deployment commands here
-          # Example: kubectl set image deployment/backend backend=${{ needs.build-and-push.outputs.backend-tag }}
-
-      - name: Run smoke tests
-        run: |
-          echo "Running smoke tests against production..."
-          # Add smoke test commands here
-          # Example: curl -f https://stellarbridgewatch.io/health || exit 1
-
-      - name: Notify deployment
-        if: always()
-        run: |
-          echo "Production deployment completed with status: ${{ job.status }}"
-          # Add notification logic (Slack, Discord, email, etc.)
-
-  rollback:
-    name: Rollback Deployment
-    runs-on: ubuntu-latest
-    if: failure()
-    needs: [deploy-staging, deploy-production]
-    environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-
-    steps:
-      - name: Rollback
-        run: |
-          echo "Rolling back deployment..."
-          # Add rollback commands here
-          # Example: kubectl rollout undo deployment/backend
+          echo "Deploying to Production environment..."
+          # Add your production deployment commands here
+          # Note: This job requires manual approval via GitHub Environment settings.

@@ -9,7 +9,15 @@ import TransactionDetail from "./TransactionDetail";
 import { SkeletonTable } from "./Skeleton";
 import type { BridgeTransaction } from "../types";
 
-export default function TransactionHistory() {
+type TransactionHistoryProps = {
+  refreshInterval?: number | false;
+  refreshOnWindowFocus?: boolean;
+};
+
+export default function TransactionHistory({
+  refreshInterval,
+  refreshOnWindowFocus,
+}: TransactionHistoryProps) {
   const {
     data,
     isLoading,
@@ -20,7 +28,10 @@ export default function TransactionHistory() {
     setPage,
     updateFilters,
     resetFilters,
-  } = useTransactions();
+  } = useTransactions({
+    refetchInterval: refreshInterval,
+    refetchOnWindowFocus: refreshOnWindowFocus,
+  });
 
   const [selectedTx, setSelectedTx] = useState<BridgeTransaction | null>(null);
 

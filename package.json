@@ -16,6 +16,8 @@
     "build:frontend": "npm run build --workspace=frontend",
     "test": "npm run test --workspaces --if-present",
     "test:backend": "npm run test --workspace=backend",
+    "test:load": "k6 run load-tests/scenarios/api-load.js -e PROFILE=smoke -e BASE_URL=http://127.0.0.1:3001",
+    "test:load:report": "node load-tests/scripts/generate-report.mjs load-tests/results/summary.json load-tests/results/report.md",
     "lint": "npm run lint --workspaces --if-present",
     "setup": "bash scripts/setup.sh",
     "setup:quick": "bash scripts/setup.sh --skip-contracts --skip-ide -y"

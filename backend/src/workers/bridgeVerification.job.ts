@@ -3,8 +3,10 @@ import { BridgeService } from "../services/bridge.service.js";
 import { SUPPORTED_ASSETS } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
+import { getMetricsService } from "../services/metrics.service.js";
 
 const bridgeService = new BridgeService();
+const metricsService = getMetricsService();
 
 export async function processBridgeVerification(job: Job) {
   logger.info({ jobId: job.id }, "Starting bridge verification job");
@@ -15,6 +17,16 @@ export async function processBridgeVerification(job: Job) {
   for (const asset of bridgedAssets) {
     try {
       const result = await bridgeService.verifySupply(asset.code);
+      
+      // Record metrics (using asset code as identifier since bridgeId is not in result)
+      metricsService.recordBridgeVerification(
+        'stellar-bridge',
+        'Stellar Bridge',
+        asset.code,
+        !result.isFlagged && !result.errorStatus,
+        result.errorStatus || (result.isFlagged ? 'supply_mismatch' : undefined)
+      );
+      
       if (result.isFlagged) {
         logger.error(
           { asset: asset.code, result }, 
@@ -32,6 +44,15 @@ export async function processBridgeVerification(job: Job) {
         );
       }
     } catch (error) {
+      // Record failure metric
+      metricsService.recordBridgeVerification(
+        'stellar-bridge',
+        'Stellar Bridge',
+        asset.code,
+        false,
+        'exception'
+      );
+      
       logger.error({ error, asset: asset.code }, "Unexpected failure during bridge verification job");
     }
   }
