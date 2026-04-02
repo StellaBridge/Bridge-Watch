@@ -7,8 +7,8 @@ const priceService = new PriceService();
 export async function processPriceCollection(job: Job) {
   logger.info({ jobId: job.id }, "Starting price collection job");
   
-  // Fetch all prices for aggregation
-  const testAssets = ["USDC", "EUR", "GBP"];
+  const _assetsToFetch = SUPPORTED_ASSETS.filter(a => a.code !== "XLM"); // XLM is usually the base or handled differently if needed, but let's fetch all for completeness if they are in SUPPORTED_ASSETS. 
+  // Actually, the service handles USDC as 1.
   
   for (const asset of testAssets) {
     try {

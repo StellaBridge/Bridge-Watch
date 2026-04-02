@@ -20,6 +20,7 @@ export class ScoreCalculator {
     if (totalLiquidity <= 0) return 0;
 
     // Logarithmic scale: $1k = 25, $10k = 50, $100k = 75, $1M = 100
+    const _logBase = 10;
     const baseScore = Math.min(100, (Math.log10(Math.max(1, totalLiquidity)) / 6) * 100);
 
     // Balance penalty: penalize if one side is significantly thinner than the other

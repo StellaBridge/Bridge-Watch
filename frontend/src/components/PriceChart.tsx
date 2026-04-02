@@ -23,60 +23,48 @@ interface PriceChartProps {
   symbol: string;
 }
 
-const SOURCE_COLORS: Record<PriceSourceId, string> = {
-  stellar_dex: "#0057FF",
+interface EnhancedPriceChartProps extends PriceChartProps {
+  timeframe: PriceTimeframe;
+  onTimeframeChange: (tf: PriceTimeframe) => void;
+}
+
+const SOURCE_COLORS: Record<string, string> = {
+  sdex: "#0057FF",
   circle: "#00D4AA",
   coinbase: "#0052FF",
   stellar_amm: "#FF6B35",
 };
 
-const ALL_SOURCES: PriceSourceId[] = [
-  "stellar_dex",
-  "circle",
-  "coinbase",
-  "stellar_amm",
-];
+const TIMEFRAMES: PriceTimeframe[] = ["1H", "24H", "7D", "30D"];
 
-function stellarVarRgb(varName: string, fallbackRgb: string): string {
-  try {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-    if (!raw) return fallbackRgb;
-    return `rgb(${raw})`;
-  } catch {
-    return fallbackRgb;
-  }
+function getTimeframeTickFormatter(timeframe: PriceTimeframe) {
+  return (val: string) => {
+    const date = new Date(val);
+    switch (timeframe) {
+      case "1H":
+        return date.toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      case "24H":
+        return date.toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      case "7D":
+        return date.toLocaleDateString(undefined, {
+          weekday: "short",
+        });
+      case "30D":
+        return date.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        });
+    }
+  };
 }
 
-function msForRange(rangeId: TimeRangeId, customStartIso: string, customEndIso: string): number {
-  if (rangeId === "1h") return 60 * 60 * 1000;
-  if (rangeId === "24h") return 24 * 60 * 60 * 1000;
-  if (rangeId === "7d") return 7 * 24 * 60 * 60 * 1000;
-  if (rangeId === "30d") return 30 * 24 * 60 * 60 * 1000;
-
-  const start = Date.parse(customStartIso);
-  const end = Date.parse(customEndIso);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 60 * 60 * 1000;
-  return end - start;
-}
-
-function formatPct(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "--";
-  return `${(value * 100).toFixed(2)}%`;
-}
-
-function formatPrice(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "--";
-  return `${value.toFixed(6)}`;
-}
-
-function tooltipLabelFromIso(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
-
-export default function PriceChart({ symbol }: PriceChartProps) {
+export default function PriceChart({ symbol, data, isLoading }: PriceChartProps) {
   const titleId = `price-chart-title-${symbol}`;
   const descId = `price-chart-desc-${symbol}`;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -394,5 +382,95 @@ export default function PriceChart({ symbol }: PriceChartProps) {
         )}
       </div>
     </figure>
+  );
+}
+
+export function EnhancedPriceChart({
+  symbol,
+  data,
+  isLoading,
+  timeframe,
+  onTimeframeChange,
+}: EnhancedPriceChartProps) {
+  const sources = data.length > 0 ? [...new Set(data.map((d) => d.source))] : [];
+
+  return (
+    <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-white">
+          {symbol} Price History
+        </h3>
+        <div className="flex items-center gap-1 bg-stellar-dark rounded-lg p-1">
+          {TIMEFRAMES.map((tf) => (
+            <button
+              key={tf}
+              type="button"
+              onClick={() => onTimeframeChange(tf)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                tf === timeframe
+                  ? "bg-stellar-blue text-white"
+                  : "text-stellar-text-secondary hover:text-white"
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="h-72 flex items-center justify-center">
+          <span className="text-stellar-text-secondary">
+            Loading chart data...
+          </span>
+        </div>
+      ) : data.length === 0 ? (
+        <div className="h-72 flex items-center justify-center">
+          <span className="text-stellar-text-secondary">
+            No price data available for {timeframe}
+          </span>
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1E2340" />
+            <XAxis
+              dataKey="timestamp"
+              stroke="#8A8FA8"
+              tick={{ fontSize: 12 }}
+              tickFormatter={getTimeframeTickFormatter(timeframe)}
+            />
+            <YAxis
+              stroke="#8A8FA8"
+              tick={{ fontSize: 12 }}
+              domain={["auto", "auto"]}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#141829",
+                border: "1px solid #1E2340",
+                borderRadius: "8px",
+                color: "#FFFFFF",
+              }}
+              labelFormatter={(label: string) =>
+                new Date(label).toLocaleString()
+              }
+            />
+            <Legend />
+            {sources.map((source) => (
+              <Line
+                key={source}
+                type="monotone"
+                dataKey="price"
+                name={source}
+                stroke={SOURCE_COLORS[source] || "#8A8FA8"}
+                dot={false}
+                strokeWidth={2}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </div>
   );
 }
