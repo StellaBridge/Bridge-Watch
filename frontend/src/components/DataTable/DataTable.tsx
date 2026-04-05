@@ -15,6 +15,24 @@ import { TablePagination } from "./TablePagination";
 import { useDataTable } from "./useDataTable";
 import type { DataTableColumnDef, DataTableRowAction } from "./types";
 
+function withFilterFns<TData extends RowData>(
+  cols: Array<DataTableColumnDef<TData>>
+): Array<DataTableColumnDef<TData>> {
+  return cols.map((c) => {
+    if (!c.filterType) return c;
+    if ("filterFn" in c && c.filterFn) return c;
+
+    if (c.filterType === "numberRange") return { ...c, filterFn: "numberRange" };
+    if (c.filterType === "dateRange") return { ...c, filterFn: "dateRange" };
+
+    // For these filter UIs we can safely use built-in filter fns.
+    if (c.filterType === "boolean") return { ...c, filterFn: "equals" };
+    if (c.filterType === "select") return { ...c, filterFn: "equals" };
+
+    return c;
+  });
+}
+
 declare module "@tanstack/react-table" {
   interface FilterFns {
     numberRange: FilterFn<unknown>;
@@ -102,7 +120,8 @@ export function DataTable<TData extends RowData>({
   } = useDataTable<TData>({ columns, defaultPageSize: pageSizeOptions?.[0] ?? 10 });
 
   const columnsWithSelection = useMemo(() => {
-    if (!enableRowSelection) return columns;
+    const mappedColumns = withFilterFns(columns);
+    if (!enableRowSelection) return mappedColumns;
 
     const selectionCol: DataTableColumnDef<TData> = {
       id: "select",
@@ -131,7 +150,7 @@ export function DataTable<TData extends RowData>({
       size: 40,
     };
 
-    return [selectionCol, ...columns];
+    return [selectionCol, ...mappedColumns];
   }, [columns, enableRowSelection]);
 
   const table = useReactTable({

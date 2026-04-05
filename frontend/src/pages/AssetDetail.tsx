@@ -5,6 +5,9 @@ import AssetHeader from "../components/AssetHeader";
 import HealthBreakdown from "../components/HealthBreakdown";
 import { EnhancedPriceChart } from "../components/PriceChart";
 import LiquidityDepthChart from "../components/LiquidityDepthChart";
+import type { DataTableColumnDef } from "../components/DataTable";
+import { DataTable } from "../components/DataTable";
+import type { CellContext } from "@tanstack/react-table";
 import RefreshControls from "../components/RefreshControls";
 import { ErrorBoundary, LoadingSpinner } from "../components/Skeleton";
 import VolumeAnalytics from "../components/VolumeAnalytics";
@@ -34,6 +37,46 @@ export default function AssetDetail() {
     timeframe,
     setTimeframe,
   } = useAssetDetail(symbol ?? "");
+
+  const priceSourceRows = (priceData?.sources ?? []) as Array<{
+    source: string;
+    price: number;
+    timestamp: string;
+  }>;
+
+  const priceSourceColumns: Array<
+    DataTableColumnDef<{
+      source: string;
+      price: number;
+      timestamp: string;
+    }>
+  > = [
+    {
+      id: "source",
+      accessorKey: "source",
+      header: "Source",
+      filterType: "text",
+    },
+    {
+      id: "price",
+      accessorKey: "price",
+      header: "Price",
+      filterType: "numberRange",
+      cell: (
+        ctx: CellContext<
+          { source: string; price: number; timestamp: string },
+          unknown
+        >
+      ) =>
+        `$${Number(ctx.getValue()).toFixed(4)}`,
+    },
+    {
+      id: "timestamp",
+      accessorKey: "timestamp",
+      header: "Last Updated",
+      filterType: "text",
+    },
+  ];
 
   if (!symbol) {
     return <div className="text-stellar-text-secondary p-8">No asset symbol provided.</div>;
@@ -118,6 +161,33 @@ export default function AssetDetail() {
             <VolumeAnalytics data={volume.data} isLoading={volume.isLoading} />
           )}
 
+      <DataTable
+        data={priceSourceRows}
+        columns={priceSourceColumns}
+        isLoading={!priceData}
+        title="Price Sources"
+        description={`Price sources for ${symbol} including last update times`}
+        pageSizeOptions={[10, 20, 50]}
+        filenameBase={`${symbol}-price-sources`}
+        enableRowSelection={true}
+        enableMultiSort={true}
+        enableColumnReorder={true}
+        enableVirtualization={true}
+        rowActions={{
+          items: [
+            {
+              id: "copy-source",
+              label: "Copy source",
+              onSelect: (row) => {
+                void navigator.clipboard.writeText(row.source);
+              },
+            },
+          ],
+        }}
+      />
+    </div>
+  </Suspense>
+</ErrorBoundary>
           {activeTab === TabId.Alerts && (
             <AlertConfigSection
               alerts={alerts.data}

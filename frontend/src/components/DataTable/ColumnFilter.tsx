@@ -21,7 +21,7 @@ export function ColumnFilter<TData>({
 
     return (
       <select
-        className="mt-2 w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+        className="mt-2 w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
         value={v === "" ? "" : v ? "true" : "false"}
         onChange={(e) => {
           const next = e.target.value;
@@ -41,7 +41,7 @@ export function ColumnFilter<TData>({
 
     return (
       <select
-        className="mt-2 w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+        className="mt-2 w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
         value={v}
         onChange={(e) => {
           const next = e.target.value;
@@ -65,7 +65,7 @@ export function ColumnFilter<TData>({
     return (
       <div className="mt-2 flex items-center gap-2">
         <input
-          className="w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+          className="w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
           placeholder="Min"
           inputMode="decimal"
           value={typeof min === "number" ? String(min) : ""}
@@ -79,7 +79,7 @@ export function ColumnFilter<TData>({
           }}
         />
         <input
-          className="w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+          className="w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
           placeholder="Max"
           inputMode="decimal"
           value={typeof max === "number" ? String(max) : ""}
@@ -104,7 +104,7 @@ export function ColumnFilter<TData>({
       <div className="mt-2 flex items-center gap-2">
         <input
           type="date"
-          className="w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+          className="w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
           value={typeof from === "string" ? from : ""}
           onChange={(e) => {
             const next: [string | undefined, string | undefined] = [
@@ -116,7 +116,7 @@ export function ColumnFilter<TData>({
         />
         <input
           type="date"
-          className="w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+          className="w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
           value={typeof to === "string" ? to : ""}
           onChange={(e) => {
             const next: [string | undefined, string | undefined] = [
@@ -134,7 +134,7 @@ export function ColumnFilter<TData>({
 
   return (
     <input
-      className="mt-2 w-full bg-stellar-card border border-stellar-border rounded px-2 py-1 text-xs text-stellar-text-primary"
+      className="mt-2 w-full bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-xs text-white"
       placeholder="Filter…"
       value={text}
       onChange={(e) => column.setFilterValue(e.target.value)}

@@ -50,28 +50,52 @@ function SortableHeaderCell<TData>({
   const sortIndicator =
     sort === "asc" ? "▲" : sort === "desc" ? "▼" : "";
 
+  const ariaSort: "ascending" | "descending" | "none" =
+    sort === "asc" ? "ascending" : sort === "desc" ? "descending" : "none";
+
   return (
     <th
       ref={setNodeRef}
       style={style}
       scope="col"
       className="pb-3 pr-4 align-top"
+      aria-sort={canSort ? ariaSort : undefined}
     >
       <div className="flex items-start justify-between gap-2">
         <button
           type="button"
           className={`text-left w-full ${canSort ? "cursor-pointer" : "cursor-default"}`}
           onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+          onKeyDown={(e) => {
+            if (!canSort) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              header.column.toggleSorting(undefined, e.shiftKey);
+            }
+          }}
           aria-label={canSort ? `Sort by ${id}` : undefined}
+          aria-describedby={canSort ? `${header.id}-sort-hint` : undefined}
         >
           <div className="flex items-center gap-2 text-stellar-text-secondary">
-            <span className="select-none" {...attributes} {...listeners}>
+            <span
+              className="select-none"
+              {...attributes}
+              {...listeners}
+              aria-label="Reorder column"
+              role="button"
+              tabIndex={-1}
+            >
               ⠿
             </span>
             <span className="text-stellar-text-secondary">
               {flexRender(header.column.columnDef.header, header.getContext())}
             </span>
             <span className="text-xs text-stellar-text-secondary">{sortIndicator}</span>
+            {canSort ? (
+              <span id={`${header.id}-sort-hint`} className="sr-only">
+                Press Enter or Space to sort. Hold Shift for multi-sort.
+              </span>
+            ) : null}
           </div>
         </button>
       </div>
