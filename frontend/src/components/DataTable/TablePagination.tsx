@@ -24,7 +24,7 @@ export function TablePagination<TData>({
         </label>
         <select
           id="page-size"
-          className="bg-stellar-card border border-stellar-border rounded px-2 py-1 text-sm text-stellar-text-primary"
+          className="bg-stellar-dark border border-stellar-border rounded px-2 py-1 text-sm text-white"
           value={pageSize}
           onChange={(e) => table.setPageSize(Number(e.target.value))}
         >
