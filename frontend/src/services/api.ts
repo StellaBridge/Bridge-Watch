@@ -1,6 +1,7 @@
 import type {
   ApiKeyRecord,
   Asset,
+  AssetInfo,
   AssetWithHealth,
   Bridge,
   BridgeStats,
@@ -115,6 +116,60 @@ export function getAssetPrice(symbol: string) {
     deviation: number;
     lastUpdated: string;
   } | null>(`/assets/${symbol}/price`);
+}
+
+export function getAssetInfo(symbol: string) {
+  return fetchApi<AssetInfo | null>(`/assets/${symbol}/info`);
+}
+
+export function getAssetPriceHistory(symbol: string, timeframe: string) {
+  return fetchApi<Array<{ source: string; price: number; timestamp: string }>>(
+    `/assets/${symbol}/price/history?timeframe=${timeframe}`
+  );
+}
+
+export function getAssetPriceSources(symbol: string) {
+  return fetchApi<Array<{ source: string; price: number; timestamp: string }>>(
+    `/assets/${symbol}/price/sources`
+  );
+}
+
+export function getAssetLiquiditySources(symbol: string) {
+  return fetchApi<Array<{
+    dex: string;
+    bidDepth: number;
+    askDepth: number;
+    totalLiquidity: number;
+  }>>(`/assets/${symbol}/liquidity/sources`);
+}
+
+export function getAssetVolume(symbol: string) {
+  return fetchApi<{
+    symbol: string;
+    volume24h: number;
+    volume7d: number;
+    volume30d: number;
+  } | null>(`/assets/${symbol}/volume`);
+}
+
+export function getAssetSupplyVerification(symbol: string) {
+  return fetchApi<{
+    symbol: string;
+    onChainSupply: number;
+    offChainSupply: number;
+    mismatchPercentage: number;
+    lastVerified: string;
+  } | null>(`/assets/${symbol}/supply`);
+}
+
+export function getAssetAlerts(symbol: string) {
+  return fetchApi<Array<{
+    id: string;
+    type: string;
+    severity: "info" | "warning" | "critical";
+    message: string;
+    createdAt: string;
+  }>>(`/assets/${symbol}/alerts`);
 }
 
 // Bridges

@@ -12,7 +12,7 @@ import {
   getAssetAlerts,
 } from "../services/api";
 import { useWebSocket } from "./useWebSocket";
-import type { PriceTimeframe, HealthScore } from "../types";
+import type { HealthScore, PriceTimeframe } from "../types";
 
 export function useAssetDetail(symbol: string) {
   const [timeframe, setTimeframe] = useState<PriceTimeframe>("24H");

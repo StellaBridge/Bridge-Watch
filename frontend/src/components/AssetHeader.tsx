@@ -114,7 +114,7 @@ export default function AssetHeader({
             <h1 className="text-2xl font-bold text-white">{symbol}</h1>
             {assetInfo && (
               <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-stellar-border text-stellar-text-secondary">
-                {TYPE_LABELS[assetInfo.type] || assetInfo.type}
+                {(assetInfo.type && TYPE_LABELS[assetInfo.type]) || assetInfo.type}
               </span>
             )}
             {status && (

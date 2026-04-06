@@ -14,6 +14,8 @@ function getStatusStyle(status: PriceSource["status"]): string {
       return "bg-yellow-500/20 text-yellow-400";
     case "offline":
       return "bg-red-500/20 text-red-400";
+    default:
+      return "bg-stellar-border text-stellar-text-secondary";
   }
 }
 

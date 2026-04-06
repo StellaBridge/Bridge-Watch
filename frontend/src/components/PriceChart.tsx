@@ -18,12 +18,63 @@ import {
   usePriceComparison,
 } from "../hooks/usePriceComparison";
 import { SkeletonChart } from "./Skeleton";
+import type { PriceTimeframe } from "../types";
+
+// --- local helpers ---
+
+const ALL_SOURCES: PriceSourceId[] = ["stellar_dex", "circle", "coinbase", "stellar_amm"];
+
+function msForRange(rangeId: string, customStartIso: string, customEndIso: string): number {
+  if (rangeId === "custom" && customStartIso && customEndIso) {
+    return Math.max(0, Date.parse(customEndIso) - Date.parse(customStartIso));
+  }
+  const RANGE_MS: Record<string, number> = {
+    "1h": 60 * 60 * 1_000,
+    "24h": 24 * 60 * 60 * 1_000,
+    "7d": 7 * 24 * 60 * 60 * 1_000,
+    "30d": 30 * 24 * 60 * 60 * 1_000,
+  };
+  return RANGE_MS[rangeId] ?? RANGE_MS["24h"];
+}
+
+function stellarVarRgb(varName: string, fallbackRgb: string): string {
+  if (typeof document === "undefined") return fallbackRgb;
+  const val = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return val || fallbackRgb;
+}
+
+function formatPrice(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `$${value.toFixed(4)}`;
+}
+
+function formatPct(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function tooltipLabelFromIso(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+// --- end helpers ---
 
 interface PriceChartProps {
   symbol: string;
 }
 
+interface PriceDataPoint {
+  source: string;
+  price: number;
+  timestamp: string;
+}
+
 interface EnhancedPriceChartProps extends PriceChartProps {
+  data: PriceDataPoint[];
+  isLoading: boolean;
+  sources?: PriceDataPoint[];
   timeframe: PriceTimeframe;
   onTimeframeChange: (tf: PriceTimeframe) => void;
 }
@@ -60,11 +111,13 @@ function getTimeframeTickFormatter(timeframe: PriceTimeframe) {
           month: "short",
           day: "numeric",
         });
+      default:
+        return val;
     }
   };
 }
 
-export default function PriceChart({ symbol, data, isLoading }: PriceChartProps) {
+export default function PriceChart({ symbol }: PriceChartProps) {
   const titleId = `price-chart-title-${symbol}`;
   const descId = `price-chart-desc-${symbol}`;
   const containerRef = useRef<HTMLDivElement | null>(null);

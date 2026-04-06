@@ -115,7 +115,7 @@ export async function rateLimitAdminRoutes(server: FastifyInstance) {
         await rateLimitService.resetRateLimit(identifier, type, endpoint);
         
         logger.info(
-          { type, identifier, endpoint, adminKey: request.headers["x-api-key"] },
+          { type, identifier, endpoint },
           "Rate limit reset by admin"
         );
 
@@ -173,7 +173,7 @@ export async function rateLimitAdminRoutes(server: FastifyInstance) {
         await rateLimitService.updateRateLimit(tier as any, newLimits);
         
         logger.info(
-          { tier, newLimits, adminKey: request.headers["x-api-key"] },
+          { tier, newLimits },
           "Rate limits updated by admin"
         );
 

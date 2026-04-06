@@ -135,6 +135,32 @@ export interface WsBridgeMessage extends WsBaseMessage {
 
 export type WsMessage = WsPriceMessage | WsHealthMessage | WsAlertMessage | WsBridgeMessage;
 
+export type PriceTimeframe = "1H" | "24H" | "7D" | "30D";
+
+export interface AssetInfo {
+  symbol: string;
+  name: string;
+  type?: string;
+  description?: string;
+  issuer?: string;
+  domain?: string;
+  bridge?: string;
+  sourceChain?: string;
+}
+
+export interface PriceSource {
+  source: string;
+  price: number;
+  timestamp: string;
+  deviation: number;
+  status: "active" | "stale" | "offline";
+}
+
+export interface HealthHistoryPoint {
+  timestamp: string;
+  score: number;
+}
+
 export interface ApiKeyRecord {
   id: string;
   name: string;

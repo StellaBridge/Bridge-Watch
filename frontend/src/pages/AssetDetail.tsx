@@ -8,7 +8,6 @@ import LiquidityDepthChart from "../components/LiquidityDepthChart";
 import type { DataTableColumnDef } from "../components/DataTable";
 import { DataTable } from "../components/DataTable";
 import type { CellContext } from "@tanstack/react-table";
-import RefreshControls from "../components/RefreshControls";
 import { ErrorBoundary, LoadingSpinner } from "../components/Skeleton";
 import VolumeAnalytics from "../components/VolumeAnalytics";
 import AlertConfigSection from "../components/AlertConfigSection";
@@ -31,14 +30,13 @@ export default function AssetDetail() {
     priceSources,
     liquidity,
     volume,
-    supply,
     healthHistory,
     alerts,
     timeframe,
     setTimeframe,
   } = useAssetDetail(symbol ?? "");
 
-  const priceSourceRows = (priceData?.sources ?? []) as Array<{
+  const priceSourceRows = (priceSources.data ?? []) as Array<{
     source: string;
     price: number;
     timestamp: string;
@@ -97,6 +95,7 @@ export default function AssetDetail() {
           <AssetHeader
             symbol={symbol}
             assetInfo={assetInfo.data}
+            health={health.data}
             isLoading={assetInfo.isLoading}
           />
 
@@ -119,14 +118,14 @@ export default function AssetDetail() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <HealthBreakdown
-                  health={health.data}
-                  history={healthHistory.data}
-                  isLoading={health.isLoading}
+                  factors={health.data?.factors ?? null}
+                  history={healthHistory.data?.points ?? []}
+                  isHistoryLoading={healthHistory.isLoading}
                 />
                 <div className="lg:col-span-2">
                   <EnhancedPriceChart
                     symbol={symbol}
-                    data={priceHistory.data}
+                    data={priceHistory.data ?? []}
                     sources={priceSources.data}
                     timeframe={timeframe}
                     onTimeframeChange={setTimeframe}
@@ -144,6 +143,31 @@ export default function AssetDetail() {
                   </div>
                 </div>
               </div>
+
+              <DataTable
+                data={priceSourceRows}
+                columns={priceSourceColumns}
+                isLoading={priceSources.isLoading}
+                title="Price Sources"
+                description={`Price sources for ${symbol} including last update times`}
+                pageSizeOptions={[10, 20, 50]}
+                filenameBase={`${symbol}-price-sources`}
+                enableRowSelection={true}
+                enableMultiSort={true}
+                enableColumnReorder={true}
+                enableVirtualization={true}
+                rowActions={{
+                  items: [
+                    {
+                      id: "copy-source",
+                      label: "Copy source",
+                      onSelect: (row) => {
+                        void navigator.clipboard.writeText(row.source);
+                      },
+                    },
+                  ],
+                }}
+              />
             </div>
           )}
 
@@ -161,33 +185,6 @@ export default function AssetDetail() {
             <VolumeAnalytics data={volume.data} isLoading={volume.isLoading} />
           )}
 
-      <DataTable
-        data={priceSourceRows}
-        columns={priceSourceColumns}
-        isLoading={!priceData}
-        title="Price Sources"
-        description={`Price sources for ${symbol} including last update times`}
-        pageSizeOptions={[10, 20, 50]}
-        filenameBase={`${symbol}-price-sources`}
-        enableRowSelection={true}
-        enableMultiSort={true}
-        enableColumnReorder={true}
-        enableVirtualization={true}
-        rowActions={{
-          items: [
-            {
-              id: "copy-source",
-              label: "Copy source",
-              onSelect: (row) => {
-                void navigator.clipboard.writeText(row.source);
-              },
-            },
-          ],
-        }}
-      />
-    </div>
-  </Suspense>
-</ErrorBoundary>
           {activeTab === TabId.Alerts && (
             <AlertConfigSection
               alerts={alerts.data}
