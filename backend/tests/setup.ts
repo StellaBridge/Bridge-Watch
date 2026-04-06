@@ -57,6 +57,54 @@ vi.mock("ioredis", () => {
   };
 });
 
+// Mock BullMQ to avoid real Redis connections in unit tests
+vi.mock("bullmq", () => {
+  // Use require inside the mock factory to avoid hoisting issues
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { EventEmitter } = require("events");
+
+  class QueueMock {
+    name: string;
+
+    constructor(name: string) {
+      this.name = name;
+    }
+
+    add = vi.fn(async (name: string, data?: unknown, opts?: unknown) => ({
+      id: "mock-job",
+      name,
+      data,
+      opts,
+    }));
+
+    getJobCounts = vi.fn(async () => ({
+      waiting: 0,
+      active: 0,
+      completed: 0,
+      failed: 0,
+      delayed: 0,
+    }));
+
+    getFailed = vi.fn(async () => []);
+
+    close = vi.fn(async () => undefined);
+  }
+
+  class WorkerMock extends EventEmitter {
+    constructor() {
+      super();
+    }
+
+    close = vi.fn(async () => undefined);
+    run = vi.fn(async () => undefined);
+  }
+
+  return {
+    Queue: QueueMock,
+    Worker: WorkerMock,
+  };
+});
+
 // Global test setup
 beforeAll(async () => {
   process.env.NODE_ENV = "test";

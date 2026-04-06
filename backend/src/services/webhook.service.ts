@@ -1,12 +1,10 @@
 import crypto from "crypto";
-import nodeFetch from "node-fetch";
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
 import { Queue, Job, ConnectionOptions } from "bullmq";
 import { config } from "../config/index.js";
 
-// Polyfill global fetch with node-fetch for compatibility
-const fetch = globalThis.fetch || nodeFetch;
+const fetch = globalThis.fetch;
 
 // =============================================================================
 // TYPES & INTERFACES

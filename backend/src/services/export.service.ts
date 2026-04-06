@@ -10,7 +10,7 @@ import type {
   PaginationOptions,
   PaginatedExports,
 } from "../types/export.types.js";
-import { exportQueue } from "../workers/export.worker.js";
+import { exportQueue } from "../jobs/export.job.js";
 
 /**
  * Export Service

@@ -53,15 +53,6 @@ export default function Analytics() {
         }))
     : [];
 
-  const refreshTargets = [
-    { id: "assets", label: "Assets", refetch: refetchAssets },
-    {
-      id: "prices",
-      label: "Prices",
-      refetch: () => Promise.all(priceQueries.map((query) => query.refetch())),
-    },
-  ];
-
   return (
     <div className="space-y-6">
       {/* ── Header row ──────────────────────────────────────────────────────── */}

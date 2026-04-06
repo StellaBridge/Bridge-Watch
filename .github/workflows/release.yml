@@ -154,15 +154,12 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        working-directory: backend
         run: npm ci
 
       - name: Build
-        working-directory: backend
-        run: npm run build
+        run: npm --workspace=backend run build
 
       - name: Publish to NPM
-        working-directory: backend
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

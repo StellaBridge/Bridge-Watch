@@ -134,18 +134,6 @@ async function start() {
 
     // Initialize webhook delivery worker
     await initWebhookWorker();
-
-    // Graceful shutdown
-    const shutdown = async () => {
-      logger.info("Closing server...");
-      await server.close();
-      await JobQueue.getInstance().stop();
-      await stopWebhookWorker();
-      process.exit(0);
-    };
-
-    process.on("SIGTERM", shutdown);
-    process.on("SIGINT", shutdown);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -159,6 +147,7 @@ async function start() {
     await server.close();
     await JobQueue.getInstance().stop();
     await getSupplyVerificationQueue().stop();
+    await stopWebhookWorker();
     logger.info("Server closed");
     process.exit(0);
   };

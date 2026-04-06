@@ -64,18 +64,15 @@ jobs:
 
       - name: Install backend dependencies
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
-        working-directory: backend
         run: npm ci
 
       - name: Build backend
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
-        working-directory: backend
         continue-on-error: true
-        run: npm run build
+        run: npm --workspace=backend run build
 
       - name: Start backend
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}
-        working-directory: backend
         continue-on-error: true
         run: |
           NODE_ENV=development \
@@ -87,8 +84,8 @@ jobs:
           POSTGRES_PASSWORD=test_password \
           REDIS_HOST=localhost \
           REDIS_PORT=6379 \
-          node dist/index.js > ../load-tests/results/backend.log 2>&1 &
-          echo $! > ../load-tests/results/backend.pid
+          node backend/dist/index.js > load-tests/results/backend.log 2>&1 &
+          echo $! > load-tests/results/backend.pid
 
       - name: Wait for backend health
         if: ${{ github.event_name == 'pull_request' || github.event.inputs.base_url == '' }}

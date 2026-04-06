@@ -40,13 +40,20 @@ vi.mock("../../src/config/index.js", () => ({
 }));
 
 // Mock database
-vi.mock("../../src/database/connection.js", () => ({
-  getDatabase: vi.fn(() => ({
-    insert: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    first: vi.fn().mockResolvedValue(null),
-  })),
-}));
+vi.mock("../../src/database/connection.js", () => {
+  const defaultDb = Object.assign(
+    ((_: string) => ({
+      insert: vi.fn().mockResolvedValue(undefined),
+      where: vi.fn().mockReturnThis(),
+      first: vi.fn().mockResolvedValue(null),
+    })) as any,
+    { fn: { now: vi.fn() } }
+  );
+
+  return {
+    getDatabase: vi.fn(() => defaultDb),
+  };
+});
 
 describe("SupplyVerificationQueue", () => {
   let queue: SupplyVerificationQueue;
@@ -327,7 +334,7 @@ describe("Supply Verification Job Processing", () => {
   it("handles verification failure and retries", async () => {
     const error = new Error("API timeout");
     vi.spyOn(BridgeService.prototype, "verifySupply").mockRejectedValue(error);
-    vi.spyOn(queue as any, "persistResult").mockResolvedValue(undefined);
+    const persistSpy = vi.spyOn(queue as any, "persistResult").mockResolvedValue(undefined);
 
     const mockJob = {
       id: "test-3",
@@ -338,7 +345,7 @@ describe("Supply Verification Job Processing", () => {
     } as any;
 
     await expect((queue as any).processSingleJob(mockJob, Date.now())).rejects.toThrow("API timeout");
-    expect(queue as any).persistResulttoHaveBeenCalledWith(
+    expect(persistSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         assetCode: "USDC",
         isValid: false,
@@ -459,11 +466,30 @@ describe("Result Persistence", () => {
   });
 
   it("persists verification result to database", async () => {
-    const mockDb = {
-      insert: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      first: vi.fn().mockResolvedValue({ bridge_id: "bridge-usdc" }),
-    };
+    const insertSpy = vi.fn().mockResolvedValue(undefined);
+    const mockDb = Object.assign(
+      ((table: string) => {
+        if (table === "bridge_operators") {
+          return {
+            where: vi.fn().mockReturnThis(),
+            first: vi.fn().mockResolvedValue({ bridge_id: "bridge-usdc" }),
+          };
+        }
+
+        if (table === "verification_results") {
+          return {
+            insert: insertSpy,
+          };
+        }
+
+        return {
+          where: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+          insert: insertSpy,
+        };
+      }) as any,
+      { fn: { now: vi.fn() } }
+    );
     (getDatabase as any).mockReturnValue(mockDb);
 
     const result: SupplyVerificationResult = {
@@ -478,7 +504,7 @@ describe("Result Persistence", () => {
 
     await (queue as any).persistResult(result);
 
-    expect(mockDb.insert).toHaveBeenCalledWith(
+    expect(insertSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         bridge_id: "bridge-usdc",
         is_valid: true,
@@ -489,11 +515,30 @@ describe("Result Persistence", () => {
   });
 
   it("uses default bridge ID if operator not found", async () => {
-    const mockDb = {
-      insert: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      first: vi.fn().mockResolvedValue(null),
-    };
+    const insertSpy = vi.fn().mockResolvedValue(undefined);
+    const mockDb = Object.assign(
+      ((table: string) => {
+        if (table === "bridge_operators") {
+          return {
+            where: vi.fn().mockReturnThis(),
+            first: vi.fn().mockResolvedValue(null),
+          };
+        }
+
+        if (table === "verification_results") {
+          return {
+            insert: insertSpy,
+          };
+        }
+
+        return {
+          where: vi.fn().mockReturnThis(),
+          first: vi.fn().mockResolvedValue(null),
+          insert: insertSpy,
+        };
+      }) as any,
+      { fn: { now: vi.fn() } }
+    );
     (getDatabase as any).mockReturnValue(mockDb);
 
     const result: SupplyVerificationResult = {
@@ -507,7 +552,7 @@ describe("Result Persistence", () => {
 
     await (queue as any).persistResult(result);
 
-    expect(mockDb.insert).toHaveBeenCalledWith(
+    expect(insertSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         bridge_id: "supply-EURC",
       })
@@ -552,6 +597,7 @@ describe("Metrics Collection", () => {
   it("records successful job metrics", () => {
     const metricsService = getMetricsService();
     const recordSpy = vi.spyOn(metricsService, "recordQueueJob");
+    queue.initWorker();
 
     // Simulate worker completion event
     const mockJob = {
@@ -574,6 +620,7 @@ describe("Metrics Collection", () => {
   it("records failed job metrics", () => {
     const metricsService = getMetricsService();
     const recordSpy = vi.spyOn(metricsService, "recordQueueJob");
+    queue.initWorker();
 
     const mockJob = {
       id: "test-metrics-2",
