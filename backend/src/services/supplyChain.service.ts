@@ -165,13 +165,13 @@ function simulateBridgeMetrics(bridgeId: string): {
   latencyMs: number;
 } {
   const base: Record<string, { volume24hUsd: number; status: "healthy" | "degraded" | "offline"; latencyMs: number }> = {
-    "stellar-ethereum-allbridge":         { volume24hUsd: 18_500_000, status: "healthy",  latencyMs: 180 },
-    "stellar-polygon-allbridge":          { volume24hUsd: 5_200_000,  status: "healthy",  latencyMs: 210 },
-    "stellar-bsc-allbridge":              { volume24hUsd: 7_800_000,  status: "degraded", latencyMs: 450 },
-    "stellar-tron-ultrastellar":          { volume24hUsd: 12_000_000, status: "healthy",  latencyMs: 120 },
-    "ethereum-polygon-pos":               { volume24hUsd: 45_000_000, status: "healthy",  latencyMs: 240 },
-    "ethereum-avalanche-avalanche-bridge":{ volume24hUsd: 22_000_000, status: "healthy",  latencyMs: 195 },
-    "stellar-avalanche-allbridge":        { volume24hUsd: 3_100_000,  status: "offline",  latencyMs: 0 },
+    "stellar-ethereum-allbridge": { volume24hUsd: 18_500_000, status: "healthy", latencyMs: 180 },
+    "stellar-polygon-allbridge": { volume24hUsd: 5_200_000, status: "healthy", latencyMs: 210 },
+    "stellar-bsc-allbridge": { volume24hUsd: 7_800_000, status: "degraded", latencyMs: 450 },
+    "stellar-tron-ultrastellar": { volume24hUsd: 12_000_000, status: "healthy", latencyMs: 120 },
+    "ethereum-polygon-pos": { volume24hUsd: 45_000_000, status: "healthy", latencyMs: 240 },
+    "ethereum-avalanche-avalanche-bridge": { volume24hUsd: 22_000_000, status: "healthy", latencyMs: 195 },
+    "stellar-avalanche-allbridge": { volume24hUsd: 3_100_000, status: "offline", latencyMs: 0 },
   };
   return base[bridgeId] ?? { volume24hUsd: 0, status: "offline", latencyMs: 0 };
 }

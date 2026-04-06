@@ -1,3 +1,4 @@
+import "tsx/cjs";
 import { beforeAll, afterAll } from "vitest";
 import { getDatabase, closeDatabase } from "../../src/database/connection.js";
 import { runMigrations, rollbackAll } from "../helpers/db.js";

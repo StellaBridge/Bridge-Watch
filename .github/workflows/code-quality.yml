@@ -21,12 +21,10 @@ jobs:
           node-version: "20"
 
       - name: Install backend dependencies
-        working-directory: backend
         run: npm ci
 
       - name: Run ESLint
-        working-directory: backend
-        run: npm run lint -- --format json --output-file eslint-report.json
+        run: npm --workspace=backend run lint -- --format json --output-file backend/eslint-report.json
         continue-on-error: true
 
       - name: Upload ESLint results

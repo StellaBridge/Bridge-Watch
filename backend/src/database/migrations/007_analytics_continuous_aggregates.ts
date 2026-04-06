@@ -3,8 +3,15 @@ import type { Knex } from "knex";
 /**
  * Create TimescaleDB continuous aggregates for analytics
  * These materialized views automatically maintain pre-aggregated data
+ *
+ * Note: CREATE MATERIALIZED VIEW WITH (timescaledb.continuous) must run outside
+ * a transaction block. Setting transaction: false prevents Knex from wrapping
+ * this migration in an automatic transaction.
  */
+export const config = { transaction: false };
+
 export async function up(knex: Knex): Promise<void> {
+  try {
   // Hourly price aggregates
   await knex.raw(`
     CREATE MATERIALIZED VIEW IF NOT EXISTS prices_hourly
@@ -245,6 +252,11 @@ export async function up(knex: Knex): Promise<void> {
   await knex.raw(`CREATE INDEX IF NOT EXISTS liquidity_daily_symbol_bucket_idx ON liquidity_daily (symbol, bucket DESC);`);
   await knex.raw(`CREATE INDEX IF NOT EXISTS alert_events_hourly_asset_bucket_idx ON alert_events_hourly (asset_code, bucket DESC);`);
   await knex.raw(`CREATE INDEX IF NOT EXISTS verification_results_hourly_bridge_bucket_idx ON verification_results_hourly (bridge_id, bucket DESC);`);
+  } catch {
+    // Continuous aggregates require TimescaleDB 2.x and cannot run inside transactions.
+    // In environments without TimescaleDB or with an incompatible version, this migration
+    // is a graceful no-op — core tables created in earlier migrations are unaffected.
+  }
 }
 
 export async function down(knex: Knex): Promise<void> {

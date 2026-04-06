@@ -21,7 +21,7 @@ export async function registerMetrics(server: FastifyInstance): Promise<void> {
   // Track request metrics
   server.addHook("onResponse", async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const duration = (reply as any).getResponseTime() / 1000; // Convert to seconds
+      const duration = reply.elapsedTime / 1000; // Convert ms to seconds
       const method = request.method;
       const route = request.routeOptions?.url || request.url;
       const statusCode = reply.statusCode;

@@ -47,20 +47,16 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: backend
         run: npm ci
 
       - name: Lint backend
-        working-directory: backend
-        run: npm run lint
+        run: npm --workspace=backend run lint
 
       - name: Build backend
-        working-directory: backend
-        run: npm run build
+        run: npm --workspace=backend run build
 
       - name: Run backend tests
-        working-directory: backend
-        run: npm run test -- --coverage
+        run: npm --workspace=backend run test -- --coverage
         env:
           NODE_ENV: test
           POSTGRES_HOST: localhost

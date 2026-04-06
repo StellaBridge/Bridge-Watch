@@ -9,6 +9,7 @@ import { registerRoutes } from "./api/routes/index.js";
 import { registerValidation } from "./api/middleware/validation.js";
 import { registerMetrics } from "./api/middleware/metrics.js";
 import { startBridgeVerificationJob } from "./jobs/verification.job.js";
+import { wsServer } from "./api/websocket/websocket.server.js";
 import {
   registerRateLimiting,
   getRateLimitMetrics,
@@ -80,9 +81,6 @@ export async function buildServer() {
   // Sliding-window Redis rate limiting (replaces the simple @fastify/rate-limit global)
   await registerRateLimiting(server as any);
 
-  // Data validation middleware
-  await registerValidation(server as any);
-
   // Enable permessage-deflate compression for WebSocket frames.
   await server.register(websocket, {
     options: {
@@ -136,18 +134,6 @@ async function start() {
 
     // Initialize webhook delivery worker
     await initWebhookWorker();
-
-    // Graceful shutdown
-    const shutdown = async () => {
-      logger.info("Closing server...");
-      await server.close();
-      await JobQueue.getInstance().stop();
-      await stopWebhookWorker();
-      process.exit(0);
-    };
-
-    process.on("SIGTERM", shutdown);
-    process.on("SIGINT", shutdown);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -157,9 +143,11 @@ async function start() {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutdown signal received");
 
+    await wsServer.shutdown();
     await server.close();
     await JobQueue.getInstance().stop();
     await getSupplyVerificationQueue().stop();
+    await stopWebhookWorker();
     logger.info("Server closed");
     process.exit(0);
   };

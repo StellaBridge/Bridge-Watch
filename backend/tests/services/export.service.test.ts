@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ExportService } from "../../src/services/export.service.js";
-import { ExportQueue } from "../../src/jobs/export.job.js";
+import { exportQueue } from "../../src/jobs/export.job.js";
 
 // Mock logger
 vi.mock("../../src/utils/logger.js", () => ({
@@ -52,29 +52,12 @@ vi.mock("../../src/config/index.js", () => ({
     },
 }));
 
-// Mock BullMQ Queue and Worker
-vi.mock("bullmq", () => ({
-    Queue: vi.fn().mockImplementation(() => ({
-        add: vi.fn().mockResolvedValue({ id: "job-123" }),
-        close: vi.fn().mockResolvedValue(undefined),
-    })),
-    Worker: vi.fn().mockImplementation(() => ({
-        on: vi.fn(),
-        run: vi.fn(),
-    })),
-}));
+const mockExportQueueAdd = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "job-123" }));
 
-// Mock export job - use proper mock for the Queue class
+// Mock export job queue
 vi.mock("../../src/jobs/export.job.js", () => ({
-    ExportQueue: vi.fn().mockImplementation(() => ({
-        add: vi.fn().mockResolvedValue({ id: "job-123" }),
-        addExportJob: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
-    })),
     exportQueue: {
-        add: vi.fn().mockResolvedValue({ id: "job-123" }),
-        addExportJob: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
+        add: mockExportQueueAdd,
     },
 }));
 
@@ -105,7 +88,15 @@ describe("ExportService", () => {
         };
 
         it("creates export record with pending status", async () => {
-            mockInsert.mockResolvedValueOnce([1]);
+            mockInsert.mockResolvedValueOnce([{
+                id: "1",
+                requested_by: "user-123",
+                format: "csv",
+                data_type: "analytics",
+                status: "pending",
+                filters: mockExportRequest.filters,
+                created_at: new Date(),
+            }]);
             mockFirst.mockResolvedValueOnce({
                 id: "1",
                 requested_by: "user-123",
@@ -130,7 +121,15 @@ describe("ExportService", () => {
         });
 
         it("enqueues export job after creating record", async () => {
-            mockInsert.mockResolvedValueOnce([1]);
+            mockInsert.mockResolvedValueOnce([{
+                id: "1",
+                requested_by: "user-123",
+                format: "csv",
+                data_type: "analytics",
+                status: "pending",
+                filters: mockExportRequest.filters,
+                created_at: new Date(),
+            }]);
             mockFirst.mockResolvedValueOnce({
                 id: "1",
                 requested_by: "user-123",
@@ -141,8 +140,8 @@ describe("ExportService", () => {
 
             const result = await exportService.requestExport("user-123", mockExportRequest);
 
-            expect(ExportQueue.add).toHaveBeenCalledWith(
-                "export",
+            expect(exportQueue.add).toHaveBeenCalledWith(
+                "process-export",
                 expect.objectContaining({
                     exportId: expect.any(String),
                     format: "csv",

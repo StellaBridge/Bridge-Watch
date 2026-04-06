@@ -3,6 +3,9 @@ import { ExportJobPayload } from "../types/export.types.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 
+const QUEUE_NAME = "export-queue";
+const JOB_NAME = "process-export";
+
 /**
  * Export job queue for BullMQ
  * Handles async processing of export requests
@@ -11,7 +14,7 @@ export class ExportQueue extends Queue<ExportJobPayload> {
     private static instance: ExportQueue;
 
     private constructor() {
-        super("export", {
+        super(QUEUE_NAME, {
             connection: {
                 host: config.REDIS_HOST || "localhost",
                 port: config.REDIS_PORT || 6379,
@@ -49,7 +52,7 @@ export class ExportQueue extends Queue<ExportJobPayload> {
      * Add export job to the queue
      */
     public async addExportJob(payload: ExportJobPayload): Promise<void> {
-        await this.add("export", payload, {
+        await this.add(JOB_NAME, payload, {
             jobId: `export-${payload.exportId}`,
         });
 

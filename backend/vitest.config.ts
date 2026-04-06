@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    setupFiles: ["./tests/setup.ts"],
+    // No root-level setupFiles: each project defines its own to prevent the
+    // unit-test ioredis mock from bleeding into integration tests.
     include: ["tests/**/*.test.ts"],
     coverage: {
       provider: "v8",
@@ -22,7 +23,12 @@ export default defineConfig({
       {
         test: {
           name: "unit",
-          include: ["tests/{api,services,workers,jobs}/**/*.test.ts"],
+          include: [
+            "tests/api/**/*.test.ts",
+            "tests/services/**/*.test.ts",
+            "tests/workers/**/*.test.ts",
+            "tests/jobs/**/*.test.ts",
+          ],
           setupFiles: ["./tests/setup.ts"],
         },
       },
