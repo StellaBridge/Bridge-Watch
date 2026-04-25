@@ -36,6 +36,7 @@ import { healthScoreHistoryRoutes } from "./healthScoreHistory.routes.js";
 import { horizonStreamRoutes } from "./horizonStream.routes.js";
 import { adminRotationRoutes } from "./adminRotation.js";
 import { digestSchedulerRoutes } from "./digestScheduler.js";
+import { backfillRoutes } from "./backfill.routes.js";
 
 export async function registerRoutes(server: FastifyInstance) {
   server.register(assetsRoutes, { prefix: "/api/v1/assets" });
@@ -77,4 +78,5 @@ export async function registerRoutes(server: FastifyInstance) {
   server.register(horizonStreamRoutes, { prefix: "/api/v1/horizon-streams" });
   server.register(adminRotationRoutes, { prefix: "/api/v1/admin/rotation" });
   server.register(digestSchedulerRoutes, { prefix: "/api/v1/digest" });
+  server.register(backfillRoutes, { prefix: "/api/v1/backfill" });
 }

@@ -174,6 +174,14 @@ Common HTTP status codes:
 | GET | `/monitor` | Queue status and failed jobs |
 | POST | `/:jobName/trigger` | Manually enqueue a job |
 
+### Backfill `/api/v1/backfill`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/` | Start a transactional backfill job for an asset |
+| GET | `/` | List current backfill jobs and progress |
+| GET | `/:jobId` | Get backfill job status and metrics |
+| POST | `/:jobId/resume` | Resume a failed or paused backfill job |
+
 ### Config `/api/v1/config`
 | Method | Path | Description |
 |--------|------|-------------|

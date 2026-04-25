@@ -118,6 +118,11 @@ const envSchema = z.object({
   // Verification & Retries
   RETRY_MAX: z.coerce.number().default(3),
   BRIDGE_VERIFICATION_INTERVAL_MS: z.coerce.number().default(300000),
+  BACKFILL_QUEUE_CONCURRENCY: z.coerce.number().default(2),
+  BACKFILL_DEFAULT_MAX_PAGES: z.coerce.number().default(250),
+  BACKFILL_CHUNK_PAGES: z.coerce.number().default(5),
+  BACKFILL_PAGE_SIZE: z.coerce.number().default(100),
+  BACKFILL_PROVIDER_DELAY_MS: z.coerce.number().default(500),
 
   // Price Aggregation
   HORIZON_TIMEOUT_MS: z.coerce.number().default(500),

@@ -7,6 +7,7 @@ import { processAnalyticsAggregation } from "./analyticsAggregation.worker.js";
 import { processDigestScheduler } from "./digestScheduler.worker.js";
 import { logger } from "../utils/logger.js";
 import { initSupplyVerificationJob } from "../jobs/supplyVerification.job.js";
+import { initBackfillJob } from "../jobs/backfill.job.js";
 import { runAuditRetentionJob } from "../jobs/auditRetention.job.js";
 
 export async function initJobSystem() {
@@ -43,6 +44,9 @@ export async function initJobSystem() {
 
   // Initialize supply verification job system (dedicated queue and worker)
   await initSupplyVerificationJob();
+
+  // Initialize backfill orchestration worker
+  await initBackfillJob();
 
   // Schedule repeatable jobs
   // price-collection: every 30 seconds
