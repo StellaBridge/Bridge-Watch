@@ -1,3 +1,5 @@
+import IncidentHeatmap from "../components/IncidentHeatmap";
+
 export default function Analytics() {
   return (
     <div className="space-y-8">
@@ -27,6 +29,9 @@ export default function Analytics() {
           </div>
         ))}
       </div>
+
+      {/* Incident Heatmap */}
+      <IncidentHeatmap />
 
       {/* Health Score Trends */}
       <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">

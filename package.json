@@ -16,7 +16,9 @@
     "build:frontend": "npm run build --workspace=frontend",
     "test": "npm run test --workspaces --if-present",
     "test:backend": "npm run test --workspace=backend",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "sandbox": "NODE_ENV=sandbox tsx sandbox/seed.ts && npm run dev",
+    "sandbox:reset": "NODE_ENV=sandbox tsx sandbox/seed.ts"
   },
   "engines": {
     "node": ">=20.0.0"
