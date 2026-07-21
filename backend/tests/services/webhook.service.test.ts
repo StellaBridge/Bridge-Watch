@@ -51,6 +51,7 @@ vi.mock("../../src/config/index.js", () => ({
     REDIS_HOST: "localhost",
     REDIS_PORT: 6379,
     REDIS_PASSWORD: undefined,
+    WEBHOOK_ENCRYPTION_KEY: "test-webhook-encryption-key-32-bytes!!",
   },
 }));
 
@@ -126,7 +127,7 @@ describe("WebhookService — HMAC signing", () => {
 
   it("generateSignatureHeaders returns required headers", () => {
     const headers = service.generateSignatureHeaders('{"test":true}', "my-secret");
-    expect(headers).toHaveProperty("X-Webhook-Signature");
+    expect(headers).toHaveProperty("X-Bridge-Watch-Signature");
     expect(headers).toHaveProperty("X-Webhook-Timestamp");
     expect(headers).toHaveProperty("X-Webhook-Event-Id");
     expect(headers["Content-Type"]).toBe("application/json");
@@ -179,6 +180,29 @@ describe("WebhookService — rate limiting", () => {
       service.checkRateLimit("ep-1", 5);
     }
     expect(service.checkRateLimit("ep-2", 5)).toBe(true);
+  });
+});
+
+describe("WebhookService — secret encryption", () => {
+  let service: WebhookService;
+
+  beforeEach(() => {
+    (WebhookService as any).instance = undefined;
+    service = WebhookService.getInstance();
+  });
+
+  it("encrypts and decrypts secrets with the configured key", () => {
+    const secret = "super-secret-value";
+    const encrypted = (service as any).encryptSecret(secret);
+    const decrypted = (service as any).decryptSecret(encrypted);
+
+    expect(encrypted).toContain(":");
+    expect(decrypted).toBe(secret);
+  });
+
+  it("returns plaintext values unchanged when they are not encrypted", () => {
+    const plaintext = "legacy-secret";
+    expect((service as any).decryptSecret(plaintext)).toBe(plaintext);
   });
 });
 

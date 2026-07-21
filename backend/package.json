@@ -7,12 +7,15 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "eslint src/ --ext .ts",
     "lint:fix": "eslint src/ --ext .ts --fix",
     "migrate": "tsx src/database/migrate.ts up",
@@ -69,6 +72,7 @@
     "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^8.57.1",
     "ioredis-mock": "^8.13.1",
+    "prettier": "^3.9.6",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"

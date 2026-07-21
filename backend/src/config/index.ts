@@ -135,6 +135,9 @@ const envSchema = z.object({
    */
   WS_AUTH_SECRET: z.string().optional(),
 
+  // Webhook security
+  WEBHOOK_ENCRYPTION_KEY: z.string().min(32).optional(),
+
   // Health Score Weights
   HEALTH_WEIGHT_LIQUIDITY: z.coerce.number().default(0.25),
   HEALTH_WEIGHT_PRICE: z.coerce.number().default(0.25),

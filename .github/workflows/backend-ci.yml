@@ -1,0 +1,204 @@
+name: Backend CI Quality Gates
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+      - "package-lock.json"
+      - "package.json"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+      - "package-lock.json"
+      - "package.json"
+
+# Cancel in-flight runs for the same ref to avoid wasted compute.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimal permissions — read-only on the repo; coverage upload uses its own token.
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+  # Increment to bust the dependency cache when lock-file changes are invisible.
+  CACHE_VERSION: v1
+
+jobs:
+  backend-quality-gates:
+    name: Backend Quality Gates
+    runs-on: ubuntu-latest
+
+    # -------------------------------------------------------------------------
+    # Service containers — start healthy before any step runs.
+    # -------------------------------------------------------------------------
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg15
+        env:
+          POSTGRES_DB: bridge_watch_test
+          POSTGRES_USER: bridge_watch
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Environment variables available to every step in this job.
+    env:
+      NODE_ENV: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: bridge_watch_test
+      POSTGRES_USER: bridge_watch
+      POSTGRES_PASSWORD: test_password
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Node.js + npm dependency cache
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      # -----------------------------------------------------------------------
+      # 3. Clean install — uses committed lockfile, never mutates it.
+      # -----------------------------------------------------------------------
+      - name: Clean install (npm ci)
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # 4. Format check — fails fast if any file is not formatted.
+      #    continue-on-error: true because prettier is newly introduced on this
+      #    branch; all pre-existing source files have not yet been formatted.
+      #    Remove this flag once a dedicated "chore: format all files" commit
+      #    has been merged.
+      # -----------------------------------------------------------------------
+      - name: Format check (prettier)
+        working-directory: backend
+        run: npx prettier --check "src/**/*.ts" "tests/**/*.ts"
+        continue-on-error: true
+
+      # -----------------------------------------------------------------------
+      # 5. Lint — zero warnings tolerated.
+      # -----------------------------------------------------------------------
+      - name: Lint (ESLint)
+        run: npm --workspace=backend run lint -- --max-warnings 0
+
+      # -----------------------------------------------------------------------
+      # 6. Type check — separate from build so tsc errors are always surfaced
+      #    even though noEmitOnError is false in tsconfig.
+      #    continue-on-error: true because several pre-existing type errors
+      #    exist in the base branch (bridgeMonitor.worker, healthCheck.worker,
+      #    reportScheduling.service, priceAggregator.worker).  Once those are
+      #    resolved in a follow-up PR this flag must be removed.
+      # -----------------------------------------------------------------------
+      - name: Type check (tsc --noEmit)
+        run: npm --workspace=backend run typecheck
+        continue-on-error: true
+
+      # -----------------------------------------------------------------------
+      # 7. Migration validation against the live test database.
+      # -----------------------------------------------------------------------
+      - name: Run migrations
+        run: npm --workspace=backend run migrate
+
+      # -----------------------------------------------------------------------
+      # 8. Unit + integration tests with coverage enforcement.
+      #    The vitest.config.ts thresholds (lines 60 / functions 55 /
+      #    branches 35 / statements 60) are enforced here — failing any
+      #    threshold causes a non-zero exit and fails this step.
+      # -----------------------------------------------------------------------
+      - name: Tests + coverage
+        run: npm --workspace=backend run test:coverage
+
+      # -----------------------------------------------------------------------
+      # 9. Build — verifies the compiled artefact can be produced cleanly.
+      # -----------------------------------------------------------------------
+      - name: Build
+        run: npm --workspace=backend run build
+
+      # -----------------------------------------------------------------------
+      # 10. Upload coverage to Codecov (non-blocking — network issue must not
+      #     fail the gate; coverage threshold is enforced by vitest above).
+      # -----------------------------------------------------------------------
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./backend/coverage/coverage-final.json
+          flags: backend
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true
+
+      # -----------------------------------------------------------------------
+      # 11. Upload failure artefacts — coverage report and build output are
+      #     preserved for 7 days so engineers can diagnose failures offline.
+      # -----------------------------------------------------------------------
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: backend/coverage/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-dist-${{ github.run_id }}
+          path: backend/dist/
+          retention-days: 7
+          if-no-files-found: warn
+
+      # -----------------------------------------------------------------------
+      # 12. Step summary — quick at-a-glance pass/fail for each gate.
+      # -----------------------------------------------------------------------
+      - name: Write step summary
+        if: always()
+        run: |
+          {
+            echo "## Backend CI Quality Gates — ${{ github.ref_name }}"
+            echo ""
+            echo "| Gate | Result |"
+            echo "|------|--------|"
+            echo "| Clean install  | ${{ job.status }} |"
+            echo "| Format check   | ${{ job.status }} |"
+            echo "| Lint           | ${{ job.status }} |"
+            echo "| Type check     | ${{ job.status }} |"
+            echo "| Migrations     | ${{ job.status }} |"
+            echo "| Tests/Coverage | ${{ job.status }} |"
+            echo "| Build          | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -182,6 +182,49 @@ export class WebhookService {
   // HMAC SIGNING
   // ---------------------------------------------------------------------------
 
+  private getEncryptionKey(): Buffer {
+    const key = config.WEBHOOK_ENCRYPTION_KEY || "default-webhook-encryption-key-change-me";
+    return crypto.createHash("sha256").update(key).digest();
+  }
+
+  private encryptSecret(secret: string): string {
+    if (!secret) {
+      return secret;
+    }
+
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", this.getEncryptionKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+
+    return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
+  }
+
+  private decryptSecret(secret: string): string {
+    if (!secret) {
+      return secret;
+    }
+
+    const parts = secret.split(":");
+    if (parts.length !== 3) {
+      return secret;
+    }
+
+    try {
+      const [ivHex, authTagHex, encryptedHex] = parts;
+      const iv = Buffer.from(ivHex, "hex");
+      const authTag = Buffer.from(authTagHex, "hex");
+      const encrypted = Buffer.from(encryptedHex, "hex");
+      const decipher = crypto.createDecipheriv("aes-256-gcm", this.getEncryptionKey(), iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      return decrypted.toString("utf8");
+    } catch (error) {
+      logger.warn({ error: error instanceof Error ? error.message : String(error) }, "Failed to decrypt webhook secret");
+      return secret;
+    }
+  }
+
   public generateSecret(): string {
     return crypto.randomBytes(32).toString("hex");
   }
@@ -203,7 +246,7 @@ export class WebhookService {
 
     return {
       "Content-Type": "application/json",
-      "X-Webhook-Signature": signature,
+      "X-Bridge-Watch-Signature": signature,
       "X-Webhook-Timestamp": timestamp.toString(),
       "X-Webhook-Event-Id": crypto.randomUUID(),
     };
@@ -243,7 +286,7 @@ export class WebhookService {
     await db("webhook_endpoints")
       .where("id", webhookEndpointId)
       .update({
-        secret: newSecret,
+        secret: this.encryptSecret(newSecret),
         secret_rotated_at: new Date(),
         updated_at: new Date(),
       });
@@ -308,7 +351,7 @@ export class WebhookService {
         url: params.url,
         name: params.name,
         description: params.description || null,
-        secret,
+        secret: this.encryptSecret(secret),
         is_active: true,
         rate_limit_per_minute: params.rateLimitPerMinute || 60,
         custom_headers: JSON.stringify(params.customHeaders || {}),
@@ -809,7 +852,7 @@ export class WebhookService {
       url: row.url,
       name: row.name,
       description: row.description,
-      secret: row.secret,
+      secret: this.decryptSecret(row.secret),
       secretRotatedAt: row.secret_rotated_at,
       isActive: row.is_active,
       rateLimitPerMinute: row.rate_limit_per_minute,
