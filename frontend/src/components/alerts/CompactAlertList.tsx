@@ -9,6 +9,7 @@ import {
 type SortField = "severity" | "time" | "status" | "title";
 type SortDir = "asc" | "desc";
 type DensityMode = "compact" | "comfortable";
+type QuickFilterType = "all" | "critical" | "depeg" | "unacknowledged";
 
 const SEVERITY_ORDER: Record<IncidentSeverity, number> = {
   critical: 0,
@@ -267,6 +268,7 @@ export default function CompactAlertList({
   const [severityFilter, setSeverityFilter] = useState<IncidentSeverity | "">("");
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | "">("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeQuickFilter, setActiveQuickFilter] = useState<QuickFilterType>("all");
 
   const selectAllRef = useRef<HTMLInputElement>(null);
 
@@ -290,6 +292,42 @@ export default function CompactAlertList({
     [sortField]
   );
 
+  const handleQuickFilterClick = useCallback((filter: QuickFilterType) => {
+    setActiveQuickFilter((prev) => {
+      const next = prev === filter ? "all" : filter;
+      setSeverityFilter("");
+      setStatusFilter("");
+      return next;
+    });
+  }, []);
+
+  const counts = useMemo(() => {
+    const allCount = incidents.filter((i) => !dismissedIds.has(i.id)).length;
+    const criticalCount = incidents.filter(
+      (i) => !dismissedIds.has(i.id) && i.severity === "critical"
+    ).length;
+    const depegCount = incidents.filter(
+      (i) =>
+        !dismissedIds.has(i.id) &&
+        (i.title.toLowerCase().includes("depeg") ||
+          i.description.toLowerCase().includes("depeg") ||
+          i.title.toLowerCase().includes("deviation") ||
+          i.description.toLowerCase().includes("deviation") ||
+          i.title.toLowerCase().includes("peg") ||
+          i.description.toLowerCase().includes("peg"))
+    ).length;
+    const unacknowledgedCount = incidents.filter(
+      (i) => !dismissedIds.has(i.id) && !readIds.has(i.id)
+    ).length;
+
+    return {
+      all: allCount,
+      critical: criticalCount,
+      depeg: depegCount,
+      unacknowledged: unacknowledgedCount,
+    };
+  }, [incidents, dismissedIds, readIds]);
+
   const processedIncidents = useMemo(() => {
     let items = incidents.filter((i) => !dismissedIds.has(i.id));
 
@@ -301,6 +339,22 @@ export default function CompactAlertList({
           i.bridgeId.toLowerCase().includes(q) ||
           (i.assetCode?.toLowerCase().includes(q) ?? false)
       );
+    }
+
+    if (activeQuickFilter === "critical") {
+      items = items.filter((i) => i.severity === "critical");
+    } else if (activeQuickFilter === "depeg") {
+      items = items.filter(
+        (i) =>
+          i.title.toLowerCase().includes("depeg") ||
+          i.description.toLowerCase().includes("depeg") ||
+          i.title.toLowerCase().includes("deviation") ||
+          i.description.toLowerCase().includes("deviation") ||
+          i.title.toLowerCase().includes("peg") ||
+          i.description.toLowerCase().includes("peg")
+      );
+    } else if (activeQuickFilter === "unacknowledged") {
+      items = items.filter((i) => !readIds.has(i.id));
     }
 
     return [...items].sort((a, b) => {
@@ -317,7 +371,7 @@ export default function CompactAlertList({
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [incidents, dismissedIds, searchQuery, sortField, sortDir]);
+  }, [incidents, dismissedIds, searchQuery, activeQuickFilter, readIds, sortField, sortDir]);
 
   const allSelected =
     processedIncidents.length > 0 &&
@@ -424,6 +478,82 @@ export default function CompactAlertList({
         </div>
       </div>
 
+      {/* Quick Filters */}
+      <div className="flex flex-wrap gap-2 pb-1" role="group" aria-label="Quick filters">
+        <button
+          type="button"
+          onClick={() => handleQuickFilterClick("all")}
+          className={`px-3 py-1.5 text-xs rounded-full border transition-all font-medium flex items-center gap-1.5 ${
+            activeQuickFilter === "all"
+              ? "border-stellar-blue bg-stellar-blue/15 text-white shadow-sm"
+              : "border-stellar-border bg-stellar-card/50 text-stellar-text-muted hover:text-white hover:border-stellar-text-secondary"
+          }`}
+        >
+          All
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+            activeQuickFilter === "all"
+              ? "bg-stellar-blue/30 text-white"
+              : "bg-stellar-dark/50 text-stellar-text-muted"
+          }`}>
+            {counts.all}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleQuickFilterClick("critical")}
+          className={`px-3 py-1.5 text-xs rounded-full border transition-all font-medium flex items-center gap-1.5 ${
+            activeQuickFilter === "critical"
+              ? "border-stellar-blue bg-stellar-blue/15 text-white shadow-sm"
+              : "border-stellar-border bg-stellar-card/50 text-stellar-text-muted hover:text-white hover:border-stellar-text-secondary"
+          }`}
+        >
+          Critical Only
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+            activeQuickFilter === "critical"
+              ? "bg-stellar-blue/30 text-white"
+              : "bg-stellar-dark/50 text-stellar-text-muted"
+          }`}>
+            {counts.critical}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleQuickFilterClick("depeg")}
+          className={`px-3 py-1.5 text-xs rounded-full border transition-all font-medium flex items-center gap-1.5 ${
+            activeQuickFilter === "depeg"
+              ? "border-stellar-blue bg-stellar-blue/15 text-white shadow-sm"
+              : "border-stellar-border bg-stellar-card/50 text-stellar-text-muted hover:text-white hover:border-stellar-text-secondary"
+          }`}
+        >
+          Depeg Alerts
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+            activeQuickFilter === "depeg"
+              ? "bg-stellar-blue/30 text-white"
+              : "bg-stellar-dark/50 text-stellar-text-muted"
+          }`}>
+            {counts.depeg}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleQuickFilterClick("unacknowledged")}
+          className={`px-3 py-1.5 text-xs rounded-full border transition-all font-medium flex items-center gap-1.5 ${
+            activeQuickFilter === "unacknowledged"
+              ? "border-stellar-blue bg-stellar-blue/15 text-white shadow-sm"
+              : "border-stellar-border bg-stellar-card/50 text-stellar-text-muted hover:text-white hover:border-stellar-text-secondary"
+          }`}
+        >
+          Unacknowledged
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+            activeQuickFilter === "unacknowledged"
+              ? "bg-stellar-blue/30 text-white"
+              : "bg-stellar-dark/50 text-stellar-text-muted"
+          }`}>
+            {counts.unacknowledged}
+          </span>
+        </button>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <input
@@ -436,9 +566,10 @@ export default function CompactAlertList({
         />
         <select
           value={severityFilter}
-          onChange={(e) =>
-            setSeverityFilter(e.target.value as IncidentSeverity | "")
-          }
+          onChange={(e) => {
+            setSeverityFilter(e.target.value as IncidentSeverity | "");
+            setActiveQuickFilter("all");
+          }}
           className="bg-stellar-card border border-stellar-border rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-stellar-blue"
           aria-label="Filter by severity"
         >
@@ -450,9 +581,10 @@ export default function CompactAlertList({
         </select>
         <select
           value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(e.target.value as IncidentStatus | "")
-          }
+          onChange={(e) => {
+            setStatusFilter(e.target.value as IncidentStatus | "");
+            setActiveQuickFilter("all");
+          }}
           className="bg-stellar-card border border-stellar-border rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-stellar-blue"
           aria-label="Filter by status"
         >

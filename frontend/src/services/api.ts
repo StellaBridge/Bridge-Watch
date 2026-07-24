@@ -34,6 +34,7 @@ import type {
   UpdateServiceAnnotationInput,
   ServiceAnnotationAuditEntry,
 } from "../types";
+import type { LiquidityConcentrationData } from "../types/liquidity";
 const API_BASE_URL = "/api/v1";
 
 async function fetchApi<T>(
@@ -240,6 +241,12 @@ export function getAssetLiquidity(symbol: string) {
       timestamp?: string;
     }>;
   } | null>(`/assets/${symbol}/liquidity`);
+}
+
+export function getLiquidityConcentration(pair: string) {
+  return fetchApi<LiquidityConcentrationData | null>(
+    `/assets/${pair.split("/")[1]}/liquidity/concentration?pair=${encodeURIComponent(pair)}`
+  );
 }
 
 export function getAssetPrice(symbol: string) {

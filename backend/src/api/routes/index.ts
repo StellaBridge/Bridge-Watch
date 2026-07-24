@@ -86,6 +86,8 @@ import { eventReplayRoutes } from "./eventReplay.routes.js";
 import { sourceDecommissionRoutes } from "./sourceDecommission.routes.js";
 import { providerCircuitBreakerRoutes } from "./providerCircuitBreaker.routes.js";
 import { crossChainVerificationRoutes } from "./crossChainVerification.routes.js";
+import { eventFederationRoutes } from "./eventFederation.routes.js";
+import { eventSourceKeyRoutes } from "./eventSourceKeys.routes.js";
 
 export async function registerRoutes(server: FastifyInstance) {
   server.register(assetsRoutes, { prefix: "/api/v1/assets" });
@@ -208,4 +210,6 @@ export async function registerRoutes(server: FastifyInstance) {
   server.register(crossChainVerificationRoutes, {
     prefix: "/api/v1/cross-chain-verification",
   });
+  server.register(eventFederationRoutes, { prefix: "/api/v1/event-federation" });
+  server.register(eventSourceKeyRoutes, { prefix: "/api/v1/admin/event-source-keys" });
 }

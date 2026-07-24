@@ -1,4 +1,5 @@
 import { sourceDecommissionService } from "../services/sourceDecommission.service.js";
+import { distributedLockService } from "../services/distributedLock.service.js";
 import { logger } from "../utils/logger.js";
 
 const CHECK_INTERVAL_MS = Number(process.env.SOURCE_DECOMMISSION_CHECK_INTERVAL_MS) || 3_600_000; // 1 hour default
@@ -18,15 +19,21 @@ export async function runSourceDecommissionCheck(): Promise<number> {
   }
 }
 
+const LOCK_KEY = "source-decommission";
+
+function runLocked(): Promise<unknown> {
+  return distributedLockService.withLock(LOCK_KEY, CHECK_INTERVAL_MS, runSourceDecommissionCheck);
+}
+
 export function startSourceDecommissionJob(): void {
   logger.info({ intervalMs: CHECK_INTERVAL_MS }, "Starting source decommission readiness job scheduler");
 
-  runSourceDecommissionCheck().catch((err) => {
+  runLocked().catch((err) => {
     logger.error({ error: err }, "Initial source decommission readiness check failed");
   });
 
   decommissionCheckInterval = setInterval(() => {
-    runSourceDecommissionCheck().catch((err) => {
+    runLocked().catch((err) => {
       logger.error({ error: err }, "Scheduled source decommission readiness check failed");
     });
   }, CHECK_INTERVAL_MS);

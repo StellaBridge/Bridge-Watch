@@ -1,4 +1,5 @@
 import { providerCircuitBreakerService } from "../services/providerCircuitBreaker.service.js";
+import { distributedLockService } from "../services/distributedLock.service.js";
 import { logger } from "../utils/logger.js";
 
 const PROBE_SWEEP_INTERVAL_MS = Number(process.env.PROVIDER_BREAKER_PROBE_INTERVAL_MS) || 30_000; // 30s default
@@ -18,11 +19,17 @@ export async function runRecoveryProbeSweep(): Promise<number> {
   }
 }
 
+const LOCK_KEY = "provider-circuit-breaker-sweep";
+
+function runLocked(): Promise<unknown> {
+  return distributedLockService.withLock(LOCK_KEY, PROBE_SWEEP_INTERVAL_MS, runRecoveryProbeSweep);
+}
+
 export function startProviderCircuitBreakerJob(): void {
   logger.info({ intervalMs: PROBE_SWEEP_INTERVAL_MS }, "Starting provider circuit breaker recovery probe job");
 
   probeSweepInterval = setInterval(() => {
-    runRecoveryProbeSweep().catch((err) => {
+    runLocked().catch((err) => {
       logger.error({ error: err }, "Scheduled provider circuit breaker probe sweep failed");
     });
   }, PROBE_SWEEP_INTERVAL_MS);

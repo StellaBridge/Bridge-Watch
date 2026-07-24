@@ -90,6 +90,28 @@ export interface IChainConnector {
   getLiveness(): SourceLiveness;
 }
 
+// ─── Signed federated event submission ─────────────────────────────────────
+
+export interface SignedFederatedEvent {
+  /** The event payload to be validated and ingested. */
+  event: FederatedEvent;
+  /** Canonical JSON of the event that was signed. */
+  payload: string;
+  /** Hex-encoded cryptographic signature. */
+  signature: string;
+  /** ISO-8601 timestamp of when the signature was created. */
+  signedAt: string;
+  /** Name of the source that signed the payload. */
+  sourceName: string;
+}
+
+export interface EventSubmissionResult {
+  accepted: boolean;
+  eventId: string;
+  reason?: string;
+  timestampAgeMs?: number;
+}
+
 // ─── Replay request ───────────────────────────────────────────────────────────
 
 export interface ReplayRequest {

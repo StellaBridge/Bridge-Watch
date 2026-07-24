@@ -5,6 +5,7 @@ import {
   BridgeWatchTransactionError,
 } from "./errors";
 import type {
+  BackoffState,
   BridgeWatchSdkConfig,
   EventSubscription,
   EventSubscriptionOptions,
@@ -156,6 +157,24 @@ export class BridgeWatchContractSdk {
   subscribeToEvents(options: EventSubscriptionOptions): EventSubscription {
     let active = true;
     let cursor = options.startLedger;
+    let consecutiveFailures = 0;
+    const minBackoffMs = options.pollIntervalMs ?? 5000;
+    const maxBackoffMs = options.maxBackoffMs ?? 60000;
+    let currentBackoffMs = minBackoffMs;
+
+    const updateBackoffState = (isBackingOff: boolean) => {
+      const state: BackoffState = {
+        currentBackoffMs,
+        consecutiveFailures,
+        isBackingOff,
+      };
+      options.onBackoffStateChange?.(state);
+    };
+
+    const jitter = () => {
+      const jitterPercent = Math.random() * 0.1;
+      return currentBackoffMs * (1 + jitterPercent);
+    };
 
     const run = async () => {
       while (active) {
@@ -179,17 +198,35 @@ export class BridgeWatchContractSdk {
           if (response.latestLedger) {
             cursor = response.latestLedger + 1;
           }
+
+          if (consecutiveFailures > 0) {
+            consecutiveFailures = 0;
+            currentBackoffMs = minBackoffMs;
+            updateBackoffState(false);
+          }
+
+          await new Promise((resolve) => {
+            setTimeout(resolve, minBackoffMs);
+          });
         } catch (error) {
+          consecutiveFailures++;
+          currentBackoffMs = Math.min(
+            minBackoffMs * Math.pow(2, consecutiveFailures - 1),
+            maxBackoffMs
+          );
+          updateBackoffState(true);
+
           options.onError?.(
             error instanceof Error
               ? error
               : new BridgeWatchConnectionError("Event polling failed", error)
           );
-        }
 
-        await new Promise((resolve) => {
-          setTimeout(resolve, options.pollIntervalMs ?? 5000);
-        });
+          const delay = jitter();
+          await new Promise((resolve) => {
+            setTimeout(resolve, delay);
+          });
+        }
       }
     };
 

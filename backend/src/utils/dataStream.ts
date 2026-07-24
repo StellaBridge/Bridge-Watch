@@ -1,14 +1,18 @@
 import { getDatabase } from "../database/connection.js";
 import { config } from "../config/index.js";
 import type { ExportDataType, ExportFilters } from "../types/export.types.js";
-import { logger } from "./logger.js";
+import { logger } from "../utils/logger.js";
 
 /**
- * Async generator that streams data from the database in configurable page sizes
- * to avoid loading entire datasets into memory.
- * 
- * Memory profile: Bounded to PAGE_SIZE * record_size regardless of total dataset size.
- * 
+ * Async generator that streams data from the database using keyset (cursor)
+ * pagination instead of OFFSET-based pagination.
+ *
+ * Keyset pagination uses the last-seen value of the ORDER BY column to fetch
+ * the next page, so the database can seek directly via the index without
+ * scanning and discarding preceding rows. This keeps memory bounded to
+ * PAGE_SIZE records regardless of total dataset size and avoids the
+ * O(N) performance degradation of OFFSET on large tables.
+ *
  * @param dataType - The type of data to stream
  * @param filters - Filters to apply to the data query
  * @yields Individual data records
@@ -19,55 +23,80 @@ export async function* streamData(
 ): AsyncGenerator<any, void, unknown> {
   const db = getDatabase();
   const pageSize = config.EXPORT_STREAMING_PAGE_SIZE;
-  let offset = 0;
-  let hasMore = true;
+  const maxRows = config.EXPORT_STREAMING_MAX_ROWS ?? 0;
+  let yielded = 0;
 
-  logger.info({ dataType, filters, pageSize }, "Starting data stream");
+  // Cursor holds the last seen value of the ORDER BY column for keyset pagination.
+  // Starts as null (first page has no cursor constraint).
+  let cursor: Date | string | number | null = null;
 
-  while (hasMore) {
-    let records: any[] = [];
+  logger.info({ dataType, filters, pageSize, maxRows }, "Starting data stream");
+
+  while (true) {
+    let records: any[];
 
     try {
       switch (dataType) {
         case "analytics":
-          records = await fetchAnalyticsData(db, filters, pageSize, offset);
+          records = await fetchAnalyticsData(db, filters, pageSize, cursor);
           break;
         case "transactions":
-          records = await fetchTransactionsData(db, filters, pageSize, offset);
+          records = await fetchTransactionsData(db, filters, pageSize, cursor);
           break;
         case "health_metrics":
-          records = await fetchHealthMetricsData(db, filters, pageSize, offset);
+          records = await fetchHealthMetricsData(db, filters, pageSize, cursor);
           break;
         default:
           throw new Error(`Unsupported data type: ${dataType}`);
       }
 
-      if (records.length === 0) {
-        hasMore = false;
-        break;
-      }
+      if (records.length === 0) break;
 
-      // Yield each record individually for streaming
       for (const record of records) {
         yield record;
+        yielded++;
+
+        if (maxRows > 0 && yielded >= maxRows) {
+          logger.info({ dataType, yielded, maxRows }, "Data stream hit max row limit");
+          return;
+        }
       }
 
-      // Check if we've reached the limit or end of data
-      if (filters.limit && offset + records.length >= filters.limit) {
-        hasMore = false;
-      } else if (records.length < pageSize) {
-        hasMore = false;
-      } else {
-        offset += pageSize;
-      }
+      // If fewer records than pageSize, we've reached the end
+      if (records.length < pageSize) break;
+
+      // Advance cursor to the ORDER BY value of the last record
+      cursor = getCursorValue(dataType, records[records.length - 1]);
     } catch (error) {
-      logger.error({ error, dataType, offset }, "Error streaming data");
+      logger.error({ error, dataType, yielded }, "Error streaming data");
       throw error;
     }
   }
 
-  logger.info({ dataType, totalRecords: offset }, "Data stream completed");
+  logger.info({ dataType, totalRecords: yielded }, "Data stream completed");
 }
+
+// ---------------------------------------------------------------------------
+// Cursor helpers
+// ---------------------------------------------------------------------------
+
+function getCursorValue(dataType: ExportDataType, lastRecord: any): Date | string | number {
+  switch (dataType) {
+    case "analytics":
+      return new Date(lastRecord.time);
+    case "transactions":
+      return new Date(lastRecord.verified_at);
+    case "health_metrics":
+      return new Date(lastRecord.time);
+    default:
+      throw new Error(`Unsupported data type: ${dataType}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-type fetch functions — keyset pagination: WHERE <col> < cursor
+// (ordering is DESC so the next page is strictly less than the cursor)
+// ---------------------------------------------------------------------------
 
 /**
  * Fetch analytics data (prices with VWAP and sources)
@@ -76,20 +105,17 @@ async function fetchAnalyticsData(
   db: any,
   filters: ExportFilters,
   limit: number,
-  offset: number
+  cursor: Date | string | number | null
 ): Promise<any[]> {
   let query = db("prices")
-    .select(
-      "time",
-      "symbol",
-      "source",
-      "price",
-      "volume_24h"
-    )
+    .select("time", "symbol", "source", "price", "volume_24h")
     .whereBetween("time", [new Date(filters.startDate), new Date(filters.endDate)])
     .orderBy("time", "desc")
-    .limit(limit)
-    .offset(offset);
+    .limit(limit);
+
+  if (cursor) {
+    query = query.where("time", "<", cursor);
+  }
 
   if (filters.assetCodes && filters.assetCodes.length > 0) {
     query = query.whereIn("symbol", filters.assetCodes);
@@ -105,7 +131,7 @@ async function fetchTransactionsData(
   db: any,
   filters: ExportFilters,
   limit: number,
-  offset: number
+  cursor: Date | string | number | null
 ): Promise<any[]> {
   let query = db("verification_results")
     .select(
@@ -121,8 +147,11 @@ async function fetchTransactionsData(
     )
     .whereBetween("verified_at", [new Date(filters.startDate), new Date(filters.endDate)])
     .orderBy("verified_at", "desc")
-    .limit(limit)
-    .offset(offset);
+    .limit(limit);
+
+  if (cursor) {
+    query = query.where("verified_at", "<", cursor);
+  }
 
   if (filters.bridgeIds && filters.bridgeIds.length > 0) {
     query = query.whereIn("bridge_id", filters.bridgeIds);
@@ -138,7 +167,7 @@ async function fetchHealthMetricsData(
   db: any,
   filters: ExportFilters,
   limit: number,
-  offset: number
+  cursor: Date | string | number | null
 ): Promise<any[]> {
   let query = db("health_scores")
     .select(
@@ -153,8 +182,11 @@ async function fetchHealthMetricsData(
     )
     .whereBetween("time", [new Date(filters.startDate), new Date(filters.endDate)])
     .orderBy("time", "desc")
-    .limit(limit)
-    .offset(offset);
+    .limit(limit);
+
+  if (cursor) {
+    query = query.where("time", "<", cursor);
+  }
 
   if (filters.assetCodes && filters.assetCodes.length > 0) {
     query = query.whereIn("symbol", filters.assetCodes);

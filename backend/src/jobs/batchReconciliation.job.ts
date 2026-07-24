@@ -1,5 +1,6 @@
 import { SUPPORTED_ASSETS } from "../config/index.js";
 import { ReconciliationService } from "../services/reconciliation.service.js";
+import { distributedLockService } from "../services/distributedLock.service.js";
 import { logger } from "../utils/logger.js";
 
 const RECONCILIATION_INTERVAL_MS = Number(process.env.RECONCILIATION_INTERVAL_MS) || 600000; // 10 min default
@@ -106,15 +107,21 @@ export async function runBatchReconciliation(): Promise<BatchReconciliationRepor
   return report;
 }
 
+const LOCK_KEY = "batch-reconciliation";
+
+function runLocked(): Promise<unknown> {
+  return distributedLockService.withLock(LOCK_KEY, RECONCILIATION_INTERVAL_MS, runBatchReconciliation);
+}
+
 export function startBatchReconciliationJob(): void {
   logger.info({ intervalMs: RECONCILIATION_INTERVAL_MS }, "Starting batch reconciliation job scheduler");
 
-  runBatchReconciliation().catch((err) => {
+  runLocked().catch((err) => {
     logger.error({ error: err }, "Initial batch reconciliation run failed");
   });
 
   reconciliationInterval = setInterval(() => {
-    runBatchReconciliation().catch((err) => {
+    runLocked().catch((err) => {
       logger.error({ error: err }, "Scheduled batch reconciliation run failed");
     });
   }, RECONCILIATION_INTERVAL_MS);

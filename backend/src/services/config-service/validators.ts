@@ -115,6 +115,7 @@ export const ConfigSchemas = {
   EXPORT_DOWNLOAD_URL_EXPIRY_HOURS: z.number().int().min(1).max(168),
   EXPORT_COMPRESSION_THRESHOLD_BYTES: z.number().int().min(0),
   EXPORT_STREAMING_PAGE_SIZE: z.number().int().min(10).max(10000),
+  EXPORT_STREAMING_MAX_ROWS: z.number().int().min(0),
   EXPORT_QUEUE_CONCURRENCY: z.number().int().min(1).max(10),
   EXPORT_MAX_DATE_RANGE_DAYS: z.number().int().min(1).max(365),
 

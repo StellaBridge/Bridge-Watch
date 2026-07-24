@@ -166,6 +166,7 @@ const envSchema = z.object({
   EXPORT_DOWNLOAD_URL_EXPIRY_HOURS: z.coerce.number().default(24),
   EXPORT_COMPRESSION_THRESHOLD_BYTES: z.coerce.number().default(1048576), // 1MB
   EXPORT_STREAMING_PAGE_SIZE: z.coerce.number().default(1000),
+  EXPORT_STREAMING_MAX_ROWS: z.coerce.number().default(0),
   EXPORT_QUEUE_CONCURRENCY: z.coerce.number().default(3),
   EXPORT_MAX_DATE_RANGE_DAYS: z.coerce.number().default(90),
 

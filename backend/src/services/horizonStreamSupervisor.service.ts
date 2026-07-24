@@ -86,6 +86,7 @@ export class HorizonStreamSupervisor extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.gapCheckTimer) clearInterval(this.gapCheckTimer);
     this.abortController?.abort();
+    this.removeAllListeners();
     logger.info({ streamId: this.streamId }, "Horizon stream supervisor stopped");
   }
 
@@ -131,13 +132,12 @@ export class HorizonStreamSupervisor extends EventEmitter {
     this.setStatus("connecting");
     logger.info({ streamId: this.streamId, url: streamUrl }, "Connecting to Horizon stream");
 
+    const timeoutId = setTimeout(() => this.abortController?.abort(), this.timeoutMs);
     try {
-      const timeoutId = setTimeout(() => this.abortController?.abort(), this.timeoutMs);
       const response = await fetch(streamUrl, {
         headers: { Accept: "text/event-stream" },
         signal,
       });
-      clearTimeout(timeoutId);
 
       if (!response.ok || !response.body) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
@@ -182,6 +182,8 @@ export class HorizonStreamSupervisor extends EventEmitter {
       logger.warn({ streamId: this.streamId, error: errMsg }, "Horizon stream error");
       this.setStatus("error");
       this._scheduleReconnect();
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

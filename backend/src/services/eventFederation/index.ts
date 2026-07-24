@@ -17,6 +17,8 @@ export type {
   FederationStatus,
   IChainConnector,
   ReplayRequest,
+  SignedFederatedEvent,
+  EventSubmissionResult,
 } from "./types.js";
 
 import { EventFederationService } from "./EventFederationService.js";

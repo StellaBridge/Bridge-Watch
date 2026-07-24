@@ -61,6 +61,55 @@ export interface LiquidityWsMessage {
   venues: VenueLiquidity[];
 }
 
+/** A single price bracket in the concentration histogram */
+export interface ConcentrationBucket {
+  /** Price range label, e.g. "mid-2%" */
+  label: string;
+  /** Lower bound of the price range */
+  lowerBound: number;
+  /** Upper bound of the price range */
+  upperBound: number;
+  /** Total bid volume in this bracket */
+  bidVolume: number;
+  /** Total ask volume in this bracket */
+  askVolume: number;
+  /** Number of venue levels contributing to this bracket */
+  levelsCount: number;
+}
+
+/** A detected low-liquidity zone */
+export interface LiquidityGap {
+  /** Start price of the gap */
+  startPrice: number;
+  /** End price of the gap */
+  endPrice: number;
+  /** Total depth (bid + ask) in the gap — should be near zero */
+  depth: number;
+  /** Severity rating 0-1 (1 = completely empty) */
+  severity: number;
+}
+
+/** Full concentration analysis response */
+export interface LiquidityConcentrationData {
+  pair: TradingPair;
+  midPrice: number;
+  buckets: ConcentrationBucket[];
+  gaps: LiquidityGap[];
+  spreadPct: number;
+  bidTotal: number;
+  askTotal: number;
+  timestamp: string;
+}
+
+/** State managed by the useLiquidityConcentration hook */
+export interface LiquidityConcentrationState {
+  data: LiquidityConcentrationData | null;
+  isLoading: boolean;
+  error: string | null;
+  lastUpdated: string | null;
+  refetch: () => Promise<unknown>;
+}
+
 /** State managed by the useLiquidity hook */
 export interface LiquidityState {
   depth: DepthData | null;

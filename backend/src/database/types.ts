@@ -486,3 +486,33 @@ export const DEFAULT_WEBHOOK_RETRY_CONFIG: WebhookRetryConfig = {
   retryBackoffMultiplier: 2.0,
   retryJitterRatio: 0.2,
 };
+// ─── event_source_keys ─────────────────────────────────────────────────────
+
+export type SourceKeyAlgorithm = "ed25519" | "secp256k1" | "p256";
+
+export interface EventSourceKey {
+  id: string;
+  source_name: string;
+  public_key: string;
+  algorithm: SourceKeyAlgorithm;
+  is_active: boolean;
+  rotated_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export type NewEventSourceKey = Omit<EventSourceKey, "id" | "created_at" | "updated_at">;
+
+// ─── event_federation_audit ───────────────────────────────────────────────
+
+export type FederationAuditStatus = "accepted" | "rejected_signature" | "rejected_timestamp" | "rejected_unknown_source";
+
+export interface EventFederationAuditRecord {
+  id: string;
+  source_name: string;
+  event_id: string;
+  status: FederationAuditStatus;
+  error_message: string | null;
+  timestamp_age_ms: number | null;
+  created_at: Date;
+}
