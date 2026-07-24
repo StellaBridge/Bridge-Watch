@@ -15,6 +15,11 @@ interface CreateEndpointBody {
   eventTypes?: WebhookEventType[];
   isBatchDeliveryEnabled?: boolean;
   batchWindowMs?: number;
+  retryMaxAttempts?: number;
+  retryBaseDelayMs?: number;
+  retryMaxDelayMs?: number;
+  retryBackoffMultiplier?: number;
+  retryJitterRatio?: number;
 }
 
 interface UpdateEndpointBody {
@@ -27,6 +32,11 @@ interface UpdateEndpointBody {
   eventTypes?: WebhookEventType[];
   isBatchDeliveryEnabled?: boolean;
   batchWindowMs?: number;
+  retryMaxAttempts?: number;
+  retryBaseDelayMs?: number;
+  retryMaxDelayMs?: number;
+  retryBackoffMultiplier?: number;
+  retryJitterRatio?: number;
 }
 
 interface EndpointParams {

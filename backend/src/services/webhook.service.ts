@@ -6,6 +6,8 @@ import { Queue, Job, ConnectionOptions } from "bullmq";
 import { config } from "../config/index.js";
 import { WebhookBatchBufferService } from "./webhookBatchBuffer.service.js";
 import type { BatchBufferStatus } from "./webhookBatchBuffer.service.js";
+import type { WebhookRetryConfig } from "../database/types.js";
+import { DEFAULT_WEBHOOK_RETRY_CONFIG } from "../database/types.js";
 
 const fetch = globalThis.fetch;
 
@@ -47,6 +49,11 @@ export interface WebhookEndpoint {
   circuitBreakerStatus: WebhookCircuitBreakerStatus;
   circuitBreakerTrippedAt: Date | null;
   circuitBreakerResetAt: Date | null;
+  retryMaxAttempts: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
+  retryBackoffMultiplier: number;
+  retryJitterRatio: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -105,12 +112,27 @@ const WEBHOOK_CONNECTION: ConnectionOptions = {
   password: config.REDIS_PASSWORD,
 };
 
-// Retry configuration: exponential backoff starting at 1s, max 1 hour
-const RETRY_DELAYS = [1000, 5000, 15000, 60000, 300000, 900000, 3600000];
-const MAX_RETRY_ATTEMPTS = 7;
+// Retry configuration: defaults used when endpoint has no custom config
+const DEFAULT_RETRY_MAX_ATTEMPTS = 7;
 
 // Circuit breaker: trip after this many consecutive failures per endpoint
 const CONSECUTIVE_FAILURE_THRESHOLD = 10;
+
+// =============================================================================
+// BACKOFF HELPER
+// =============================================================================
+
+function computeRetryDelay(attempt: number, policy: WebhookRetryConfig): number {
+  const exponential = Math.min(
+    policy.retryMaxDelayMs,
+    Math.floor(policy.retryBaseDelayMs * policy.retryBackoffMultiplier ** Math.max(0, attempt - 1)),
+  );
+  const jitterWindow = Math.floor(exponential * policy.retryJitterRatio);
+  const jitter = jitterWindow > 0
+    ? Math.floor(Math.random() * (jitterWindow * 2 + 1)) - jitterWindow
+    : 0;
+  return Math.max(1, exponential + jitter);
+}
 
 // =============================================================================
 // WEBHOOK SERVICE CLASS
@@ -145,7 +167,7 @@ export class WebhookService extends EventEmitter {
     this.deliveryQueue = new Queue(WEBHOOK_QUEUE_NAME, {
       connection: WEBHOOK_CONNECTION,
       defaultJobOptions: {
-        attempts: MAX_RETRY_ATTEMPTS,
+        attempts: DEFAULT_RETRY_MAX_ATTEMPTS,
         backoff: {
           type: "custom",
         },
@@ -495,6 +517,11 @@ export class WebhookService extends EventEmitter {
     eventTypes?: WebhookEventType[];
     isBatchDeliveryEnabled?: boolean;
     batchWindowMs?: number;
+    retryMaxAttempts?: number;
+    retryBaseDelayMs?: number;
+    retryMaxDelayMs?: number;
+    retryBackoffMultiplier?: number;
+    retryJitterRatio?: number;
   }): Promise<WebhookEndpoint> {
     const db = getDatabase();
     const secret = this.generateSecret();
@@ -513,6 +540,11 @@ export class WebhookService extends EventEmitter {
         filter_event_types: JSON.stringify(params.eventTypes || []),
         is_batch_delivery_enabled: params.isBatchDeliveryEnabled || false,
         batch_window_ms: params.batchWindowMs || 5000,
+        retry_max_attempts: params.retryMaxAttempts ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryMaxAttempts,
+        retry_base_delay_ms: params.retryBaseDelayMs ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryBaseDelayMs,
+        retry_max_delay_ms: params.retryMaxDelayMs ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryMaxDelayMs,
+        retry_backoff_multiplier: params.retryBackoffMultiplier ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryBackoffMultiplier,
+        retry_jitter_ratio: params.retryJitterRatio ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryJitterRatio,
         created_at: new Date(),
         updated_at: new Date(),
       })
@@ -535,6 +567,11 @@ export class WebhookService extends EventEmitter {
       filterEventTypes: WebhookEventType[];
       isBatchDeliveryEnabled: boolean;
       batchWindowMs: number;
+      retryMaxAttempts: number;
+      retryBaseDelayMs: number;
+      retryMaxDelayMs: number;
+      retryBackoffMultiplier: number;
+      retryJitterRatio: number;
     }>
   ): Promise<WebhookEndpoint | null> {
     const db = getDatabase();
@@ -549,6 +586,11 @@ export class WebhookService extends EventEmitter {
     if (updates.filterEventTypes !== undefined) updateData.filter_event_types = JSON.stringify(updates.filterEventTypes);
     if (updates.isBatchDeliveryEnabled !== undefined) updateData.is_batch_delivery_enabled = updates.isBatchDeliveryEnabled;
     if (updates.batchWindowMs !== undefined) updateData.batch_window_ms = updates.batchWindowMs;
+    if (updates.retryMaxAttempts !== undefined) updateData.retry_max_attempts = Math.max(1, Math.min(20, updates.retryMaxAttempts));
+    if (updates.retryBaseDelayMs !== undefined) updateData.retry_base_delay_ms = Math.max(100, updates.retryBaseDelayMs);
+    if (updates.retryMaxDelayMs !== undefined) updateData.retry_max_delay_ms = Math.max(1000, updates.retryMaxDelayMs);
+    if (updates.retryBackoffMultiplier !== undefined) updateData.retry_backoff_multiplier = Math.max(1, Math.min(10, updates.retryBackoffMultiplier));
+    if (updates.retryJitterRatio !== undefined) updateData.retry_jitter_ratio = Math.max(0, Math.min(1, updates.retryJitterRatio));
 
     const [endpoint] = await db("webhook_endpoints")
       .where("id", webhookEndpointId)
@@ -881,9 +923,30 @@ export class WebhookService extends EventEmitter {
     }
 
     if (status === "retrying") {
+      const delivery = await db("webhook_deliveries").where("id", deliveryId).first();
+      const attempts = delivery ? delivery.attempts + 1 : 1;
+
       updateData.attempts = db.raw("attempts + 1");
       updateData.last_attempt_at = new Date();
-      updateData.next_retry_at = new Date(Date.now() + RETRY_DELAYS[Math.min(0, 0)]);
+
+      if (delivery) {
+        const endpoint = await this.getEndpoint(delivery.webhook_endpoint_id);
+        const retryPolicy: WebhookRetryConfig = endpoint
+          ? {
+              retryMaxAttempts: endpoint.retryMaxAttempts,
+              retryBaseDelayMs: endpoint.retryBaseDelayMs,
+              retryMaxDelayMs: endpoint.retryMaxDelayMs,
+              retryBackoffMultiplier: endpoint.retryBackoffMultiplier,
+              retryJitterRatio: endpoint.retryJitterRatio,
+            }
+          : DEFAULT_WEBHOOK_RETRY_CONFIG;
+
+        const delayMs = computeRetryDelay(attempts, retryPolicy);
+        updateData.next_retry_at = new Date(Date.now() + delayMs);
+      } else {
+        updateData.next_retry_at = new Date(Date.now() + DEFAULT_WEBHOOK_RETRY_CONFIG.retryBaseDelayMs);
+      }
+
       updateData.error_message = errorMessage;
     }
 
@@ -1061,6 +1124,36 @@ export class WebhookService extends EventEmitter {
   }
 
   // ---------------------------------------------------------------------------
+  // RETRY POLICY
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get the retry delay for a specific attempt using the endpoint's backoff config.
+   */
+  public getRetryDelayMs(attempt: number, endpoint: WebhookEndpoint): number {
+    return computeRetryDelay(attempt, {
+      retryMaxAttempts: endpoint.retryMaxAttempts,
+      retryBaseDelayMs: endpoint.retryBaseDelayMs,
+      retryMaxDelayMs: endpoint.retryMaxDelayMs,
+      retryBackoffMultiplier: endpoint.retryBackoffMultiplier,
+      retryJitterRatio: endpoint.retryJitterRatio,
+    });
+  }
+
+  /**
+   * Get the full retry policy config for an endpoint.
+   */
+  public getRetryPolicy(endpoint: WebhookEndpoint): WebhookRetryConfig {
+    return {
+      retryMaxAttempts: endpoint.retryMaxAttempts,
+      retryBaseDelayMs: endpoint.retryBaseDelayMs,
+      retryMaxDelayMs: endpoint.retryMaxDelayMs,
+      retryBackoffMultiplier: endpoint.retryBackoffMultiplier,
+      retryJitterRatio: endpoint.retryJitterRatio,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // MAPPERS
   // ---------------------------------------------------------------------------
 
@@ -1083,6 +1176,11 @@ export class WebhookService extends EventEmitter {
       circuitBreakerStatus: row.circuit_breaker_status ?? "closed",
       circuitBreakerTrippedAt: row.circuit_breaker_tripped_at ?? null,
       circuitBreakerResetAt: row.circuit_breaker_reset_at ?? null,
+      retryMaxAttempts: row.retry_max_attempts ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryMaxAttempts,
+      retryBaseDelayMs: row.retry_base_delay_ms ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryBaseDelayMs,
+      retryMaxDelayMs: row.retry_max_delay_ms ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryMaxDelayMs,
+      retryBackoffMultiplier: row.retry_backoff_multiplier ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryBackoffMultiplier,
+      retryJitterRatio: row.retry_jitter_ratio ?? DEFAULT_WEBHOOK_RETRY_CONFIG.retryJitterRatio,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -1124,3 +1222,6 @@ export class WebhookService extends EventEmitter {
 
 // Export singleton instance
 export const webhookService = WebhookService.getInstance();
+
+// Re-export backoff helper for use by workers
+export { computeRetryDelay };

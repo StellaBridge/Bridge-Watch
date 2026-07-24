@@ -468,3 +468,21 @@ export interface BalanceHistoryRecord {
   recorded_at: Date;
   metadata: unknown | null;
 }
+
+// ─── webhook retry backoff configuration ──────────────────────────────────
+
+export interface WebhookRetryConfig {
+  retryMaxAttempts: number;
+  retryBaseDelayMs: number;
+  retryMaxDelayMs: number;
+  retryBackoffMultiplier: number;
+  retryJitterRatio: number;
+}
+
+export const DEFAULT_WEBHOOK_RETRY_CONFIG: WebhookRetryConfig = {
+  retryMaxAttempts: 7,
+  retryBaseDelayMs: 1000,
+  retryMaxDelayMs: 3_600_000,
+  retryBackoffMultiplier: 2.0,
+  retryJitterRatio: 0.2,
+};

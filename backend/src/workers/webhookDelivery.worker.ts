@@ -2,7 +2,7 @@ import { Worker, Job } from "bullmq";
 import { ConnectionOptions } from "bullmq";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
-import { webhookService } from "../services/webhook.service.js";
+import { webhookService, computeRetryDelay } from "../services/webhook.service.js";
 import { retryPolicyService } from "../services/retryPolicy.service.js";
 
 // =============================================================================
@@ -57,11 +57,20 @@ export async function initWebhookWorker(): Promise<void> {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-        // Estimate next retry delay for observability.
-        const delay = retryPolicyService.getDelayMs(job.attemptsMade + 1, {
+        // Compute endpoint-specific retry delay for observability
+        let delay = retryPolicyService.getDelayMs(job.attemptsMade + 1, {
           operation: "webhook:delivery",
           ...WEBHOOK_RETRY_POLICY,
         });
+
+        try {
+          const endpoint = await webhookService.getEndpoint(job.data.webhookEndpointId);
+          if (endpoint) {
+            delay = webhookService.getRetryDelayMs(job.attemptsMade + 1, endpoint);
+          }
+        } catch {
+          // Fall back to default policy if endpoint lookup fails
+        }
 
         logger.error(
           { jobId: job.id, attempt: job.attemptsMade + 1, error: errorMessage, nextRetryIn: delay },
@@ -96,7 +105,17 @@ export async function initWebhookWorker(): Promise<void> {
     const errorMessage = err.message;
 
     // Check if we've exceeded max attempts
-    if (job.attemptsMade >= WEBHOOK_RETRY_POLICY.maxRetries) {
+    let maxRetries = WEBHOOK_RETRY_POLICY.maxRetries;
+    try {
+      const endpoint = await webhookService.getEndpoint(job.data.webhookEndpointId);
+      if (endpoint) {
+        maxRetries = endpoint.retryMaxAttempts;
+      }
+    } catch {
+      // Fall back to default
+    }
+
+    if (job.attemptsMade >= maxRetries) {
       logger.error(
         { jobId: job.id, webhookEndpointId: job.data.webhookEndpointId, attempts: job.attemptsMade },
         "Webhook delivery failed permanently after max retries"
@@ -104,16 +123,16 @@ export async function initWebhookWorker(): Promise<void> {
 
       // Update delivery status to failed
       try {
-        const { webhookService } = await import("../services/webhook.service.js");
-        await webhookService.updateDeliveryStatus(job.data.deliveryId, "failed", undefined, errorMessage);
+        const { webhookService: svc } = await import("../services/webhook.service.js");
+        await svc.updateDeliveryStatus(job.data.deliveryId, "failed", undefined, errorMessage);
       } catch (updateError) {
         logger.error({ jobId: job.id }, "Failed to update delivery status after max retries");
       }
 
       // Record failure for circuit breaker tracking
       try {
-        const { webhookService } = await import("../services/webhook.service.js");
-        await webhookService.recordFailure(job.data.webhookEndpointId);
+        const { webhookService: svc } = await import("../services/webhook.service.js");
+        await svc.recordFailure(job.data.webhookEndpointId);
       } catch (cbError) {
         logger.error(
           { jobId: job.id, error: cbError instanceof Error ? cbError.message : String(cbError) },
