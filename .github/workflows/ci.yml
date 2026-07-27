@@ -14,9 +14,6 @@ jobs:
   # Node.js Job for Backend & Frontend
   node-ci:
     runs-on: ubuntu-latest
-    env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/node-ci
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
 
     services:
       postgres:
@@ -48,6 +45,11 @@ jobs:
 
       - name: Initialize command log archive
         run: |
+          {
+            echo "COMMAND_LOG_DIR=$RUNNER_TEMP/bridge-watch-command-logs/node-ci"
+            echo "COMMAND_LOG_ARCHIVE_DIR=$RUNNER_TEMP/bridge-watch-command-log-archives"
+          } >> "$GITHUB_ENV"
+          COMMAND_LOG_DIR="$RUNNER_TEMP/bridge-watch-command-logs/node-ci"
           mkdir -p "$COMMAND_LOG_DIR"
           printf 'label\tcommand\tlog_file\n' > "$COMMAND_LOG_DIR/COMMANDS.tsv"
 
@@ -164,15 +166,17 @@ jobs:
   sdk:
     name: SDK Build & Test
     runs-on: ubuntu-latest
-    env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/sdk
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Initialize command log archive
         run: |
+          {
+            echo "COMMAND_LOG_DIR=$RUNNER_TEMP/bridge-watch-command-logs/sdk"
+            echo "COMMAND_LOG_ARCHIVE_DIR=$RUNNER_TEMP/bridge-watch-command-log-archives"
+          } >> "$GITHUB_ENV"
+          COMMAND_LOG_DIR="$RUNNER_TEMP/bridge-watch-command-logs/sdk"
           mkdir -p "$COMMAND_LOG_DIR"
           printf 'label\tcommand\tlog_file\n' > "$COMMAND_LOG_DIR/COMMANDS.tsv"
 
@@ -218,15 +222,17 @@ jobs:
   frontend:
     name: Frontend Build
     runs-on: ubuntu-latest
-    env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/frontend
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Initialize command log archive
         run: |
+          {
+            echo "COMMAND_LOG_DIR=$RUNNER_TEMP/bridge-watch-command-logs/frontend"
+            echo "COMMAND_LOG_ARCHIVE_DIR=$RUNNER_TEMP/bridge-watch-command-log-archives"
+          } >> "$GITHUB_ENV"
+          COMMAND_LOG_DIR="$RUNNER_TEMP/bridge-watch-command-logs/frontend"
           mkdir -p "$COMMAND_LOG_DIR"
           printf 'label\tcommand\tlog_file\n' > "$COMMAND_LOG_DIR/COMMANDS.tsv"
 
@@ -322,9 +328,6 @@ jobs:
   # Rust Job for Smart Contracts
   rust-ci:
     runs-on: ubuntu-latest
-    env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/rust-ci
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
     defaults:
       run:
         working-directory: contracts
@@ -334,6 +337,11 @@ jobs:
       - name: Initialize command log archive
         working-directory: .
         run: |
+          {
+            echo "COMMAND_LOG_DIR=$RUNNER_TEMP/bridge-watch-command-logs/rust-ci"
+            echo "COMMAND_LOG_ARCHIVE_DIR=$RUNNER_TEMP/bridge-watch-command-log-archives"
+          } >> "$GITHUB_ENV"
+          COMMAND_LOG_DIR="$RUNNER_TEMP/bridge-watch-command-logs/rust-ci"
           mkdir -p "$COMMAND_LOG_DIR"
           printf 'label\tcommand\tlog_file\n' > "$COMMAND_LOG_DIR/COMMANDS.tsv"
 
