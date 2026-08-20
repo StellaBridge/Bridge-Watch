@@ -91,7 +91,7 @@ export class HealthCheckService {
       maintenance: {
         active: config.MAINTENANCE_MODE,
         message: config.MAINTENANCE_MESSAGE,
-        severity: config.MAINTENANCE_SEVERITY,
+        severity: config.MAINTENANCE_SEVERITY as "info" | "warning" | "critical",
         statusPageUrl: config.STATUS_PAGE_URL,
       },
     };

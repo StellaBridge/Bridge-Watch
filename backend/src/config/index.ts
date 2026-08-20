@@ -45,6 +45,16 @@ const envSchema = z.object({
   CIRCUIT_BREAKER_CONTRACT_ID: z.string().optional(),
   LIQUIDITY_CONTRACT_ADDRESS: z.string().optional(),
 
+  // Wormhole-watched asset (EVM lock contract reserves)
+  WORMHOLE_WATCHED_ASSET_SYMBOL: z.string().default(""),
+  WORMHOLE_WATCHED_ASSET_STELLAR_ISSUER: z.string().default(""),
+
+  // OAuth2 / JWT
+  JWT_SECRET: z.string().optional(),
+  JWT_ISSUER: z.string().default("bridge-watch-api"),
+  JWT_AUDIENCE: z.string().default("bridge-watch-api"),
+  JWT_TTL_SECONDS: z.coerce.number().default(3600),
+
   // Ethereum / EVM chains
   ETHEREUM_RPC_URL: z.string().url().optional(),
   ETHEREUM_RPC_WS_URL: z.string().url().optional(),
@@ -123,6 +133,8 @@ const envSchema = z.object({
   // Alert Thresholds
   PRICE_DEVIATION_THRESHOLD: z.coerce.number().default(0.02),
   BRIDGE_SUPPLY_MISMATCH_THRESHOLD: z.coerce.number().default(0.1),
+  BRIDGE_MISMATCH_THRESHOLD: z.coerce.number().default(0.01),
+  HEALTH_SCORE_THRESHOLD: z.coerce.number().default(0.5),
 
   // Verification & Retries
   RETRY_MAX: z.coerce.number().default(3),
@@ -169,6 +181,7 @@ const envSchema = z.object({
   EXPORT_DOWNLOAD_URL_EXPIRY_HOURS: z.coerce.number().default(24),
   EXPORT_COMPRESSION_THRESHOLD_BYTES: z.coerce.number().default(1048576), // 1MB
   EXPORT_STREAMING_PAGE_SIZE: z.coerce.number().default(1000),
+  EXPORT_STREAMING_MAX_ROWS: z.coerce.number().default(0),
   EXPORT_QUEUE_CONCURRENCY: z.coerce.number().default(3),
   EXPORT_MAX_DATE_RANGE_DAYS: z.coerce.number().default(90),
 
@@ -202,6 +215,10 @@ const envSchema = z.object({
   HEALTH_CHECK_MEMORY_THRESHOLD: z.coerce.number().default(90),
   HEALTH_CHECK_DISK_THRESHOLD: z.coerce.number().default(80),
   HEALTH_CHECK_EXTERNAL_APIS: z.string().default("true"),
+  MAINTENANCE_MODE: z.coerce.boolean().default(false),
+  MAINTENANCE_MESSAGE: z.string().default(""),
+  MAINTENANCE_SEVERITY: z.string().default("warning"),
+  STATUS_PAGE_URL: z.string().optional(),
 
   // CORS Configuration
   CORS_ALLOWED_ORIGINS: z
@@ -228,6 +245,14 @@ const envSchema = z.object({
   VALIDATION_ERROR_THRESHOLD: z.coerce.number().default(0.1), // 10% error rate threshold
   VALIDATION_WARNING_THRESHOLD: z.coerce.number().default(0.3), // 30% warning threshold
   VALIDATION_DATA_QUALITY_THRESHOLD: z.coerce.number().default(70), // 70% quality score threshold
+
+  // Ingestion confirmations and reorg handling
+  INGESTION_MIN_CONFIRMATIONS_STELLAR: z.coerce.number().default(3),
+  INGESTION_MIN_CONFIRMATIONS_ETHEREUM: z.coerce.number().default(12),
+  INGESTION_MIN_CONFIRMATIONS_POLYGON: z.coerce.number().default(12),
+  INGESTION_MIN_CONFIRMATIONS_BASE: z.coerce.number().default(12),
+  INGESTION_UNCONFIRMED_EVENT_TTL_MINUTES: z.coerce.number().default(30),
+  INGESTION_REORG_BUFFER_DEPTH: z.coerce.number().default(6),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

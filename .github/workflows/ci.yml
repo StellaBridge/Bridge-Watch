@@ -15,8 +15,8 @@ jobs:
   node-ci:
     runs-on: ubuntu-latest
     env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/node-ci
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
+      COMMAND_LOG_DIR: ${{ github.workspace }}/.command-logs/node-ci
+      COMMAND_LOG_ARCHIVE_DIR: ${{ github.workspace }}/.command-log-archives
 
     services:
       postgres:
@@ -165,8 +165,8 @@ jobs:
     name: SDK Build & Test
     runs-on: ubuntu-latest
     env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/sdk
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
+      COMMAND_LOG_DIR: ${{ github.workspace }}/.command-logs/sdk
+      COMMAND_LOG_ARCHIVE_DIR: ${{ github.workspace }}/.command-log-archives
 
     steps:
       - uses: actions/checkout@v4
@@ -219,8 +219,8 @@ jobs:
     name: Frontend Build
     runs-on: ubuntu-latest
     env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/frontend
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
+      COMMAND_LOG_DIR: ${{ github.workspace }}/.command-logs/frontend
+      COMMAND_LOG_ARCHIVE_DIR: ${{ github.workspace }}/.command-log-archives
 
     steps:
       - uses: actions/checkout@v4
@@ -323,8 +323,8 @@ jobs:
   rust-ci:
     runs-on: ubuntu-latest
     env:
-      COMMAND_LOG_DIR: ${{ runner.temp }}/bridge-watch-command-logs/rust-ci
-      COMMAND_LOG_ARCHIVE_DIR: ${{ runner.temp }}/bridge-watch-command-log-archives
+      COMMAND_LOG_DIR: ${{ github.workspace }}/.command-logs/rust-ci
+      COMMAND_LOG_ARCHIVE_DIR: ${{ github.workspace }}/.command-log-archives
     defaults:
       run:
         working-directory: contracts

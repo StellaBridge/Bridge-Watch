@@ -12,7 +12,7 @@ import { operatorNotesRoutes } from "../notes.js";
 import { externalDependenciesRoutes } from "../externalDependencies.routes.js";
 import { eventReplayRoutes } from "../eventReplay.routes.js";
 import { eventFederationRoutes } from "../eventFederation.routes.js";
-import { jobsRoutes } from "../jobs.js";
+import jobsRoutes from "../jobs.js";
 
 export async function registerUtilityRoutes(server: FastifyInstance): Promise<void> {
   server.register(exportsRoutes, { prefix: "/api/v1/exports" });

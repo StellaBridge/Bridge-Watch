@@ -51,14 +51,14 @@ export interface MmrVerifyResult {
 
 const ZERO = Buffer.alloc(32, 0);
 
-function hashLeaf(data: Buffer): Buffer {
+function hashLeaf(data: Uint8Array): Buffer<ArrayBuffer> {
   return createHash("sha256")
     .update(Buffer.from([0x00]))
     .update(data)
     .digest();
 }
 
-function hashNode(left: Buffer, right: Buffer): Buffer {
+function hashNode(left: Uint8Array, right: Uint8Array): Buffer<ArrayBuffer> {
   return createHash("sha256")
     .update(Buffer.from([0x01]))
     .update(left)

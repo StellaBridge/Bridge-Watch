@@ -10,7 +10,7 @@ import { aggregationRoutes } from "../aggregation.js";
 import { circuitBreakerRoutes } from "../circuitBreaker.js";
 import { circuitHealthRoutes } from "../circuitHealth.js";
 import { searchRoutes } from "../search.routes.js";
-import { sessionRoutes } from "../sessions.js";
+import { sessionsRoutes } from "../sessions.js";
 import { tagsRoutes } from "../tags.js";
 import { notificationTemplatesRoutes } from "../notificationTemplates.js";
 
@@ -27,7 +27,7 @@ export async function registerCoreRoutes(server: FastifyInstance): Promise<void>
   server.register(circuitBreakerRoutes, { prefix: "/api/v1/circuit-breaker" });
   server.register(circuitHealthRoutes, { prefix: "/api/v1/circuit-health" });
   server.register(searchRoutes, { prefix: "/api/v1/search" });
-  server.register(sessionRoutes, { prefix: "/api/v1/sessions" });
+  server.register(sessionsRoutes, { prefix: "/api/v1/sessions" });
   server.register(tagsRoutes, { prefix: "/api/v1/tags" });
   server.register(notificationTemplatesRoutes, {
     prefix: "/api/v1/notification-templates",

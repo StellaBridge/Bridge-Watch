@@ -1,5 +1,5 @@
 import { Worker, Queue } from "bullmq";
-import { config, BRIDGE_MISMATCH_THRESHOLD } from "../config/index.js";
+import { config } from "../config/index.js";
 import { BridgeService } from "../services/bridge.service.js";
 import { logger } from "../utils/logger.js";
 import { alertRoutingService, type RouteableAlert } from "../services/alertRouting.service.js";

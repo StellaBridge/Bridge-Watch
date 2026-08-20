@@ -1,5 +1,5 @@
 import { Worker, Queue } from "bullmq";
-import { config, HEALTH_SCORE_THRESHOLD } from "../config/index.js";
+import { config } from "../config/index.js";
 import { HealthService, type HealthScore } from "../services/health.service.js";
 import { logger } from "../utils/logger.js";
 import { alertRoutingService, type RouteableAlert } from "../services/alertRouting.service.js";
