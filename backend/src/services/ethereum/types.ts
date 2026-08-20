@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import type { FailoverOptions } from "./failover/types.js";
 
 /** Supported EVM chains */
 export type ChainId = "ethereum" | "polygon" | "base";
@@ -66,14 +66,5 @@ export interface RpcClientOptions {
   maxRetries?: number;
   retryDelayMs?: number;
   requestTimeoutMs?: number;
-}
-
-/** Internal provider state per chain */
-export interface ProviderState {
-  providers: ethers.JsonRpcProvider[];
-  activeIndex: number;
-  lastBlockNumber: number;
-  lastBlockTime: number;
-  requestCount: number;
-  lastRateLimitReset: number;
+  failover?: FailoverOptions;
 }

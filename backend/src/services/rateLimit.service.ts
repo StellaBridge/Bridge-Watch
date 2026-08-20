@@ -296,7 +296,7 @@ export class RateLimitService {
     const timeRange = options?.timeRange ?? "24h";
     const stats = await this.getRateLimitStats(timeRange);
 
-    let providerKey = options?.providerKey;
+    const providerKey = options?.providerKey;
     let throttledCount = 0;
     let burstCount = 0;
     let usagePercent: number | null = null;

@@ -83,7 +83,7 @@ export class SlackNotificationService {
           alertRuleId: alert.alertRuleId,
           assetCode: alert.assetCode,
           severity: alert.severity,
-          webhookUrl: this.webhookUrl.replace(/\/[^\/]+$/, "/***"),
+          webhookUrl: this.webhookUrl.replace(/\/[^/]+$/, "/***"),
         },
         "Alert sent to Slack successfully"
       );
