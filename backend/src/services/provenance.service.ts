@@ -1,3 +1,5 @@
+import type { LatencyBreakdown, TemporalPoint } from "../temporal/types.js";
+
 export type ProvenanceNodeKind = "source" | "transform" | "destination";
 export type ProvenanceFreshness = "fresh" | "stale" | "unknown";
 
@@ -11,6 +13,8 @@ export interface ProvenanceNode {
   entityId: string;
   description: string;
   metadata: Record<string, string | number | boolean>;
+  /** Temporal point with clock provenance (if available) */
+  temporal?: TemporalPoint;
 }
 
 export interface ProvenanceEdge {
@@ -18,6 +22,10 @@ export interface ProvenanceEdge {
   to: string;
   transformKind: string;
   latencyMs: number | null;
+  /** Detailed latency breakdown distinguishing network delay from clock skew */
+  latencyBreakdown?: LatencyBreakdown;
+  /** Confidence in the latency measurement (0-1) */
+  latencyConfidence?: number;
 }
 
 export interface ProvenanceGraph {
