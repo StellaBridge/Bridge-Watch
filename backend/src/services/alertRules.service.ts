@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
+import { compareTemporalPoints, createTemporalPoint, nowAsTemporalPoint } from "../temporal/temporalUtils.js";
+import type { ComparisonOptions, TemporalPoint } from "../temporal/types.js";
 
 // =============================================================================
 // TYPES
@@ -39,6 +41,10 @@ export interface RuleCondition {
   thresholdHigh?: number;
   /** Label for display and audit purposes */
   label?: string;
+  /** Temporal comparison mode for time-based metrics */
+  temporalMode?: ComparisonOptions["mode"];
+  /** Whether this condition uses temporal semantics */
+  useTemporal?: boolean;
 }
 
 export interface AlertRule {
@@ -92,10 +98,16 @@ export interface EvaluationResult {
     threshold: number;
     actualValue: number;
     passed: boolean;
+    /** Temporal comparison result if applicable */
+    temporalComparison?: ReturnType<typeof compareTemporalPoints>;
+    /** Confidence in the condition evaluation (0-1) */
+    confidence?: number;
   }>;
   logicOperator: LogicOperator;
   timeWindowActive: boolean;
   testMode: boolean;
+  /** Overall confidence in the evaluation (0-1) */
+  overallConfidence: number;
 }
 
 // =============================================================================
@@ -160,25 +172,59 @@ const BUILT_IN_TEMPLATES: RuleTemplate[] = [
 function evaluateCondition(
   condition: RuleCondition,
   value: number,
-  previousValue?: number
-): boolean {
-  const { operator, threshold, thresholdHigh } = condition;
+  previousValue?: number,
+  temporalPoint?: TemporalPoint,
+  previousTemporalPoint?: TemporalPoint
+): { passed: boolean; temporalComparison?: ReturnType<typeof compareTemporalPoints>; confidence: number } {
+  const { operator, threshold, thresholdHigh, useTemporal, temporalMode } = condition;
 
-  switch (operator) {
-    case "gt":   return value > threshold;
-    case "gte":  return value >= threshold;
-    case "lt":   return value < threshold;
-    case "lte":  return value <= threshold;
-    case "eq":   return value === threshold;
-    case "ne":   return value !== threshold;
-    case "between":
-      return thresholdHigh !== undefined && value >= threshold && value <= thresholdHigh;
-    case "changes_by_pct":
-      if (previousValue === undefined || previousValue === 0) return false;
-      return Math.abs((value - previousValue) / previousValue) * 100 >= threshold;
-    default:
-      return false;
+  // Use temporal comparison if enabled and temporal points are available
+  if (useTemporal && temporalPoint && previousTemporalPoint) {
+    const comparison = compareTemporalPoints(previousTemporalPoint, temporalPoint, {
+      mode: temporalMode || "approximate",
+    });
+
+    // For temporal conditions, we check if the comparison matches the expected operator
+    let temporalPassed = false;
+    if (comparison.result === "before" && (operator === "lt" || operator === "lte")) {
+      temporalPassed = true;
+    } else if (comparison.result === "after" && (operator === "gt" || operator === "gte")) {
+      temporalPassed = true;
+    } else if (comparison.result === "concurrent" && operator === "eq") {
+      temporalPassed = true;
+    }
+
+    return {
+      passed: temporalPassed,
+      temporalComparison: comparison,
+      confidence: comparison.confidence,
+    };
   }
+
+  // Fall back to standard numeric comparison
+  let passed = false;
+  switch (operator) {
+    case "gt":   passed = value > threshold; break;
+    case "gte":  passed = value >= threshold; break;
+    case "lt":   passed = value < threshold; break;
+    case "lte":  passed = value <= threshold; break;
+    case "eq":   passed = value === threshold; break;
+    case "ne":   passed = value !== threshold; break;
+    case "between":
+      passed = thresholdHigh !== undefined && value >= threshold && value <= thresholdHigh;
+      break;
+    case "changes_by_pct":
+      if (previousValue === undefined || previousValue === 0) {
+        passed = false;
+      } else {
+        passed = Math.abs((value - previousValue) / previousValue) * 100 >= threshold;
+      }
+      break;
+    default:
+      passed = false;
+  }
+
+  return { passed, confidence: 1.0 };
 }
 
 function isTimeWindowActive(window: TimeWindow | null): boolean {
@@ -399,20 +445,28 @@ export class AlertRulesService {
     rule: AlertRule,
     metrics: Record<string, number>,
     previousMetrics?: Record<string, number>,
-    testMode = false
+    testMode = false,
+    temporalMetrics?: Record<string, TemporalPoint>,
+    previousTemporalMetrics?: Record<string, TemporalPoint>
   ): EvaluationResult {
     const timeWindowActive = isTimeWindowActive(rule.timeWindow);
 
     const conditionResults = rule.conditions.map((cond) => {
       const value = metrics[cond.metric] ?? 0;
       const previousValue = previousMetrics?.[cond.metric];
-      const passed = evaluateCondition(cond, value, previousValue);
+      const temporalPoint = temporalMetrics?.[cond.metric];
+      const previousTemporalPoint = previousTemporalMetrics?.[cond.metric];
+      
+      const result = evaluateCondition(cond, value, previousValue, temporalPoint, previousTemporalPoint);
+      
       return {
         metric: cond.metric,
         operator: cond.operator,
         threshold: cond.threshold,
         actualValue: value,
-        passed,
+        passed: result.passed,
+        temporalComparison: result.temporalComparison,
+        confidence: result.confidence,
       };
     });
 
@@ -422,6 +476,11 @@ export class AlertRulesService {
       (rule.logicOperator === "AND"
         ? conditionResults.every((r) => r.passed)
         : conditionResults.some((r) => r.passed));
+
+    // Calculate overall confidence based on condition confidences
+    const overallConfidence = conditionResults.length > 0
+      ? conditionResults.reduce((sum, r) => sum + (r.confidence || 1.0), 0) / conditionResults.length
+      : 1.0;
 
     return {
       ruleId: rule.id,
@@ -433,6 +492,7 @@ export class AlertRulesService {
       logicOperator: rule.logicOperator,
       timeWindowActive,
       testMode,
+      overallConfidence,
     };
   }
 
