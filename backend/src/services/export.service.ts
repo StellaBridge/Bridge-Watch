@@ -11,6 +11,8 @@ import type {
   PaginatedExports,
 } from "../types/export.types.js";
 import { exportQueue } from "../jobs/export.job.js";
+import { createTemporalPoint, isoToMs, compareTemporalPoints } from "../temporal/temporalUtils.js";
+import type { TemporalPoint, ComparisonOptions } from "../temporal/types.js";
 
 /**
  * Export Service
@@ -260,9 +262,9 @@ export class ExportService {
   }
 
   /**
-   * Validate date range
+   * Validate date range with temporal semantics
    */
-  private validateDateRange(startDate: string, endDate: string): void {
+  private validateDateRange(startDate: string, endDate: string, comparisonMode?: ComparisonOptions["mode"]): void {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
@@ -270,8 +272,20 @@ export class ExportService {
       throw new Error("Invalid date format");
     }
 
-    if (start >= end) {
-      throw new Error("Invalid date range");
+    // Use temporal comparison for date range validation
+    const startTemporal = createTemporalPoint(isoToMs(startDate), "system_clock", {
+      observedAt: Date.now(),
+    });
+    const endTemporal = createTemporalPoint(isoToMs(endDate), "system_clock", {
+      observedAt: Date.now(),
+    });
+
+    const comparison = compareTemporalPoints(startTemporal, endTemporal, {
+      mode: comparisonMode || "strict",
+    });
+
+    if (!comparison.success || comparison.result !== "before") {
+      throw new Error("Invalid date range: start must be before end");
     }
 
     const daysDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
