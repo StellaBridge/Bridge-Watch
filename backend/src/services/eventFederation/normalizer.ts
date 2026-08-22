@@ -7,6 +7,8 @@
  */
 
 import type { FederatedEvent, FederatedEventType } from "./types.js";
+import { createTemporalPoint, isoToMs } from "../../temporal/temporalUtils.js";
+import type { TemporalPoint } from "../../temporal/types.js";
 
 // ─── Stellar ──────────────────────────────────────────────────────────────────
 
@@ -38,12 +40,20 @@ export function normalizeStellarPayment(raw: RawStellarPayment): FederatedEvent 
       ? "swap"
       : "payment";
 
+  const timestampMs = isoToMs(raw.created_at);
+  const temporal = createTemporalPoint(timestampMs, "stellar_ledger", {
+    chain: "stellar",
+    blockNumber: raw.ledger_sequence,
+    rawTimestamp: raw.created_at,
+  });
+
   return {
     id: `stellar:${eventType}:${raw.id}`,
     chain: "stellar",
     type: eventType,
     blockNumber: raw.ledger_sequence ?? 0,
     timestamp: raw.created_at,
+    temporal,
     from: raw.from,
     to: raw.to,
     assetCode,
@@ -64,12 +74,20 @@ export interface RawStellarLedger {
 }
 
 export function normalizeStellarLedger(raw: RawStellarLedger): FederatedEvent {
+  const timestampMs = isoToMs(raw.closed_at);
+  const temporal = createTemporalPoint(timestampMs, "stellar_ledger", {
+    chain: "stellar",
+    blockNumber: raw.sequence,
+    rawTimestamp: raw.closed_at,
+  });
+
   return {
     id: `stellar:ledger_close:${raw.sequence}`,
     chain: "stellar",
     type: "ledger_close",
     blockNumber: raw.sequence,
     timestamp: raw.closed_at,
+    temporal,
     sourceId: String(raw.sequence),
     raw: raw as unknown as Record<string, unknown>,
   };
@@ -87,12 +105,20 @@ export interface RawEthBlock {
 }
 
 export function normalizeEthBlock(raw: RawEthBlock): FederatedEvent {
+  const timestampMs = raw.timestamp * 1000;
+  const temporal = createTemporalPoint(timestampMs, "evm_block", {
+    chain: raw.chain,
+    blockNumber: raw.number,
+    rawTimestamp: new Date(raw.timestamp * 1000).toISOString(),
+  });
+
   return {
     id: `${raw.chain}:block:${raw.number}`,
     chain: raw.chain,
     type: "block",
     blockNumber: raw.number,
     timestamp: new Date(raw.timestamp * 1000).toISOString(),
+    temporal,
     sourceId: raw.hash,
     raw: raw as unknown as Record<string, unknown>,
   };
@@ -122,12 +148,20 @@ export function normalizeEthTransfer(raw: RawEthTransfer): FederatedEvent {
           ? "swap"
           : "transfer";
 
+  const timestampMs = raw.timestamp * 1000;
+  const temporal = createTemporalPoint(timestampMs, "evm_block", {
+    chain: raw.chain,
+    blockNumber: raw.blockNumber,
+    rawTimestamp: new Date(raw.timestamp * 1000).toISOString(),
+  });
+
   return {
     id: `${raw.chain}:${eventType}:${raw.transactionHash}:${raw.logIndex}`,
     chain: raw.chain,
     type: eventType,
     blockNumber: raw.blockNumber,
     timestamp: new Date(raw.timestamp * 1000).toISOString(),
+    temporal,
     from: raw.from,
     to: raw.to,
     assetCode: raw.assetCode,

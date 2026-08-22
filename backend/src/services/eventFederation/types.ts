@@ -6,6 +6,8 @@
  * deduplicated, ordered, buffered, and fanned out to WebSocket subscribers.
  */
 
+import type { TemporalPoint } from "../../temporal/types.js";
+
 // ─── Chain identifiers ────────────────────────────────────────────────────────
 
 export type ChainId = "stellar" | "ethereum" | "polygon" | "base" | string;
@@ -33,6 +35,8 @@ export interface FederatedEvent {
   blockNumber: number;
   /** ISO-8601 wall-clock timestamp of the on-chain event */
   timestamp: string;
+  /** Temporal point with clock provenance and uncertainty */
+  temporal: TemporalPoint;
   /** Initiating address or account */
   from?: string;
   /** Destination address or account */
