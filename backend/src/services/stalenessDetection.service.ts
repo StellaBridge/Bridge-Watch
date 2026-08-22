@@ -1,6 +1,8 @@
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
 import { STALENESS_RULES, type StalenessRule } from "../config/stalenessRules.js";
+import { compareTemporalPoints, createTemporalPoint, nowAsTemporalPoint } from "../temporal/temporalUtils.js";
+import type { ComparisonOptions } from "../temporal/types.js";
 
 export type FreshnessStatus = "fresh" | "warning" | "stale" | "missing";
 export type TrendDirection = "improving" | "stable" | "deteriorating" | "unknown";
@@ -20,6 +22,10 @@ export interface FreshnessSourceSnapshot {
   recentIntervalsMs?: number[];
   history?: string[];
   error?: string;
+  /** Temporal comparison mode used for freshness assessment */
+  comparisonMode?: "strict" | "approximate" | "optimistic" | "pessimistic";
+  /** Confidence in the freshness assessment (0-1) */
+  confidence?: number;
 }
 
 export interface FreshnessSnapshot {
@@ -47,13 +53,15 @@ export class StalenessDetectionService {
   async getSnapshot(options?: {
     includeHistory?: boolean;
     historyLimit?: number;
+    comparisonMode?: ComparisonOptions["mode"];
   }): Promise<FreshnessSnapshot> {
     const includeHistory = options?.includeHistory ?? false;
     const historyLimit = Math.max(2, options?.historyLimit ?? 10);
+    const comparisonMode = options?.comparisonMode ?? "approximate";
 
     const sources = await Promise.all(
       this.rules.map((rule) =>
-        this.buildSourceSnapshot(rule, { includeHistory, historyLimit })
+        this.buildSourceSnapshot(rule, { includeHistory, historyLimit, comparisonMode })
       )
     );
 
@@ -99,12 +107,30 @@ export class StalenessDetectionService {
 
   private async buildSourceSnapshot(
     rule: StalenessRule,
-    options: { includeHistory: boolean; historyLimit: number }
+    options: { includeHistory: boolean; historyLimit: number; comparisonMode?: ComparisonOptions["mode"] }
   ): Promise<FreshnessSourceSnapshot> {
     try {
       const timestamps = await this.getRecentTimestamps(rule, options.historyLimit);
       const latest = timestamps[0] ?? null;
-      const ageMs = latest ? Date.now() - latest.getTime() : null;
+      
+      // Use temporal comparison for freshness assessment
+      let ageMs: number | null = null;
+      let confidence = 1.0;
+      
+      if (latest) {
+        const latestTemporal = createTemporalPoint(latest.getTime(), "system_clock", {
+          observedAt: Date.now(),
+        });
+        const nowTemporal = nowAsTemporalPoint();
+        
+        const comparison = compareTemporalPoints(latestTemporal, nowTemporal, {
+          mode: options.comparisonMode || "approximate",
+        });
+        
+        ageMs = Date.now() - latest.getTime();
+        confidence = comparison.confidence;
+      }
+      
       const status = this.evaluateStatus(rule, ageMs);
       const trend = this.calculateTrend(rule, timestamps);
       const intervals = this.calculateIntervals(timestamps);
@@ -123,6 +149,8 @@ export class StalenessDetectionService {
         trend,
         recentIntervalsMs: options.includeHistory ? intervals : undefined,
         history: options.includeHistory ? timestamps.map((t) => t.toISOString()) : undefined,
+        comparisonMode: options.comparisonMode,
+        confidence,
       };
     } catch (error) {
       logger.error({ error, rule: rule.key }, "Failed to evaluate freshness rule");
@@ -139,6 +167,8 @@ export class StalenessDetectionService {
         criticalAfterMs: rule.criticalAfterMs,
         trend: "unknown",
         error: error instanceof Error ? error.message : "Unknown error",
+        comparisonMode: options.comparisonMode,
+        confidence: 0,
       };
     }
   }
