@@ -10,6 +10,9 @@
  * a boundary belongs to the later window (never double-counted).
  */
 
+import type { TemporalPoint, TemporalWindowOptions } from "../temporal/types.js";
+import { isPointInWindow } from "../temporal/temporalUtils.js";
+
 export type WindowType = "tumbling" | "sliding";
 
 export interface WindowConfig {
@@ -31,6 +34,12 @@ export interface DataPoint {
   value: number;
 }
 
+export interface TemporalDataPoint {
+  /** Temporal point with clock provenance and uncertainty */
+  temporal: TemporalPoint;
+  value: number;
+}
+
 export interface AggregatedWindow {
   /** Inclusive window start (ms). */
   start: number;
@@ -41,6 +50,10 @@ export interface AggregatedWindow {
   min: number | null;
   max: number | null;
   avg: number | null;
+  /** Number of points with uncertain boundary placement */
+  uncertainBoundaryCount?: number;
+  /** Confidence score for this window (0-1) */
+  confidence?: number;
 }
 
 function validateConfig(config: WindowConfig): Required<WindowConfig> {
@@ -84,6 +97,52 @@ function aggregate(points: DataPoint[], start: number, end: number): AggregatedW
     }
   }
   return { start, end, count, sum, min, max, avg: count > 0 ? sum / count : null };
+}
+
+function aggregateTemporal(
+  points: TemporalDataPoint[],
+  start: number,
+  end: number,
+  options: TemporalWindowOptions
+): AggregatedWindow {
+  let count = 0;
+  let sum = 0;
+  let min: number | null = null;
+  let max: number | null = null;
+  let uncertainBoundaryCount = 0;
+  let totalConfidence = 0;
+
+  for (const p of points) {
+    const inWindow = isPointInWindow(p.temporal, start, end, options);
+    if (inWindow) {
+      count += 1;
+      sum += p.value;
+      min = min === null || p.value < min ? p.value : min;
+      max = max === null || p.value > max ? p.value : max;
+      
+      // Track uncertainty at boundaries
+      const uncertaintyRange = p.temporal.uncertainty.latestMs - p.temporal.uncertainty.earliestMs;
+      if (uncertaintyRange > 1000) { // More than 1 second uncertainty
+        uncertainBoundaryCount++;
+      }
+      
+      totalConfidence += p.temporal.provenance.confidence;
+    }
+  }
+
+  const confidence = count > 0 ? totalConfidence / count : 0;
+
+  return {
+    start,
+    end,
+    count,
+    sum,
+    min,
+    max,
+    avg: count > 0 ? sum / count : null,
+    uncertainBoundaryCount,
+    confidence,
+  };
 }
 
 /** Non-overlapping windows covering the span of the data, in ascending order. */
@@ -135,4 +194,74 @@ export function aggregateWindows(
   return type === "sliding"
     ? aggregateSliding(points, config)
     : aggregateTumbling(points, config);
+}
+
+// ─── Temporal-aware aggregation ─────────────────────────────────────────────────
+
+/** Non-overlapping windows for temporal data points with uncertainty handling. */
+export function aggregateTumblingTemporal(
+  points: TemporalDataPoint[],
+  config: WindowConfig,
+  options: TemporalWindowOptions = {
+    boundaryMode: "inclusive_start",
+    uncertaintyMode: "strict",
+    includeMissing: false,
+  }
+): AggregatedWindow[] {
+  const { sizeMs, originMs } = validateConfig(config);
+  if (points.length === 0) return [];
+
+  const timestamps = points.map((p) => p.temporal.timestampMs);
+  const minTs = Math.min(...timestamps);
+  const maxTs = Math.max(...timestamps);
+
+  const firstStart = windowStartFor(minTs, { sizeMs, originMs });
+  const windows: AggregatedWindow[] = [];
+  for (let start = firstStart; start <= maxTs; start += sizeMs) {
+    windows.push(aggregateTemporal(points, start, start + sizeMs, options));
+  }
+  return windows;
+}
+
+/** Overlapping windows for temporal data points with uncertainty handling. */
+export function aggregateSlidingTemporal(
+  points: TemporalDataPoint[],
+  config: WindowConfig,
+  options: TemporalWindowOptions = {
+    boundaryMode: "inclusive_start",
+    uncertaintyMode: "strict",
+    includeMissing: false,
+  }
+): AggregatedWindow[] {
+  const { sizeMs, stepMs, originMs } = validateConfig(config);
+  if (points.length === 0) return [];
+
+  const timestamps = points.map((p) => p.temporal.timestampMs);
+  const minTs = Math.min(...timestamps);
+  const maxTs = Math.max(...timestamps);
+
+  const firstStart = windowStartFor(minTs, { sizeMs, originMs });
+  const windows: AggregatedWindow[] = [];
+  for (let start = firstStart; start <= maxTs; start += stepMs) {
+    windows.push(aggregateTemporal(points, start, start + sizeMs, options));
+  }
+  return windows;
+}
+
+/** Dispatch to the temporal tumbling or sliding aggregator. */
+export function aggregateWindowsTemporal(
+  points: TemporalDataPoint[],
+  type: WindowType,
+  config: WindowConfig,
+  options?: TemporalWindowOptions
+): AggregatedWindow[] {
+  const opts = options || {
+    boundaryMode: "inclusive_start",
+    uncertaintyMode: "strict",
+    includeMissing: false,
+  };
+  
+  return type === "sliding"
+    ? aggregateSlidingTemporal(points, config, opts)
+    : aggregateTumblingTemporal(points, config, opts);
 }
