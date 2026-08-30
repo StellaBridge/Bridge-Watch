@@ -9,6 +9,8 @@ import { sendExportEmail } from "../utils/email.js";
 import { CSVHandler } from "../services/formatHandlers/csv.handler.js";
 import { JSONHandler } from "../services/formatHandlers/json.handler.js";
 import { PDFHandler } from "../services/formatHandlers/pdf.handler.js";
+import { redactionService } from "../privacy/redaction.service.js";
+import { redactionDecisionService } from "../privacy/redactionDecision.service.js";
 import type { ExportJobPayload } from "../types/export.types.js";
 import { getDatabase } from "../database/connection.js";
 import path from "path";
@@ -49,6 +51,21 @@ function getFileExtension(format: string, compressed: boolean): string {
 }
 
 /**
+ * Wrap a record stream so every exported row passes through the export
+ * redaction policy before it reaches a format handler. Each decision is
+ * recorded for audit (fingerprints only; no original values).
+ */
+async function* redactExportStream(
+  source: AsyncGenerator<any, void, unknown>,
+): AsyncGenerator<any, void, unknown> {
+  for await (const record of source) {
+    const result = redactionService.redact(record, { sink: "export" });
+    void redactionDecisionService.record(result.decision);
+    yield result.output;
+  }
+}
+
+/**
  * Export Queue Worker
  * 
  * Processes export jobs asynchronously:
@@ -84,8 +101,10 @@ export const exportWorker = new Worker(
       const fileName = `${payload.exportId}.${extension}`;
       const filePath = path.join(config.EXPORT_STORAGE_PATH, fileName);
 
-      // Stream data from database
-      const dataStream = streamData(payload.dataType, payload.filters);
+      // Stream data from database, redacting operational fields through the
+      // export policy before any format handler (PDF, CSV, JSON) serializes a
+      // row, so the persisted artifact never contains sensitive material.
+      const dataStream = redactExportStream(streamData(payload.dataType, payload.filters));
 
       // Generate output using appropriate format handler
       let outputStream: NodeJS.ReadableStream;

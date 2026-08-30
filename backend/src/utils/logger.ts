@@ -1,8 +1,14 @@
 import os from "os";
 import pino from "pino";
 import { config } from "../config/index.js";
+import { fieldRegistry } from "../privacy/fieldRegistry.js";
 
 type LogMeta = Record<string, unknown>;
+
+// Extend pino's exact-key redaction with the fields classified as sensitive by
+// the central registry. Deriving from the registry keeps the log sink's
+// enforcement tied to the same source of truth as every other sink.
+const REGISTRY_SENSITIVE_KEYS = fieldRegistry.sensitiveKeyNames();
 
 export interface FlexibleLogger {
   trace: (...args: unknown[]) => void;
@@ -88,6 +94,7 @@ const baseConfig = {
   // Custom redaction for sensitive fields
   redact: {
     paths: [
+      ...REGISTRY_SENSITIVE_KEYS,
       'password',
       'token',
       'secret',

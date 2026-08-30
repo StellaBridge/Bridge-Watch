@@ -6,6 +6,8 @@ import { Queue, Job, ConnectionOptions } from "bullmq";
 import { config } from "../config/index.js";
 import { WebhookBatchBufferService } from "./webhookBatchBuffer.service.js";
 import type { BatchBufferStatus } from "./webhookBatchBuffer.service.js";
+import { redactionService } from "../privacy/redaction.service.js";
+import { redactionDecisionService } from "../privacy/redactionDecision.service.js";
 
 const fetch = globalThis.fetch;
 
@@ -715,6 +717,8 @@ export class WebhookService extends EventEmitter {
   }): Promise<WebhookDelivery> {
     const db = getDatabase();
 
+    const payload = this.redactWebhookPayload(params.payload);
+
     const endpoint = await this.getEndpoint(params.webhookEndpointId);
     if (!endpoint) {
       throw new Error(`Webhook endpoint not found: ${params.webhookEndpointId}`);
@@ -731,7 +735,7 @@ export class WebhookService extends EventEmitter {
           id: crypto.randomUUID(),
           webhook_endpoint_id: params.webhookEndpointId,
           event_type: params.eventType,
-          payload: JSON.stringify(params.payload),
+          payload: JSON.stringify(payload),
           status: "buffered",
           attempts: 0,
           created_at: new Date(),
@@ -742,7 +746,7 @@ export class WebhookService extends EventEmitter {
         endpointId: params.webhookEndpointId,
         deliveryId: delivery.id,
         eventType: params.eventType,
-        payload: params.payload,
+        payload,
         windowMs: endpoint.batchWindowMs,
       });
 
@@ -760,7 +764,7 @@ export class WebhookService extends EventEmitter {
         id: crypto.randomUUID(),
         webhook_endpoint_id: params.webhookEndpointId,
         event_type: params.eventType,
-        payload: JSON.stringify(params.payload),
+        payload: JSON.stringify(payload),
         status: "pending",
         attempts: 0,
         created_at: new Date(),
@@ -771,7 +775,7 @@ export class WebhookService extends EventEmitter {
       deliveryId: delivery.id,
       webhookEndpointId: params.webhookEndpointId,
       eventType: params.eventType,
-      payload: params.payload,
+      payload,
       attemptNumber: 0,
     };
 
@@ -834,11 +838,13 @@ export class WebhookService extends EventEmitter {
       throw new Error("Batch delivery is not enabled for this endpoint");
     }
 
+    const events = params.events.map((event) => this.redactWebhookPayload(event));
+
     const batchPayload = {
       batch: true,
       eventType: params.eventType,
-      count: params.events.length,
-      events: params.events,
+      count: events.length,
+      events,
       timestamp: new Date().toISOString(),
     };
 
@@ -869,6 +875,17 @@ export class WebhookService extends EventEmitter {
     );
 
     return [this.mapToDelivery(delivery)];
+  }
+
+  /**
+   * Redact a webhook payload through the webhook sink policy and record the
+   * resulting decision. Runs before persistence and queueing so every stored
+   * and transmitted copy (deliveries, job data, logs, outbox) is scrubbed.
+   */
+  private redactWebhookPayload(payload: Record<string, any>): Record<string, any> {
+    const result = redactionService.redact(payload, { sink: "webhook" });
+    void redactionDecisionService.record(result.decision);
+    return result.output as Record<string, any>;
   }
 
   public async processDelivery(job: Job): Promise<{ status: number; body: string }> {
