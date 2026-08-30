@@ -73,6 +73,9 @@ export async function registerRoutes(server: FastifyInstance): Promise<void> {
   // Operational monitoring: ledger delays, cursor audit
   await registerOperationalMonitoringRoutes(server);
 
+  // Database pool dashboard: metrics, events, controls
+  await registerDbPoolRoutes(server);
+
   // Administrative functions
   await registerAdminRoutes(server);
 
