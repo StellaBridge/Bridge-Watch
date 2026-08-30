@@ -274,6 +274,23 @@ const envSchema = z.object({
   INGESTION_REORG_BUFFER_DEPTH: z.coerce.number().default(100),
   INGESTION_REORG_POLL_INTERVAL_MS: z.coerce.number().default(30_000),
   INGESTION_UNCONFIRMED_EVENT_TTL_MINUTES: z.coerce.number().default(60),
+
+  // Privacy / redaction pipeline. Classifies sensitive fields centrally and
+  // redacts them at every configured sink before persistence or transmission.
+  // When disabled the pipeline passes payloads through untouched.
+  REDACTION_ENABLED: z.coerce.boolean().default(true),
+  // Hex (or ASCII) salt used to derive deterministic pseudonyms. Keep this
+  // secret: it is the only thing that maps a pseudonym back to a candidate.
+  // It is intentionally never stored alongside the redacted data.
+  REDACTION_PSEUDONYM_SALT: z.string().default("bridge-watch-pseudonym-salt-dev"),
+  // Namespace applied to pseudonyms so identical inputs under different
+  // payload shapes stay distinct and rotation is scoped.
+  REDACTION_PSEUDONYM_NAMESPACE: z.string().default("operational"),
+  // Block (throw) instead of silently redacting when a secret is detected in
+  // a sink that refuses unsafe payloads. Applies per-sink policy by default.
+  REDACTION_BLOCK_ON_SECRET: z.coerce.boolean().default(false),
+  // Persist redaction decisions to the audit table for post-hoc review.
+  REDACTION_DECISION_LOG_ENABLED: z.coerce.boolean().default(true),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

@@ -1,6 +1,10 @@
 import crypto from "crypto";
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config/index.js";
+import { redactionService } from "../privacy/redaction.service.js";
+import { redactionDecisionService } from "../privacy/redactionDecision.service.js";
+import type { RedactionDecision } from "../privacy/types.js";
 
 // =============================================================================
 // TYPES
@@ -157,29 +161,38 @@ export class AuditService {
       severity: params.severity ?? this.inferSeverity(params.action),
     };
 
-    const checksum = this.computeChecksum(draft);
+    // Redact sensitive operational fields (IP, addresses, notes, evidence)
+    // before the checksum is computed and before persistence, so the stored
+    // values are already scrubbed and the checksum covers the scrubbed state.
+    const redaction = this.applyRedaction(draft);
+
+    const checksum = this.computeChecksum(redaction.draft);
 
     const [row] = await db("audit_logs")
       .insert({
         id: crypto.randomUUID(),
-        action: draft.action,
-        actor_id: draft.actorId,
-        actor_type: draft.actorType,
-        ip_address: draft.ipAddress,
-        user_agent: draft.userAgent,
-        resource_type: draft.resourceType,
-        resource_id: draft.resourceId,
-        before: draft.before ? JSON.stringify(draft.before) : null,
-        after: draft.after ? JSON.stringify(draft.after) : null,
-        metadata: JSON.stringify(draft.metadata),
-        severity: draft.severity,
+        action: redaction.draft.action,
+        actor_id: redaction.draft.actorId,
+        actor_type: redaction.draft.actorType,
+        ip_address: redaction.draft.ipAddress,
+        user_agent: redaction.draft.userAgent,
+        resource_type: redaction.draft.resourceType,
+        resource_id: redaction.draft.resourceId,
+        before: redaction.draft.before ? JSON.stringify(redaction.draft.before) : null,
+        after: redaction.draft.after ? JSON.stringify(redaction.draft.after) : null,
+        metadata: JSON.stringify(redaction.draft.metadata),
+        severity: redaction.draft.severity,
         checksum,
         created_at: new Date(),
       })
       .returning("*");
 
+    if (redaction.decision) {
+      this.recordRedactionDecision(redaction.decision, params.resourceType ?? null, params.resourceId ?? null);
+    }
+
     logger.info(
-      { auditId: row.id, action: draft.action, actorId: draft.actorId, severity: draft.severity },
+      { auditId: row.id, action: redaction.draft.action, actorId: redaction.draft.actorId, severity: redaction.draft.severity },
       "Audit event recorded"
     );
 
@@ -337,6 +350,49 @@ export class AuditService {
   // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
+
+  private applyRedaction(draft: {
+    action: AuditAction;
+    actorId: string;
+    actorType: "user" | "api_key" | "system" | "admin";
+    ipAddress: string | null;
+    userAgent: string | null;
+    resourceType: string | null;
+    resourceId: string | null;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    metadata: Record<string, unknown>;
+    severity: AuditSeverity;
+  }): { draft: typeof draft; decision: RedactionDecision | null } {
+    if (!config.REDACTION_ENABLED) {
+      return { draft, decision: null };
+    }
+
+    const composite = {
+      actorId: draft.actorId,
+      ipAddress: draft.ipAddress,
+      userAgent: draft.userAgent,
+      resourceId: draft.resourceId,
+      before: draft.before,
+      after: draft.after,
+      metadata: draft.metadata,
+    };
+
+    const result = redactionService.redact(composite, { sink: "audit" });
+    const red = result.output as typeof composite;
+
+    return {
+      draft: { ...draft, ...red },
+      decision: result.decision,
+    };
+  }
+
+  private recordRedactionDecision(decision: RedactionDecision, resourceType: string | null, resourceId: string | null): void {
+    void redactionDecisionService.record(decision, {
+      resourceType: resourceType ?? undefined,
+      resourceId: resourceId ?? undefined,
+    });
+  }
 
   private inferSeverity(action: AuditAction): AuditSeverity {
     if (

@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 import { config } from "../config/index.js";
+import { redactionService } from "../privacy/redaction.service.js";
+import { redactionDecisionService } from "../privacy/redactionDecision.service.js";
 
 const MAX_HISTORY_PER_TOPIC = config.WS_MAX_HISTORY_PER_TOPIC;
 const MAX_HISTORY_AGE_MS = config.WS_MAX_HISTORY_AGE_MS;
@@ -264,6 +266,13 @@ export class WebsocketService {
     payload: unknown,
     options: WebsocketPublishOptions = {},
   ): void {
+    // Redact operational payloads before they enter replay history or are
+    // delivered, so addresses, hashes, and evidence are not exposed over the
+    // socket or replayed on reconnect.
+    const result = redactionService.redact(payload, { sink: "websocket" });
+    void redactionDecisionService.record(result.decision);
+    const safePayload = result.output;
+
     const timestamp = options.timestamp ?? new Date().toISOString();
     const createdAtMs = Date.parse(timestamp);
     const expiresAtMs =
@@ -275,7 +284,7 @@ export class WebsocketService {
       type,
       topic,
       priority: options.priority ?? "medium",
-      payload,
+      payload: safePayload,
       timestamp,
       expiresAt: new Date(expiresAtMs).toISOString(),
       ackRequired: options.ackRequired ?? false,

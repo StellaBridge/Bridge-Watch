@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import type { FastifyRequest } from "fastify";
 import { config } from "../../config/index.js";
 import { logger } from "../../utils/logger.js";
+import { redactionService } from "../../privacy/redaction.service.js";
+import { redactionDecisionService } from "../../privacy/redactionDecision.service.js";
 import { factory, redisSubscriber } from "../../utils/redis.js";
 import {
   type ClientState,
@@ -327,7 +329,13 @@ export class WebSocketServer implements IBroadcaster {
     channel: ChannelName,
     message: OutboundDataMessage
   ): Promise<void> {
-    const payload = JSON.stringify(message);
+    // Redact operational fields (addresses, evidence, endpoint details) before
+    // the message is serialized to local clients and published to Redis, so no
+    // cross-instance sink exposes the sensitive material.
+    const result = redactionService.redact(message, { sink: "websocket" });
+    void redactionDecisionService.record(result.decision, { resourceType: "websocket", resourceId: channel });
+
+    const payload = JSON.stringify(result.output);
     this.broadcastLocal(channel, payload);
 
     await this.publishToRedis(channel, payload).catch((err) => {

@@ -3,6 +3,8 @@ import { randomBytes } from "crypto";
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
 import { OutboxProducer } from "../outbox/eventProducer.js";
+import { redactionService } from "../privacy/redaction.service.js";
+import { redactionDecisionService } from "../privacy/redactionDecision.service.js";
 
 // Import existing types from original webhook service
 import type {
@@ -43,6 +45,8 @@ export class OutboxWebhookService {
         throw new Error(`Rate limit exceeded for webhook endpoint: ${params.webhookEndpointId}`);
       }
 
+      const payload = this.redactWebhookPayload(params.payload);
+
       // Create delivery record in webhook_deliveries table (existing behavior)
       const deliveryId = crypto.randomUUID();
       const [delivery] = await tx("webhook_deliveries")
@@ -50,7 +54,7 @@ export class OutboxWebhookService {
           id: deliveryId,
           webhook_endpoint_id: params.webhookEndpointId,
           event_type: params.eventType,
-          payload: JSON.stringify(params.payload),
+          payload: JSON.stringify(payload),
           status: "pending",
           attempts: 0,
           created_at: new Date(),
@@ -66,7 +70,7 @@ export class OutboxWebhookService {
           deliveryId,
           webhookEndpointId: params.webhookEndpointId,
           eventType: params.eventType,
-          payload: params.payload,
+          payload,
           url: endpoint.url,
           secret: endpoint.secret,
           customHeaders: endpoint.customHeaders,
@@ -111,12 +115,13 @@ export class OutboxWebhookService {
       }
 
       const batchId = crypto.randomUUID();
+      const events = params.events.map((event) => this.redactWebhookPayload(event));
       const batchPayload = {
         batch: true,
         batchId,
         eventType: params.eventType,
-        count: params.events.length,
-        events: params.events,
+        count: events.length,
+        events,
         timestamp: new Date().toISOString(),
       };
 
@@ -348,6 +353,12 @@ export class OutboxWebhookService {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private redactWebhookPayload(payload: Record<string, any>): Record<string, any> {
+    const result = redactionService.redact(payload, { sink: "webhook" });
+    void redactionDecisionService.record(result.decision);
+    return result.output as Record<string, any>;
   }
 
   private mapToDelivery(row: any): WebhookDelivery {
