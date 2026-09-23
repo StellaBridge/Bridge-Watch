@@ -20,6 +20,7 @@ import { registerOperationalRoutes } from "./route-groups/operational-routes.js"
 import { registerOperationalMonitoringRoutes } from "./route-groups/operational-monitoring-routes.js";
 import { registerLiquidityRoutes } from "./route-groups/liquidity-routes.js";
 import { sorobanEventsRoutes } from "./sorobanEvents.routes.js";
+import { contractInstanceDiscoveryRoutes } from "./contractInstanceDiscovery.routes.js";
 import { backfillRoutes } from "./backfill.routes.js";
 // #1019 — Signed evidence bundles & append-only transparency log
 import { evidenceBundleRoutes } from "./evidenceBundle.routes.js";
@@ -89,6 +90,8 @@ export async function registerRoutes(server: FastifyInstance): Promise<void> {
   await registerOperationalRoutes(server);
 
   server.register(sorobanEventsRoutes, { prefix: "/api/v1/soroban-events" });
+  // #1198 — Soroban contract instance discovery
+  server.register(contractInstanceDiscoveryRoutes, { prefix: "/api/v1/soroban-contracts" });
   server.register(backfillRoutes, { prefix: "/api/v1/backfill" });
 
   // #1019 — Signed evidence bundles & append-only transparency log

@@ -125,6 +125,57 @@ export async function configVersionsRoutes(server: FastifyInstance) {
   );
 
   // ---------------------------------------------------------------------------
+  // GET /:configKey/diff/:fromVersion/:toVersion — diff any two versions (#1189)
+  // ---------------------------------------------------------------------------
+  server.get<{
+    Params: { configKey: string; fromVersion: string; toVersion: string };
+  }>(
+    "/:configKey/diff/:fromVersion/:toVersion",
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const { configKey, fromVersion, toVersion } = request.params;
+      const fromVersionNumber = parseInt(fromVersion, 10);
+      const toVersionNumber = parseInt(toVersion, 10);
+
+      if (
+        isNaN(fromVersionNumber) ||
+        fromVersionNumber < 1 ||
+        isNaN(toVersionNumber) ||
+        toVersionNumber < 1
+      ) {
+        return reply.code(400).send({
+          error: "Bad Request",
+          message: "fromVersion and toVersion must be positive integers.",
+        });
+      }
+
+      try {
+        const comparison = await service.compareVersions(
+          configKey,
+          fromVersionNumber,
+          toVersionNumber
+        );
+        return reply.code(200).send(comparison);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to compute version diff.";
+        const isNotFound = message.includes("not found");
+        const isSameVersion = message.includes("identical");
+        return reply
+          .code(isNotFound ? 404 : isSameVersion ? 400 : 500)
+          .send({
+            error: isNotFound
+              ? "Not Found"
+              : isSameVersion
+              ? "Bad Request"
+              : "Internal Server Error",
+            message,
+          });
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
   // GET /:configKey/rollback-preview/:targetVersion  — preview diff without applying
   // ---------------------------------------------------------------------------
   server.get<{

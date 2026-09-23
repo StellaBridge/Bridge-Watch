@@ -34,6 +34,14 @@ export interface RollbackPreview {
   impactSummary: string;
 }
 
+export interface VersionDiff {
+  configKey: string;
+  fromVersion: number;
+  toVersion: number;
+  diff: FieldDiff[];
+  impactSummary: string;
+}
+
 // =============================================================================
 // SERVICE
 // =============================================================================
@@ -155,6 +163,52 @@ export class ConfigVersionService {
       diff,
       impactSummary,
     };
+  }
+
+  /**
+   * Compares any two versions of a config key (#1189).
+   * Powers the runtime configuration diff view for arbitrary version pairs
+   * (not just current-vs-target rollback previews).
+   *
+   * @throws Error when either version does not exist, or versions are equal.
+   */
+  public async compareVersions(
+    configKey: string,
+    fromVersionNumber: number,
+    toVersionNumber: number
+  ): Promise<VersionDiff> {
+    if (fromVersionNumber === toVersionNumber) {
+      throw new Error(
+        `Versions are identical (v${fromVersionNumber}). ` +
+          `Select two different versions to compare.`
+      );
+    }
+
+    const [from, to] = await Promise.all([
+      this.getVersion(configKey, fromVersionNumber),
+      this.getVersion(configKey, toVersionNumber),
+    ]);
+
+    if (!from) {
+      throw new Error(
+        `Version ${fromVersionNumber} not found for config key: ${configKey}.`
+      );
+    }
+    if (!to) {
+      throw new Error(
+        `Version ${toVersionNumber} not found for config key: ${configKey}.`
+      );
+    }
+
+    const diff = this.computeDiff(from.payload, to.payload);
+    const impactSummary = this.buildCompareSummary(
+      configKey,
+      fromVersionNumber,
+      toVersionNumber,
+      diff
+    );
+
+    return { configKey, fromVersion: fromVersionNumber, toVersion: toVersionNumber, diff, impactSummary };
   }
 
   // ---------------------------------------------------------------------------
@@ -366,6 +420,36 @@ export class ConfigVersionService {
 
     return (
       `Rolling back '${configKey}' from v${currentVersion} to v${targetVersion}: ` +
+      parts.join(", ") +
+      "."
+    );
+  }
+
+  /** Summary for arbitrary version-to-version diffs (#1189). */
+  private buildCompareSummary(
+    configKey: string,
+    fromVersion: number,
+    toVersion: number,
+    diff: FieldDiff[]
+  ): string {
+    if (diff.length === 0) {
+      return (
+        `Comparing '${configKey}' v${fromVersion} to v${toVersion}: ` +
+        `no changes (payloads are identical).`
+      );
+    }
+
+    const modified = diff.filter((d) => d.changeType === "modified").length;
+    const added = diff.filter((d) => d.changeType === "added").length;
+    const removed = diff.filter((d) => d.changeType === "removed").length;
+
+    const parts: string[] = [];
+    if (modified > 0) parts.push(`${modified} field(s) modified`);
+    if (added > 0) parts.push(`${added} field(s) added`);
+    if (removed > 0) parts.push(`${removed} field(s) removed`);
+
+    return (
+      `Comparing '${configKey}' v${fromVersion} to v${toVersion}: ` +
       parts.join(", ") +
       "."
     );
