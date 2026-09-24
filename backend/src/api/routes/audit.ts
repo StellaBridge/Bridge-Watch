@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import "@fastify/rate-limit";
 import { auditService, type AuditAction, type AuditSeverity, type AuditQuery } from "../../services/audit.service.js";
+import { auditIntegrityService } from "../../services/auditIntegrity.service.js";
 import { authMiddleware } from "../middleware/auth.js";
 
 // =============================================================================
@@ -60,6 +61,32 @@ export async function auditRoutes(server: FastifyInstance) {
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to query audit logs";
+        return reply.code(500).send({ error: message });
+      }
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // INTEGRITY — full chain + checksum verification over a window (#1181)
+  // ---------------------------------------------------------------------------
+
+  server.get<{ Querystring: { limit?: number; from?: string; to?: string } }>(
+    "/integrity",
+    { preHandler: requireAuditRead, rateLimit: { max: 10, timeWindow: "1 minute" } } as any,
+    async (request: FastifyRequest<{ Querystring: { limit?: number; from?: string; to?: string } }>, reply: FastifyReply) => {
+      try {
+        const limit = request.query.limit ? Number(request.query.limit) : 1000;
+        if (!Number.isFinite(limit) || limit < 1 || limit > 5000) {
+          return reply.code(400).send({ error: "limit must be an integer between 1 and 5000" });
+        }
+        const result = await auditIntegrityService.verifyChain({
+          limit: Math.floor(limit),
+          from: request.query.from ? new Date(request.query.from) : undefined,
+          to: request.query.to ? new Date(request.query.to) : undefined,
+        });
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to verify audit integrity";
         return reply.code(500).send({ error: message });
       }
     }

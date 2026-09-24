@@ -424,6 +424,28 @@ export class SorobanRpcClient {
     }
   }
 
+  /**
+   * Fetch raw ledger entries by XDR ledger keys (#1200).
+   * Thin failover wrapper over Soroban RPC `getLedgerEntries`.
+   */
+  async getLedgerEntries(
+    keys: StellarSdk.xdr.LedgerKey[],
+    ledgerSeq?: number
+  ): Promise<unknown> {
+    try {
+      return await this.withFailover("get ledger entries", (server) =>
+        (server as unknown as {
+          getLedgerEntries: (
+            keys: StellarSdk.xdr.LedgerKey[],
+            ledgerSeq?: number
+          ) => Promise<unknown>;
+        }).getLedgerEntries(keys, ledgerSeq)
+      );
+    } catch (error) {
+      throw this.translateError(error, "Failed to fetch ledger entries", SorobanStateReadError);
+    }
+  }
+
   async *streamEvents(request: SorobanEventRequest, options?: { pollIntervalMs?: number; signal?: AbortSignal }): AsyncGenerator<unknown, void, void> {
     let cursor = request.cursor ?? "now";
     const pollIntervalMs = options?.pollIntervalMs ?? this.eventPollIntervalMs;
