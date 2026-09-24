@@ -97,6 +97,8 @@ const PermissionChangeNotifications = lazy(() => import("./pages/PermissionChang
 const SessionDeviceManagement = lazy(() => import("./pages/SessionDeviceManagement"));
 // #1175 — Admin Impersonation Safeguards
 const AdminImpersonationSafeguards = lazy(() => import("./pages/admin/AdminImpersonationSafeguards"));
+// #1184 — Queue Priority Fairness
+const QueueFairness = lazy(() => import("./pages/admin/QueueFairness"));
 
 function NotificationInitializer() {
   useNotifications();
@@ -217,6 +219,8 @@ function App() {
               <Route path="/user/devices" element={<SessionDeviceManagement />} />
               {/* #1175 — Admin Impersonation Safeguards */}
               <Route path="/admin/impersonation-safeguards" element={<AdminImpersonationSafeguards />} />
+              {/* #1184 — Queue Priority Fairness */}
+              <Route path="/admin/queue-fairness" element={<QueueFairness />} />
             </Route>
           </Routes>
         </Suspense>

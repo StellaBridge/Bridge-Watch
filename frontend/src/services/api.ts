@@ -1674,3 +1674,59 @@ export function getAdminImpersonationAuditLogs(apiKey: string, sessionId: string
     apiKey
   );
 }
+
+// #1184 — Queue Priority Fairness
+export function getQueueFairnessPolicies(apiKey: string) {
+  return fetchApi<{ policies: Record<string, import("../types").LanePolicy> }>(
+    "/admin/queue-fairness/policies",
+    undefined,
+    apiKey
+  );
+}
+
+export function updateQueueFairnessPolicy(
+  apiKey: string,
+  lane: string,
+  input: { weight?: number; minSharePct?: number; enabled?: boolean }
+) {
+  return fetchApi<{ policy: import("../types").LanePolicy }>(
+    `/admin/queue-fairness/policies/${encodeURIComponent(lane)}`,
+    { method: "PUT", body: JSON.stringify(input) },
+    apiKey
+  );
+}
+
+export function getQueueFairnessStatus(apiKey: string) {
+  return fetchApi<import("../types").FairnessStatusResponse>(
+    "/admin/queue-fairness/status",
+    undefined,
+    apiKey
+  );
+}
+
+export function recordQueueFairnessSample(
+  apiKey: string,
+  input: { laneName: string; depth: number; servedCount: number; servedBytes?: number }
+) {
+  return fetchApi<{ assessment: import("../types").FairnessAssessment }>(
+    "/admin/queue-fairness/sample",
+    { method: "POST", body: JSON.stringify(input) },
+    apiKey
+  );
+}
+
+export function getBullMQCounts(apiKey: string) {
+  return fetchApi<import("../types").BullMQCounts>(
+    "/admin/queue-fairness/bullmq-counts",
+    undefined,
+    apiKey
+  );
+}
+
+export function runFairnessGovernor(apiKey: string) {
+  return fetchApi<{ ok: boolean }>(
+    "/admin/queue-fairness/governor/run",
+    { method: "POST" },
+    apiKey
+  );
+}
