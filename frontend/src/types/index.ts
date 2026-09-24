@@ -887,3 +887,32 @@ export interface ImpersonationAuditLog {
   requestMethod: string;
   timestamp: string;
 }
+
+export type LaneName = "critical" | "high" | "medium" | "low";
+export type FairnessStatus = "healthy" | "degraded" | "unfair" | "starved";
+
+export interface LanePolicy {
+  laneName: LaneName;
+  weight: number;
+  minSharePct: number;
+  enabled: boolean;
+}
+
+export interface FairnessAssessment {
+  laneName: LaneName;
+  status: FairnessStatus;
+  reason: string;
+  sharePct: number;
+  minSharePct: number;
+  depth: number;
+  servedCount: number;
+}
+
+export interface FairnessStatusResponse {
+  overall: FairnessStatus;
+  byLane: FairnessAssessment[];
+}
+
+export interface BullMQCounts {
+  counts: Record<string, { waiting: number; active: number; completed: number; failed: number }>;
+}
