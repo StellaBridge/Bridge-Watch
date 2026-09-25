@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config";
+import path from "node:path";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      bullmq: path.resolve(__dirname, "../node_modules/bullmq/dist/cjs/index.js"),
+    },
+  },
   test: {
     globals: true,
     environment: "node",
