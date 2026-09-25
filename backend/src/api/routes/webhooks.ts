@@ -223,6 +223,23 @@ export async function webhooksRoutes(server: FastifyInstance) {
     }
   );
 
+  // Get retry timeline for a delivery (status plus ordered attempts)
+  server.get<{ Params: { deliveryId: string } }>(
+    "/deliveries/:deliveryId/timeline",
+    async (request: FastifyRequest<{ Params: { deliveryId: string } }>, reply: FastifyReply) => {
+      try {
+        const timeline = await webhookService.getDeliveryTimeline(request.params.deliveryId);
+        if (!timeline) {
+          return reply.code(404).send({ error: "Delivery not found" });
+        }
+        return timeline;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to get delivery timeline";
+        return reply.code(500).send({ error: message });
+      }
+    }
+  );
+
   // Get webhook history
   server.get<{ Params: { endpointId: string }; Querystring: { limit?: number } }>(
     "/endpoints/:endpointId/history",

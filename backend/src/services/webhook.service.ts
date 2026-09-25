@@ -1187,6 +1187,31 @@ export class WebhookService extends EventEmitter {
     return logs.map(this.mapToDeliveryLog);
   }
 
+  /**
+   * Retry timeline for a delivery: current status plus every attempt ordered
+   * by attempt number, with the scheduled next retry when one is pending.
+   */
+  public async getDeliveryTimeline(deliveryId: string): Promise<{
+    delivery: WebhookDelivery;
+    attempts: WebhookDeliveryLog[];
+    nextRetryAt: Date | null;
+  } | null> {
+    const delivery = await this.getDelivery(deliveryId);
+    if (!delivery) {
+      return null;
+    }
+    const db = getDatabase();
+    const logs = await db("webhook_delivery_logs")
+      .where("webhook_delivery_id", deliveryId)
+      .orderBy("attempt_number", "asc")
+      .orderBy("created_at", "asc");
+    return {
+      delivery,
+      attempts: logs.map(this.mapToDeliveryLog),
+      nextRetryAt: delivery.status === "retrying" ? delivery.nextRetryAt : null,
+    };
+  }
+
   public async getWebhookHistory(
     webhookEndpointId: string,
     limit: number = 100
