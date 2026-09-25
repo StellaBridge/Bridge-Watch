@@ -1,5 +1,6 @@
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
+import { getMetricsService } from "./metrics.service.js";
 
 export interface CursorPosition {
   cursorKey: string;
@@ -80,6 +81,12 @@ export class HorizonCursorAuditService {
           last_synced_at: new Date(),
           total_events_processed: cursor.total_events_processed + eventsInBatch,
         });
+
+      // #1245 — expose the last sync time so Prometheus can alert on cursor lag
+      getMetricsService().horizonCursorLastSyncTimestamp.set(
+        { cursor_key: cursorKey },
+        Math.floor(Date.now() / 1000)
+      );
 
       await database("horizon_cursor_audit_logs").insert({
         cursor_id: cursor.id,

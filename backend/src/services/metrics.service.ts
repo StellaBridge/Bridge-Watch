@@ -47,6 +47,8 @@ class MetricsService {
   // #1243 — EVM reserve attestation telemetry
   public bridgeReserveRatio: Gauge;
   public bridgeReserveMismatchDetected: Gauge;
+  // #1245 — Bridge health telemetry
+  public horizonCursorLastSyncTimestamp: Gauge;
 
   // Cache Metrics
   public cacheHits: Counter;
@@ -111,6 +113,7 @@ class MetricsService {
     this.workerRestartsTotal = undefined as any;
     this.bridgeReserveRatio = undefined as any;
     this.bridgeReserveMismatchDetected = undefined as any;
+    this.horizonCursorLastSyncTimestamp = undefined as any;
     this.cacheHits = undefined as any;
     this.cacheMisses = undefined as any;
     this.cacheSize = undefined as any;
@@ -351,6 +354,14 @@ class MetricsService {
       name: "bridge_reserve_mismatch_detected",
       help: "1 when the reserve ratio drops below the attestation threshold, 0 otherwise",
       labelNames: ["bridge_id", "asset_code"],
+      registers: [this.registry],
+    });
+
+    // #1245 — Bridge health telemetry
+    this.horizonCursorLastSyncTimestamp = new Gauge({
+      name: "horizon_cursor_last_sync_timestamp",
+      help: "Unix timestamp of the last successful Horizon cursor sync",
+      labelNames: ["cursor_key"],
       registers: [this.registry],
     });
 
