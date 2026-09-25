@@ -16,6 +16,16 @@ pub const MIN_REPUTATION_THRESHOLD: u32 = 5000;
 /// Maximum weight for any single factor in reputation calculation
 pub const MAX_FACTOR_WEIGHT: u32 = 100;
 
+/// Ledgers without a valid performance report before an operator's score
+/// starts to decay for inactivity (issue #1251). About one day at 5 s ledgers.
+pub const INACTIVITY_WINDOW_LEDGERS: u32 = 17_280;
+/// Score reduction applied once per elapsed inactivity window, in basis points.
+pub const DEFAULT_INACTIVITY_DECAY_BPS: u32 = 500;
+/// Collateral an operator must stake to appeal a slash, in stake units.
+pub const DEFAULT_MIN_APPEAL_COLLATERAL: i128 = 100;
+/// Ledgers after a slash during which an appeal may be filed. About seven days.
+pub const APPEAL_WINDOW_LEDGERS: u32 = 120_960;
+
 /// Entity types that can have reputation
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -114,6 +124,63 @@ pub enum DataKey {
     Config,
     TotalEntities(EntityType),
     RegisteredEntities,
+    /// Ledger of the entity's last valid performance report.
+    LastActivityLedger(Address),
+    /// Ledger at which inactivity decay was last applied to the entity.
+    LastInactivityDecayLedger(Address),
+    InactivityPolicy,
+    AppealPolicy,
+    /// Most recent slash against the entity, kept until it is appealed.
+    LastSlash(Address),
+    Appeal(Address),
+}
+
+/// How inactivity is penalised (issue #1251). Stored separately from
+/// `Config` so existing on-chain configs keep decoding.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InactivityPolicy {
+    pub window_ledgers: u32,
+    pub decay_bps: u32,
+}
+
+/// How slashing appeals are gated (issue #1251).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppealPolicy {
+    pub min_collateral: i128,
+    pub window_ledgers: u32,
+}
+
+/// What a slash took away, so an approved appeal can put it back exactly.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlashRecord {
+    pub previous_score: u32,
+    pub penalty_amount: i128,
+    pub slashed_at_ledger: u32,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AppealStatus {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+/// An operator's appeal against its most recent slash.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Appeal {
+    pub entity_address: Address,
+    pub collateral: i128,
+    pub reason: String,
+    pub submitted_ledger: u32,
+    pub status: AppealStatus,
+    pub previous_score: u32,
+    pub penalty_amount: i128,
 }
 
 /// Contract configuration
@@ -244,6 +311,7 @@ impl ReputationSystemContract {
             &DataKey::Reputation(entity_address.clone()),
             &reputation_data,
         );
+        Self::stamp_activity(&env, &entity_address);
 
         // Initialize empty performance history
         let history: Vec<PerformanceRecord> = Vec::new(&env);
@@ -293,6 +361,7 @@ impl ReputationSystemContract {
             .persistent()
             .get(&DataKey::Reputation(entity_address.clone()))
             .unwrap_or_else(|| panic!("Entity not registered"));
+        Self::stamp_activity(&env, &entity_address);
 
         // Create performance record
         let record = PerformanceRecord {
@@ -386,6 +455,17 @@ impl ReputationSystemContract {
             .overall_score
             .saturating_sub(reputation_impact);
 
+        // Remember what was taken so an approved appeal can restore it exactly.
+        env.storage().persistent().set(
+            &DataKey::LastSlash(entity_address.clone()),
+            &SlashRecord {
+                previous_score: reputation_data.overall_score,
+                penalty_amount,
+                slashed_at_ledger: env.ledger().sequence(),
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
         // Update reputation data
         reputation_data.overall_score = new_score;
         reputation_data.total_penalties += penalty_amount;
@@ -423,12 +503,293 @@ impl ReputationSystemContract {
         };
 
         history.push_back(penalty_record);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Reputation(entity_address.clone()), &history);
+        env.storage().persistent().set(
+            &DataKey::PerformanceHistory(entity_address.clone()),
+            &history,
+        );
 
         // Update leaderboard
         Self::update_leaderboard_internal(&env, entity_address, new_score, BadgeLevel::None);
+    }
+
+    // =======================================================================
+    // Inactivity decay (issue #1251)
+    // =======================================================================
+
+    /// Set how inactivity is penalised (admin only).
+    pub fn set_inactivity_policy(env: Env, window_ledgers: u32, decay_bps: u32) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        if window_ledgers == 0 {
+            panic!("Inactivity window must be at least one ledger");
+        }
+        if decay_bps > REPUTATION_SCALE {
+            panic!("Inactivity decay cannot exceed 100%");
+        }
+        env.storage().instance().set(
+            &DataKey::InactivityPolicy,
+            &InactivityPolicy {
+                window_ledgers,
+                decay_bps,
+            },
+        );
+    }
+
+    pub fn get_inactivity_policy(env: Env) -> InactivityPolicy {
+        Self::inactivity_policy(&env)
+    }
+
+    /// Ledger of the entity's last valid report, if it has been recorded.
+    pub fn get_last_activity_ledger(env: Env, entity_address: Address) -> Option<u32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LastActivityLedger(entity_address))
+    }
+
+    /// Reduce the score of every operator that has gone a full inactivity
+    /// window without a valid report (admin only). One decay step is applied
+    /// per call once a window has elapsed since the later of the last report
+    /// and the last decay, so repeated calls inside a window are no-ops and
+    /// prolonged silence compounds one step per window. Returns the number
+    /// of entities decayed.
+    ///
+    /// Entities registered before activity tracking existed have no stamp;
+    /// the first pass stamps them at the current ledger instead of decaying
+    /// them for silence that was never measured.
+    pub fn apply_inactivity_decay(env: Env) -> u32 {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        let policy = Self::inactivity_policy(&env);
+        let now = env.ledger().sequence();
+        let mut decayed: u32 = 0;
+
+        for entity_type in [
+            EntityType::BridgeOperator,
+            EntityType::OracleNode,
+            EntityType::RelayOperator,
+        ] {
+            let leaderboard: Vec<LeaderboardEntry> = env
+                .storage()
+                .instance()
+                .get(&DataKey::ReputationLeaderboard(entity_type))
+                .unwrap_or_else(|| Vec::new(&env));
+
+            for i in 0..leaderboard.len() {
+                let entity = leaderboard.get(i).unwrap().entity_address;
+                let activity_key = DataKey::LastActivityLedger(entity.clone());
+                let last_activity: u32 = match env.storage().persistent().get(&activity_key) {
+                    Some(ledger) => ledger,
+                    None => {
+                        env.storage().persistent().set(&activity_key, &now);
+                        continue;
+                    }
+                };
+                let last_decay: u32 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LastInactivityDecayLedger(entity.clone()))
+                    .unwrap_or(0);
+                let since = now.saturating_sub(if last_decay > last_activity {
+                    last_decay
+                } else {
+                    last_activity
+                });
+                if since < policy.window_ledgers {
+                    continue;
+                }
+
+                let mut reputation_data: ReputationData = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Reputation(entity.clone()))
+                    .unwrap();
+                let reduction = ((reputation_data.overall_score as u64) * (policy.decay_bps as u64)
+                    / REPUTATION_SCALE as u64) as u32;
+                reputation_data.overall_score =
+                    reputation_data.overall_score.saturating_sub(reduction);
+                reputation_data.badge_level =
+                    Self::calculate_badge_level(reputation_data.overall_score);
+                reputation_data.last_update_time = env.ledger().timestamp();
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::Reputation(entity.clone()), &reputation_data);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LastInactivityDecayLedger(entity.clone()), &now);
+                Self::update_leaderboard_internal(
+                    &env,
+                    entity.clone(),
+                    reputation_data.overall_score,
+                    reputation_data.badge_level,
+                );
+                env.events().publish(
+                    (soroban_sdk::symbol_short!("rep_decay"), entity),
+                    (reputation_data.overall_score, reduction),
+                );
+                decayed += 1;
+            }
+        }
+        decayed
+    }
+
+    // =======================================================================
+    // Slashing appeals (issue #1251)
+    // =======================================================================
+
+    /// Set the collateral and window an appeal requires (admin only).
+    pub fn set_appeal_policy(env: Env, min_collateral: i128, window_ledgers: u32) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        if min_collateral < 0 {
+            panic!("Appeal collateral cannot be negative");
+        }
+        if window_ledgers == 0 {
+            panic!("Appeal window must be at least one ledger");
+        }
+        env.storage().instance().set(
+            &DataKey::AppealPolicy,
+            &AppealPolicy {
+                min_collateral,
+                window_ledgers,
+            },
+        );
+    }
+
+    pub fn get_appeal_policy(env: Env) -> AppealPolicy {
+        Self::appeal_policy(&env)
+    }
+
+    pub fn get_last_slash(env: Env, entity_address: Address) -> Option<SlashRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::LastSlash(entity_address))
+    }
+
+    pub fn get_appeal(env: Env, entity_address: Address) -> Option<Appeal> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Appeal(entity_address))
+    }
+
+    /// Appeal the entity's most recent slash, staking `collateral` from its
+    /// current stake. The collateral is returned if the appeal is approved
+    /// and forfeited if it is rejected. One appeal per slash, filed within
+    /// the appeal window.
+    pub fn submit_appeal(env: Env, entity_address: Address, collateral: i128, reason: String) {
+        entity_address.require_auth();
+
+        let mut reputation_data: ReputationData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(entity_address.clone()))
+            .unwrap_or_else(|| panic!("Entity not registered"));
+        if !reputation_data.is_slashed {
+            panic!("Entity is not slashed");
+        }
+        let slash: SlashRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LastSlash(entity_address.clone()))
+            .unwrap_or_else(|| panic!("No slash on record to appeal"));
+        if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<_, Appeal>(&DataKey::Appeal(entity_address.clone()))
+        {
+            if existing.status == AppealStatus::Pending {
+                panic!("An appeal is already pending");
+            }
+        }
+
+        let policy = Self::appeal_policy(&env);
+        let now = env.ledger().sequence();
+        if now.saturating_sub(slash.slashed_at_ledger) > policy.window_ledgers {
+            panic!("Appeal window has closed");
+        }
+        if collateral < policy.min_collateral {
+            panic!("Appeal collateral below minimum");
+        }
+        if collateral > reputation_data.current_stake {
+            panic!("Appeal collateral exceeds current stake");
+        }
+
+        // Lock the collateral: it leaves the usable stake until the appeal resolves.
+        reputation_data.current_stake -= collateral;
+        env.storage().persistent().set(
+            &DataKey::Reputation(entity_address.clone()),
+            &reputation_data,
+        );
+        let appeal = Appeal {
+            entity_address: entity_address.clone(),
+            collateral,
+            reason,
+            submitted_ledger: now,
+            status: AppealStatus::Pending,
+            previous_score: slash.previous_score,
+            penalty_amount: slash.penalty_amount,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Appeal(entity_address.clone()), &appeal);
+        env.events().publish(
+            (soroban_sdk::symbol_short!("rep_appl"), entity_address),
+            (collateral, now),
+        );
+    }
+
+    /// Resolve a pending appeal (admin only). Approval restores the score,
+    /// the slashed stake and the collateral, and clears the slashed flag;
+    /// rejection forfeits the collateral and leaves the slash in place.
+    pub fn resolve_appeal(env: Env, entity_address: Address, approved: bool) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        let mut appeal: Appeal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Appeal(entity_address.clone()))
+            .unwrap_or_else(|| panic!("No appeal on record"));
+        if appeal.status != AppealStatus::Pending {
+            panic!("Appeal already resolved");
+        }
+        let mut reputation_data: ReputationData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Reputation(entity_address.clone()))
+            .unwrap();
+
+        if approved {
+            reputation_data.overall_score = appeal.previous_score;
+            reputation_data.badge_level = Self::calculate_badge_level(appeal.previous_score);
+            reputation_data.is_slashed = false;
+            reputation_data.current_stake += appeal.penalty_amount + appeal.collateral;
+            reputation_data.total_penalties -= appeal.penalty_amount;
+            env.storage()
+                .persistent()
+                .remove(&DataKey::LastSlash(entity_address.clone()));
+            appeal.status = AppealStatus::Approved;
+        } else {
+            appeal.status = AppealStatus::Rejected;
+        }
+        reputation_data.last_update_time = env.ledger().timestamp();
+        env.storage().persistent().set(
+            &DataKey::Reputation(entity_address.clone()),
+            &reputation_data,
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Appeal(entity_address.clone()), &appeal);
+        Self::update_leaderboard_internal(
+            &env,
+            entity_address.clone(),
+            reputation_data.overall_score,
+            reputation_data.badge_level,
+        );
+        env.events().publish(
+            (soroban_sdk::symbol_short!("rep_apres"), entity_address),
+            approved,
+        );
     }
 
     /// Grant reward to an entity (admin only)
@@ -756,6 +1117,33 @@ impl ReputationSystemContract {
         factor
     }
 
+    fn stamp_activity(env: &Env, entity_address: &Address) {
+        env.storage().persistent().set(
+            &DataKey::LastActivityLedger(entity_address.clone()),
+            &env.ledger().sequence(),
+        );
+    }
+
+    fn inactivity_policy(env: &Env) -> InactivityPolicy {
+        env.storage()
+            .instance()
+            .get(&DataKey::InactivityPolicy)
+            .unwrap_or(InactivityPolicy {
+                window_ledgers: INACTIVITY_WINDOW_LEDGERS,
+                decay_bps: DEFAULT_INACTIVITY_DECAY_BPS,
+            })
+    }
+
+    fn appeal_policy(env: &Env) -> AppealPolicy {
+        env.storage()
+            .instance()
+            .get(&DataKey::AppealPolicy)
+            .unwrap_or(AppealPolicy {
+                min_collateral: DEFAULT_MIN_APPEAL_COLLATERAL,
+                window_ledgers: APPEAL_WINDOW_LEDGERS,
+            })
+    }
+
     /// Calculate badge level based on reputation score
     fn calculate_badge_level(score: u32) -> BadgeLevel {
         match score {
@@ -827,7 +1215,7 @@ impl ReputationSystemContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
     use soroban_sdk::Env;
 
     /// Helper: set up a fresh contract with an admin
@@ -1191,5 +1579,255 @@ mod tests {
             relay_leaderboard.get(0).unwrap().entity_address,
             relay_entity
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Inactivity decay and slashing appeals (issue #1251)
+    // -----------------------------------------------------------------------
+
+    fn registered(
+        env: &Env,
+        client: &ReputationSystemContractClient,
+        entity_type: EntityType,
+    ) -> Address {
+        let entity = Address::generate(env);
+        client.register_entity(&entity, &entity_type, &10_000);
+        entity
+    }
+
+    #[test]
+    fn test_apply_penalty_keeps_reputation_readable() {
+        // Regression: the penalty path wrote the history vector under the
+        // reputation key, so the entity's record could no longer be decoded.
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "downtime"));
+
+        let rep = client
+            .get_reputation(&entity)
+            .expect("reputation still decodes");
+        assert!(rep.is_slashed);
+        assert_eq!(rep.current_stake, 9_000);
+        assert_eq!(rep.total_penalties, 1_000);
+        assert_eq!(client.get_performance_history(&entity).len(), 1);
+        let slash = client.get_last_slash(&entity).expect("slash recorded");
+        assert_eq!(slash.previous_score, 7_500);
+        assert_eq!(slash.penalty_amount, 1_000);
+    }
+
+    /// Windows in the ledger-day range outlive the test environment's
+    /// persistent-entry TTL, so these tests run the same logic with a short
+    /// configured window; the defaults are pinned separately.
+    const WINDOW: u32 = 100;
+
+    #[test]
+    fn test_inactivity_decay_waits_for_a_full_window() {
+        let (env, client, _admin) = setup();
+        client.set_inactivity_policy(&WINDOW, &DEFAULT_INACTIVITY_DECAY_BPS);
+        env.ledger().set_sequence_number(1_000);
+        let entity = registered(&env, &client, EntityType::BridgeOperator);
+        assert_eq!(client.get_last_activity_ledger(&entity), Some(1_000));
+
+        env.ledger().set_sequence_number(1_000 + WINDOW - 1);
+        assert_eq!(client.apply_inactivity_decay(), 0);
+        assert_eq!(client.get_reputation(&entity).unwrap().overall_score, 7_500);
+
+        env.ledger().set_sequence_number(1_000 + WINDOW);
+        assert_eq!(client.apply_inactivity_decay(), 1);
+        // 5% of 7 500.
+        assert_eq!(client.get_reputation(&entity).unwrap().overall_score, 7_125);
+
+        // A second call inside the same window does nothing.
+        env.ledger().set_sequence_number(1_000 + WINDOW + 10);
+        assert_eq!(client.apply_inactivity_decay(), 0);
+        assert_eq!(client.get_reputation(&entity).unwrap().overall_score, 7_125);
+
+        // Another full window of silence compounds one more step.
+        env.ledger().set_sequence_number(1_000 + 2 * WINDOW);
+        assert_eq!(client.apply_inactivity_decay(), 1);
+        assert_eq!(client.get_reputation(&entity).unwrap().overall_score, 6_769);
+    }
+
+    #[test]
+    fn test_valid_report_resets_the_inactivity_clock() {
+        let (env, client, _admin) = setup();
+        client.set_inactivity_policy(&WINDOW, &DEFAULT_INACTIVITY_DECAY_BPS);
+        env.ledger().set_sequence_number(500);
+        let entity = registered(&env, &client, EntityType::RelayOperator);
+
+        env.ledger().set_sequence_number(500 + WINDOW - 10);
+        client.record_performance(&entity, &9_000, &9_000, &9_000, &1, &0, &10, &10);
+        assert_eq!(
+            client.get_last_activity_ledger(&entity),
+            Some(500 + WINDOW - 10)
+        );
+        let score_after_report = client.get_reputation(&entity).unwrap().overall_score;
+
+        env.ledger().set_sequence_number(500 + WINDOW + 5);
+        assert_eq!(client.apply_inactivity_decay(), 0);
+        assert_eq!(
+            client.get_reputation(&entity).unwrap().overall_score,
+            score_after_report
+        );
+    }
+
+    #[test]
+    fn test_inactivity_policy_is_configurable_and_bounded() {
+        let (env, client, _admin) = setup();
+        let default = client.get_inactivity_policy();
+        assert_eq!(default.window_ledgers, INACTIVITY_WINDOW_LEDGERS);
+        assert_eq!(default.decay_bps, DEFAULT_INACTIVITY_DECAY_BPS);
+
+        env.ledger().set_sequence_number(100);
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.set_inactivity_policy(&10, &2_000);
+        env.ledger().set_sequence_number(110);
+        assert_eq!(client.apply_inactivity_decay(), 1);
+        assert_eq!(client.get_reputation(&entity).unwrap().overall_score, 6_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Inactivity decay cannot exceed 100%")]
+    fn test_inactivity_policy_rejects_over_100_percent() {
+        let (_env, client, _admin) = setup();
+        client.set_inactivity_policy(&10, &(REPUTATION_SCALE + 1));
+    }
+
+    #[test]
+    fn test_appeal_approved_restores_score_stake_and_collateral() {
+        let (env, client, _admin) = setup();
+        env.ledger().set_sequence_number(2_000);
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "partition"));
+        let slashed = client.get_reputation(&entity).unwrap();
+        assert!(slashed.is_slashed);
+        assert_eq!(slashed.overall_score, 7_400);
+        assert_eq!(slashed.current_stake, 9_000);
+
+        client.submit_appeal(&entity, &500, &String::from_str(&env, "network partition"));
+        let pending = client.get_appeal(&entity).unwrap();
+        assert_eq!(pending.status, AppealStatus::Pending);
+        assert_eq!(pending.collateral, 500);
+        // Collateral is locked while the appeal is open.
+        assert_eq!(client.get_reputation(&entity).unwrap().current_stake, 8_500);
+
+        client.resolve_appeal(&entity, &true);
+        let restored = client.get_reputation(&entity).unwrap();
+        assert!(!restored.is_slashed);
+        assert_eq!(restored.overall_score, 7_500);
+        assert_eq!(restored.current_stake, 10_000);
+        assert_eq!(restored.total_penalties, 0);
+        assert_eq!(
+            client.get_appeal(&entity).unwrap().status,
+            AppealStatus::Approved
+        );
+        assert_eq!(client.get_last_slash(&entity), None);
+    }
+
+    #[test]
+    fn test_appeal_rejected_forfeits_collateral() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::BridgeOperator);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "missed reports"));
+        client.submit_appeal(&entity, &300, &String::from_str(&env, "disagree"));
+
+        client.resolve_appeal(&entity, &false);
+        let rep = client.get_reputation(&entity).unwrap();
+        assert!(rep.is_slashed);
+        assert_eq!(rep.overall_score, 7_400);
+        assert_eq!(rep.current_stake, 8_700);
+        assert_eq!(
+            client.get_appeal(&entity).unwrap().status,
+            AppealStatus::Rejected
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Entity is not slashed")]
+    fn test_appeal_requires_a_slash() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.submit_appeal(&entity, &500, &String::from_str(&env, "nothing happened"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Appeal collateral below minimum")]
+    fn test_appeal_requires_minimum_collateral() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "x"));
+        client.submit_appeal(
+            &entity,
+            &(DEFAULT_MIN_APPEAL_COLLATERAL - 1),
+            &String::from_str(&env, "cheap"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Appeal collateral exceeds current stake")]
+    fn test_appeal_cannot_stake_more_than_held() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "x"));
+        client.submit_appeal(&entity, &9_001, &String::from_str(&env, "too much"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Appeal window has closed")]
+    fn test_appeal_window_is_enforced() {
+        let (env, client, _admin) = setup();
+        client.set_appeal_policy(&DEFAULT_MIN_APPEAL_COLLATERAL, &WINDOW);
+        env.ledger().set_sequence_number(10);
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "x"));
+        env.ledger().set_sequence_number(10 + WINDOW + 1);
+        client.submit_appeal(&entity, &500, &String::from_str(&env, "late"));
+    }
+
+    #[test]
+    fn test_default_windows_are_pinned() {
+        assert_eq!(INACTIVITY_WINDOW_LEDGERS, 17_280);
+        assert_eq!(APPEAL_WINDOW_LEDGERS, 120_960);
+        assert_eq!(DEFAULT_INACTIVITY_DECAY_BPS, 500);
+        assert_eq!(DEFAULT_MIN_APPEAL_COLLATERAL, 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "An appeal is already pending")]
+    fn test_one_pending_appeal_per_slash() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "x"));
+        client.submit_appeal(&entity, &500, &String::from_str(&env, "first"));
+        client.submit_appeal(&entity, &500, &String::from_str(&env, "second"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Appeal already resolved")]
+    fn test_appeal_cannot_be_resolved_twice() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "x"));
+        client.submit_appeal(&entity, &500, &String::from_str(&env, "once"));
+        client.resolve_appeal(&entity, &false);
+        client.resolve_appeal(&entity, &true);
+    }
+
+    #[test]
+    fn test_appeal_policy_is_configurable() {
+        let (env, client, _admin) = setup();
+        client.set_appeal_policy(&1_000, &50);
+        let policy = client.get_appeal_policy();
+        assert_eq!(policy.min_collateral, 1_000);
+        assert_eq!(policy.window_ledgers, 50);
+        let entity = registered(&env, &client, EntityType::OracleNode);
+        client.apply_penalty(&entity, &1_000, &String::from_str(&env, "x"));
+        client.submit_appeal(
+            &entity,
+            &1_000,
+            &String::from_str(&env, "meets the new floor"),
+        );
+        assert_eq!(client.get_appeal(&entity).unwrap().collateral, 1_000);
     }
 }

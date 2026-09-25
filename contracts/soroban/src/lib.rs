@@ -102,6 +102,7 @@ mod keys {
     pub const UNPAUSE_AVAILABLE_AT: &str = "unpause_available_at";
     pub const PAUSE_HISTORY: &str = "pause_history";
     pub const EMERGENCY_CONTACT: &str = "emergency_contact";
+    pub const BRIDGE_BLACKLIST: &str = "bridge_blacklist";
     pub const ASSET_PAUSE_REASON: &str = "asset_pause_reason";
     pub const PENDING_TRANSFER: &str = "pending_transfer";
     pub const PENDING_UPGRADE: &str = "pending_upgrade";
@@ -2569,6 +2570,9 @@ impl BridgeWatchContract {
         source_chain_supply: i128,
     ) {
         Self::assert_not_globally_paused(&env);
+        if Self::bridge_is_blacklisted(&env, &bridge_id) {
+            panic!("bridge is blacklisted");
+        }
         let admin: Address = env.storage().instance().get(&keys::ADMIN).unwrap();
         admin.require_auth();
 
@@ -3988,6 +3992,131 @@ impl BridgeWatchContract {
                 timestamp: env.ledger().timestamp(),
             },
         );
+    }
+
+    /// Blacklist a single bridge once `threshold` operators have signed the
+    /// `EmergencyBlacklistBridge` action for `nonce` (issue #1250). Supply
+    /// mismatch submissions for that bridge are rejected until the admin
+    /// lifts the blacklist; every other bridge is unaffected, so a compromised
+    /// operator key can be isolated without a platform-wide pause.
+    ///
+    /// # Panics
+    /// - See [`emergency_multisig::verify_and_execute`].
+    pub fn blacklist_bridge_multisig(
+        env: Env,
+        bridge_id: String,
+        signatures: Vec<OperatorSignature>,
+        nonce: u64,
+    ) {
+        let approvers = emergency_multisig::verify_and_execute(
+            &env,
+            EmergencyAction::EmergencyBlacklistBridge(bridge_id.clone()),
+            signatures,
+            nonce,
+        );
+
+        let mut blacklist: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&keys::BRIDGE_BLACKLIST)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !blacklist.iter().any(|b| b == bridge_id) {
+            blacklist.push_back(bridge_id.clone());
+            env.storage()
+                .instance()
+                .set(&keys::BRIDGE_BLACKLIST, &blacklist);
+        }
+
+        env.events().publish(
+            (symbol_short!("ems_bbl"), nonce),
+            (bridge_id, approvers.len()),
+        );
+    }
+
+    /// Revoke one trusted oracle source once `threshold` operators have signed
+    /// the `EmergencyDelistOracleNode` action for `nonce` (issue #1250). Same
+    /// effect as `revoke_trusted_source`, without the admin key.
+    ///
+    /// # Panics
+    /// - See [`emergency_multisig::verify_and_execute`].
+    /// - The address is not a registered, active trusted source.
+    pub fn delist_oracle_node_multisig(
+        env: Env,
+        node_address: Address,
+        signatures: Vec<OperatorSignature>,
+        nonce: u64,
+    ) {
+        let approvers = emergency_multisig::verify_and_execute(
+            &env,
+            EmergencyAction::EmergencyDelistOracleNode(node_address.clone()),
+            signatures,
+            nonce,
+        );
+
+        source_trust::revoke_trusted_source(&env, &env.current_contract_address(), &node_address);
+
+        env.events().publish(
+            (symbol_short!("ems_dlst"), nonce),
+            (node_address, approvers.len()),
+        );
+    }
+
+    /// Whether `bridge_id` is currently blacklisted by the emergency multisig.
+    pub fn is_bridge_blacklisted(env: Env, bridge_id: String) -> bool {
+        Self::bridge_is_blacklisted(&env, &bridge_id)
+    }
+
+    /// Every bridge currently blacklisted by the emergency multisig.
+    pub fn get_blacklisted_bridges(env: Env) -> Vec<String> {
+        env.storage()
+            .instance()
+            .get(&keys::BRIDGE_BLACKLIST)
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Lift an emergency bridge blacklist. Recovery goes through the admin,
+    /// matching how `revoke_trusted_source` is undone by re-registration.
+    ///
+    /// # Panics
+    /// - `caller` is not the contract admin.
+    /// - `bridge_id` is not blacklisted.
+    pub fn remove_bridge_from_blacklist(env: Env, caller: Address, bridge_id: String) {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&keys::ADMIN).unwrap();
+        if caller != admin {
+            panic!("only admin can lift a bridge blacklist");
+        }
+        let blacklist: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&keys::BRIDGE_BLACKLIST)
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut remaining: Vec<String> = Vec::new(&env);
+        let mut found = false;
+        for b in blacklist.iter() {
+            if b == bridge_id {
+                found = true;
+            } else {
+                remaining.push_back(b);
+            }
+        }
+        if !found {
+            panic!("bridge is not blacklisted");
+        }
+        env.storage()
+            .instance()
+            .set(&keys::BRIDGE_BLACKLIST, &remaining);
+        env.events()
+            .publish((symbol_short!("ems_bunbl"),), bridge_id);
+    }
+
+    fn bridge_is_blacklisted(env: &Env, bridge_id: &String) -> bool {
+        let blacklist: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&keys::BRIDGE_BLACKLIST)
+            .unwrap_or_else(|| Vec::new(env));
+        blacklist.iter().any(|b| &b == bridge_id)
     }
 
     /// Store operator emergency contact information (e-mail, Telegram, etc.).

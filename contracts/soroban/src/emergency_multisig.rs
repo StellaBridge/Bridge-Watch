@@ -20,7 +20,9 @@
 //! (see the `*_multisig` entrypoints in `lib.rs`), keeping this module free
 //! of any dependency on the rest of the contract's state.
 
-use soroban_sdk::{contracttype, symbol_short, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{
+    contracttype, symbol_short, xdr::ToXdr, Address, Bytes, BytesN, Env, String, Vec,
+};
 
 use crate::keys;
 
@@ -46,6 +48,13 @@ pub enum EmergencyAction {
     /// Administrative config override: update the global supply mismatch
     /// threshold (basis points), bypassing the single-admin path.
     SetMismatchThreshold(i128),
+    /// Isolate one bridge (issue #1250): its supply-mismatch submissions are
+    /// rejected while every other bridge keeps operating, so a compromised
+    /// operator key does not force a platform-wide pause.
+    EmergencyBlacklistBridge(String),
+    /// Revoke one trusted oracle source (issue #1250) without the admin key,
+    /// for a node that has started broadcasting poisoned feeds.
+    EmergencyDelistOracleNode(Address),
 }
 
 /// One operator's Ed25519 signature over a proposed `EmergencyAction`.
@@ -149,6 +158,8 @@ fn action_tag(action: &EmergencyAction) -> u32 {
         EmergencyAction::Pause => 1,
         EmergencyAction::Unpause => 2,
         EmergencyAction::SetMismatchThreshold(_) => 3,
+        EmergencyAction::EmergencyBlacklistBridge(_) => 4,
+        EmergencyAction::EmergencyDelistOracleNode(_) => 5,
     }
 }
 
@@ -173,6 +184,15 @@ fn append_i128(buf: &mut Bytes, value: i128) {
     }
 }
 
+/// Append a length-prefixed byte string, so two variable-length arguments
+/// can never be re-split into a different (id, address) pair.
+fn append_bytes(buf: &mut Bytes, value: &Bytes) {
+    append_u32(buf, value.len());
+    for b in value.iter() {
+        buf.push_back(b);
+    }
+}
+
 /// Build the canonical byte payload operators must sign for `action` at
 /// `nonce`. Binding the action's own parameters and the nonce into the
 /// message means a valid signature cannot be reused for a different action,
@@ -180,8 +200,17 @@ fn append_i128(buf: &mut Bytes, value: i128) {
 pub fn build_message(env: &Env, action: &EmergencyAction, nonce: u64) -> Bytes {
     let mut data = Bytes::from_slice(env, DOMAIN);
     append_u32(&mut data, action_tag(action));
-    if let EmergencyAction::SetMismatchThreshold(value) = action {
-        append_i128(&mut data, *value);
+    match action {
+        EmergencyAction::Pause | EmergencyAction::Unpause => {}
+        EmergencyAction::SetMismatchThreshold(value) => append_i128(&mut data, *value),
+        // Canonical XDR encodings, so the signed bytes are exactly what the
+        // contract decodes and an id or address cannot be substituted.
+        EmergencyAction::EmergencyBlacklistBridge(bridge_id) => {
+            append_bytes(&mut data, &bridge_id.clone().to_xdr(env))
+        }
+        EmergencyAction::EmergencyDelistOracleNode(node) => {
+            append_bytes(&mut data, &node.clone().to_xdr(env))
+        }
     }
     append_u64(&mut data, nonce);
     data
@@ -285,8 +314,8 @@ pub fn verify_and_execute(
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
-    use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::{contract, Address};
+    use soroban_sdk::contract;
+    use soroban_sdk::testutils::{Address as _, Ledger};
 
     /// Storage-touching functions in this module assume they run inside a
     /// contract invocation. `TestHarnessContract` gives the test suite a
@@ -558,6 +587,70 @@ mod tests {
             // Replay the exact same call (same nonce) — must fail even though
             // the signatures themselves were valid the first time.
             verify_and_execute(&env, EmergencyAction::Pause, sigs, 1);
+        });
+    }
+
+    #[test]
+    fn test_targeted_actions_have_distinct_tags_and_bound_arguments() {
+        let (env, cid) = setup_env();
+        env.as_contract(&cid, || {
+            let bridge_a =
+                EmergencyAction::EmergencyBlacklistBridge(String::from_str(&env, "bridge-a"));
+            let bridge_b =
+                EmergencyAction::EmergencyBlacklistBridge(String::from_str(&env, "bridge-b"));
+            let node = EmergencyAction::EmergencyDelistOracleNode(Address::generate(&env));
+
+            assert_eq!(action_tag(&bridge_a), 4);
+            assert_eq!(action_tag(&node), 5);
+            // The argument is part of the signed message: the same nonce with
+            // a different bridge id or a different action is a different message.
+            assert_ne!(
+                build_message(&env, &bridge_a, 1),
+                build_message(&env, &bridge_b, 1)
+            );
+            assert_ne!(
+                build_message(&env, &bridge_a, 1),
+                build_message(&env, &node, 1)
+            );
+            assert_ne!(
+                build_message(&env, &bridge_a, 1),
+                build_message(&env, &bridge_a, 2)
+            );
+            assert_eq!(
+                build_message(&env, &bridge_a, 1),
+                build_message(&env, &bridge_a, 1)
+            );
+        });
+    }
+
+    #[test]
+    fn test_verify_and_execute_records_a_targeted_action() {
+        let (env, cid) = setup_env();
+        env.ledger().set_timestamp(7_000);
+        let (sk0, pk0) = keypair(4);
+        let (sk1, pk1) = keypair(5);
+        let operators = operators_from(&env, &[pk0, pk1]);
+        env.as_contract(&cid, || {
+            configure(&env, operators, 2);
+        });
+
+        let action = EmergencyAction::EmergencyBlacklistBridge(String::from_str(&env, "bridge-x"));
+        let message = env.as_contract(&cid, || build_message(&env, &action, 1));
+        let mut sigs: Vec<OperatorSignature> = Vec::new(&env);
+        sigs.push_back(OperatorSignature {
+            operator: BytesN::from_array(&env, &pk0),
+            signature: sign(&env, &sk0, &message),
+        });
+        sigs.push_back(OperatorSignature {
+            operator: BytesN::from_array(&env, &pk1),
+            signature: sign(&env, &sk1, &message),
+        });
+
+        env.as_contract(&cid, || {
+            let approvers = verify_and_execute(&env, action.clone(), sigs, 1);
+            assert_eq!(approvers.len(), 2);
+            let log = get_log(&env);
+            assert_eq!(log.get(0).unwrap().action, action);
         });
     }
 

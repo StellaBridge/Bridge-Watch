@@ -3,9 +3,19 @@
 //! Allow querying multiple assets or bridges in one call to reduce overhead.
 //! Provides deterministic output with comprehensive error handling and size limits.
 
+extern crate std;
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Env, String, Vec,
 };
+
+/// Copy a Soroban string into a std string. This module only compiles for
+/// native tests, so std is available.
+fn to_std_string(value: &String) -> std::string::String {
+    let mut buf = std::vec![0u8; value.len() as usize];
+    value.copy_into_slice(&mut buf);
+    std::string::String::from_utf8_lossy(&buf).into_owned()
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -39,7 +49,7 @@ pub enum QueryResult {
     /// Successful query with data
     Success(String),
     /// Query failed with error message
-    Error(String),
+    Failure(String),
 }
 
 /// Batch query response with deterministic ordering
@@ -131,7 +141,7 @@ impl BatchQueryContract {
                     }
                     Err(e) => {
                         let error_msg = String::from_str(&env, e);
-                        results.push_back(QueryResult::Error(error_msg));
+                        results.push_back(QueryResult::Failure(error_msg));
                         error_count += 1;
                     }
                 }
@@ -172,7 +182,7 @@ impl BatchQueryContract {
                     }
                     Err(e) => {
                         let error_msg = String::from_str(&env, e);
-                        results.push_back(QueryResult::Error(error_msg));
+                        results.push_back(QueryResult::Failure(error_msg));
                         error_count += 1;
                     }
                 }
@@ -266,25 +276,31 @@ impl BatchQueryContract {
 
     fn serialize_asset_data(env: &Env, data: &AssetData) -> String {
         // Simple JSON-like serialization
-        let mut json = String::from_str(
+        String::from_str(
             env,
-            &format!(
+            &std::format!(
                 "{{\"asset_code\":\"{}\",\"name\":\"{}\",\"symbol\":\"{}\",\"issuer\":\"{}\",\"status\":\"{}\"}}",
-                data.asset_code, data.name, data.symbol, data.issuer, data.status
+                to_std_string(&data.asset_code),
+                to_std_string(&data.name),
+                to_std_string(&data.symbol),
+                to_std_string(&data.issuer),
+                to_std_string(&data.status)
             ),
-        );
-        json
+        )
     }
 
     fn serialize_bridge_data(env: &Env, data: &BridgeData) -> String {
         // Simple JSON-like serialization
-        let mut json = String::from_str(
+        String::from_str(
             env,
-            &format!(
+            &std::format!(
                 "{{\"bridge_id\":\"{}\",\"name\":\"{}\",\"source_chain\":\"{}\",\"dest_chain\":\"{}\",\"status\":\"{}\"}}",
-                data.bridge_id, data.name, data.source_chain, data.dest_chain, data.status
+                to_std_string(&data.bridge_id),
+                to_std_string(&data.name),
+                to_std_string(&data.source_chain),
+                to_std_string(&data.dest_chain),
+                to_std_string(&data.status)
             ),
-        );
-        json
+        )
     }
 }
