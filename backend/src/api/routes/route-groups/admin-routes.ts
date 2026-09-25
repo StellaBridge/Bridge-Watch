@@ -45,6 +45,8 @@ import { webhookIpAllowlistRoutes } from "../webhookIpAllowlist.routes.js";
 import { signedRequestVerificationRoutes } from "../signedRequestVerification.routes.js";
 // #1180 — Sensitive Field Access Reports
 import { sensitiveFieldAccessRoutes } from "../sensitiveFieldAccess.routes.js";
+// #1207 — OpenAPI Client Generation Workflow
+import { openApiClientGenRoutes } from "../openApiClientGen.routes.js";
 
 export async function registerAdminRoutes(server: FastifyInstance): Promise<void> {
   server.register(apiKeysRoutes, { prefix: "/api/v1/admin/api-keys" });
@@ -168,5 +170,10 @@ export async function registerAdminRoutes(server: FastifyInstance): Promise<void
   const { drainProtocolRoutes } = await import("../drainProtocol.routes.js");
   server.register(drainProtocolRoutes, {
     prefix: "/api/v1/admin/shutdown/drain",
+  });
+
+  // #1207 — OpenAPI Client Generation Workflow
+  server.register(openApiClientGenRoutes, {
+    prefix: "/api/v1/admin/openapi-client-gen",
   });
 }

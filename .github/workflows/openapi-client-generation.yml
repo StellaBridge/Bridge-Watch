@@ -1,0 +1,336 @@
+##
+# #1207 — OpenAPI Client Generation Workflow
+#
+# This workflow generates typed client SDKs from the live OpenAPI spec
+# produced by the Bridge-Watch backend (backend/docs/openapi.json).
+#
+# Triggers
+# ──────────────────────────────────────────────────────────────────────────────
+#  • push to main → auto-generate all enabled targets and open a PR
+#  • workflow_dispatch → run on-demand with optional overrides
+#  • schedule → weekly regeneration every Monday 03:00 UTC
+#
+# Outputs
+# ──────────────────────────────────────────────────────────────────────────────
+#  • Per-target directory under sdk/generated/<language>/
+#  • Pull-request with the diff (if changes exist)
+#  • GitHub Actions summary with generation report
+##
+name: OpenAPI Client Generation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/docs/openapi.json"
+      - "backend/src/config/openapi.ts"
+      - ".github/workflows/openapi-client-generation.yml"
+
+  schedule:
+    # Every Monday at 03:00 UTC
+    - cron: "0 3 * * 1"
+
+  workflow_dispatch:
+    inputs:
+      target_language:
+        description: "Generate only this language (leave blank for all)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - typescript
+          - python
+          - go
+          - java
+      generator_version:
+        description: "openapi-generator-cli version (blank = latest)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run — generate but do not open a PR"
+        required: false
+        default: "false"
+        type: boolean
+      open_pr:
+        description: "Open a pull request with the changes"
+        required: false
+        default: "true"
+        type: boolean
+
+env:
+  NODE_VERSION: "20"
+  # Default generator version; can be overridden via workflow_dispatch
+  DEFAULT_GENERATOR_VERSION: "7.7.0"
+  SPEC_PATH: backend/docs/openapi.json
+  OUTPUT_ROOT: sdk/generated
+
+jobs:
+  # ─── 1. Validate spec before generating ─────────────────────────────────────
+  validate-spec:
+    name: Validate OpenAPI spec
+    runs-on: ubuntu-latest
+    outputs:
+      spec_sha: ${{ steps.hash.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend (to regenerate spec if needed)
+        run: |
+          npm --workspace=backend run build || true
+          npm --workspace=backend run docs:generate || echo "docs:generate skipped (server not available in CI)"
+
+      - name: Check spec exists
+        run: |
+          if [ ! -f "${{ env.SPEC_PATH }}" ]; then
+            echo "::error::OpenAPI spec not found at ${{ env.SPEC_PATH }}"
+            exit 1
+          fi
+          echo "Spec found: ${{ env.SPEC_PATH }}"
+          wc -c < "${{ env.SPEC_PATH }}"
+
+      - name: Compute spec SHA-256
+        id: hash
+        run: |
+          sha=$(sha256sum "${{ env.SPEC_PATH }}" | awk '{print $1}')
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "OpenAPI spec SHA-256: ${sha}"
+
+      - name: Validate spec is valid JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('${{ env.SPEC_PATH }}', 'utf8')); console.log('✓ Valid JSON')"
+
+      - name: Validate OpenAPI version
+        run: |
+          version=$(node -e "const s=JSON.parse(require('fs').readFileSync('${{ env.SPEC_PATH }}','utf8')); console.log(s.openapi||s.swagger||'unknown')")
+          echo "OpenAPI version: $version"
+          if [[ "$version" != 3.* ]]; then
+            echo "::warning::Expected OpenAPI 3.x, got $version"
+          fi
+
+  # ─── 2. Matrix generation ────────────────────────────────────────────────────
+  generate-clients:
+    name: Generate ${{ matrix.language }} client
+    runs-on: ubuntu-latest
+    needs: validate-spec
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: typescript
+            generator: typescript-axios
+            output_dir: sdk/generated/typescript
+            package_name: "@bridge-watch/api-client"
+            additional_props: "supportsES6=true,npmName=@bridge-watch/api-client,npmVersion=0.1.0,withSeparateModelsAndApi=true,modelPropertyNaming=camelCase"
+          - language: python
+            generator: python
+            output_dir: sdk/generated/python
+            package_name: "bridge_watch_client"
+            additional_props: "packageName=bridge_watch_client,projectName=bridge-watch-client,packageVersion=0.1.0"
+          - language: go
+            generator: go
+            output_dir: sdk/generated/go
+            package_name: "bridgewatch"
+            additional_props: "packageName=bridgewatch,generateInterfaces=true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if filtering by language
+        if: ${{ github.event.inputs.target_language != '' && github.event.inputs.target_language != matrix.language }}
+        run: |
+          echo "Skipping ${{ matrix.language }} — target is ${{ github.event.inputs.target_language }}"
+          exit 0
+
+      - name: Set generator version
+        id: gen_version
+        run: |
+          ver="${{ github.event.inputs.generator_version }}"
+          if [ -z "$ver" ]; then
+            ver="${{ env.DEFAULT_GENERATOR_VERSION }}"
+          fi
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java (required by openapi-generator-cli)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install openapi-generator-cli
+        run: |
+          npm install -g @openapitools/openapi-generator-cli@2.13.4
+          openapi-generator-cli version-manager set ${{ steps.gen_version.outputs.version }}
+
+      - name: Prepare output directory
+        run: |
+          mkdir -p "${{ matrix.output_dir }}"
+
+      - name: Generate ${{ matrix.language }} client
+        id: generate
+        run: |
+          echo "Generating ${{ matrix.language }} client…"
+          openapi-generator-cli generate \
+            --input-spec "${{ env.SPEC_PATH }}" \
+            --generator-name "${{ matrix.generator }}" \
+            --output "${{ matrix.output_dir }}" \
+            --additional-properties="${{ matrix.additional_props }}" \
+            --skip-validate-spec \
+            2>&1 | tee /tmp/generate-${{ matrix.language }}.log
+
+          echo "Generation complete"
+
+      - name: Summarise diff
+        id: diff
+        run: |
+          added=$(git diff --diff-filter=A --name-only -- "${{ matrix.output_dir }}" | wc -l)
+          modified=$(git diff --diff-filter=M --name-only -- "${{ matrix.output_dir }}" | wc -l)
+          deleted=$(git diff --diff-filter=D --name-only -- "${{ matrix.output_dir }}" | wc -l)
+          echo "added=${added}" >> "$GITHUB_OUTPUT"
+          echo "modified=${modified}" >> "$GITHUB_OUTPUT"
+          echo "deleted=${deleted}" >> "$GITHUB_OUTPUT"
+          echo "### ${{ matrix.language }} client diff" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Change | Count |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Added  | ${added} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Modified | ${modified} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deleted | ${deleted} |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload generation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generation-log-${{ matrix.language }}
+          path: /tmp/generate-${{ matrix.language }}.log
+          retention-days: 7
+
+      - name: Upload generated client
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-client-${{ matrix.language }}
+          path: ${{ matrix.output_dir }}
+          retention-days: 7
+
+  # ─── 3. Open PR with changes ─────────────────────────────────────────────────
+  open-pr:
+    name: Open pull request
+    runs-on: ubuntu-latest
+    needs: generate-clients
+    # Only open a PR when:
+    #  • triggered by push to main or schedule (not dispatch with dry_run=true)
+    if: |
+      github.event.inputs.dry_run != 'true' &&
+      (github.event_name == 'push' || github.event_name == 'schedule' ||
+       github.event.inputs.open_pr == 'true')
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all generated clients
+        uses: actions/download-artifact@v4
+        with:
+          pattern: generated-client-*
+          merge-multiple: true
+          path: ${{ env.OUTPUT_ROOT }}
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git add "${{ env.OUTPUT_ROOT }}" || true
+          if git diff --cached --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected in generated clients"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            git diff --cached --stat
+          fi
+
+      - name: Configure git
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          SPEC_SHA="${{ needs.validate-spec.outputs.spec_sha }}"
+          SHORT_SHA="${SPEC_SHA:0:12}"
+          BRANCH="chore/openapi-clients-${SHORT_SHA}-$(date +'%Y%m%d%H%M%S')"
+          git checkout -b "$BRANCH"
+          git commit -m "chore: regenerate OpenAPI clients from spec ${SHORT_SHA}
+
+          Auto-generated by the OpenAPI Client Generation workflow (#1207).
+
+          Spec SHA-256: ${{ needs.validate-spec.outputs.spec_sha }}
+          Trigger: ${{ github.event_name }}
+          Run: ${{ github.run_id }}"
+          git push origin "$BRANCH"
+          echo "branch=${BRANCH}" >> "$GITHUB_ENV"
+
+      - name: Create pull request
+        if: steps.check_changes.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'chore: regenerate OpenAPI clients',
+              head: process.env.branch,
+              base: 'main',
+              body: [
+                '## OpenAPI Client Regeneration',
+                '',
+                'Auto-generated by the **OpenAPI Client Generation** workflow (#1207).',
+                '',
+                '| Property | Value |',
+                '|----------|-------|',
+                `| Spec SHA-256 | \`${{ needs.validate-spec.outputs.spec_sha }}\` |`,
+                `| Trigger | \`${{ github.event_name }}\` |`,
+                `| Run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |`,
+                '',
+                '### Generated targets',
+                '- `sdk/generated/typescript` (typescript-axios)',
+                '- `sdk/generated/python`',
+                '- `sdk/generated/go`',
+                '',
+                '### Review checklist',
+                '- [ ] Spot-check generated types against the API response shapes',
+                '- [ ] Verify no breaking changes in public client methods',
+                '- [ ] Ensure `package.json` / `pyproject.toml` / `go.mod` versions are correct',
+              ].join('\n'),
+              maintainer_can_modify: true,
+            });
+            core.notice(`Pull request created: ${pr.html_url}`);
+
+      - name: No changes summary
+        if: steps.check_changes.outputs.has_changes == 'false'
+        run: echo "No client changes to commit — generated output is already up to date."
+
+  # ─── 4. Notify on failure ────────────────────────────────────────────────────
+  notify-failure:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: [validate-spec, generate-clients, open-pr]
+    if: failure()
+    steps:
+      - name: Summarise failure
+        run: |
+          echo "## ❌ OpenAPI client generation failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Investigate the failing jobs above and re-run the workflow after fixing the issue." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Run: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "$GITHUB_STEP_SUMMARY"

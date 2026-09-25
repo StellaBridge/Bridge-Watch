@@ -99,6 +99,8 @@ const SessionDeviceManagement = lazy(() => import("./pages/SessionDeviceManageme
 const AdminImpersonationSafeguards = lazy(() => import("./pages/admin/AdminImpersonationSafeguards"));
 // #1184 — Queue Priority Fairness
 const QueueFairness = lazy(() => import("./pages/admin/QueueFairness"));
+// #1207 — OpenAPI Client Generation Workflow
+const OpenApiClientGen = lazy(() => import("./pages/admin/OpenApiClientGen"));
 
 function NotificationInitializer() {
   useNotifications();
@@ -221,6 +223,8 @@ function App() {
               <Route path="/admin/impersonation-safeguards" element={<AdminImpersonationSafeguards />} />
               {/* #1184 — Queue Priority Fairness */}
               <Route path="/admin/queue-fairness" element={<QueueFairness />} />
+              {/* #1207 — OpenAPI Client Generation Workflow */}
+              <Route path="/admin/openapi-client-gen" element={<OpenApiClientGen />} />
             </Route>
           </Routes>
         </Suspense>
