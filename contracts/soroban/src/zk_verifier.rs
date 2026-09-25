@@ -98,6 +98,24 @@ const PERSISTENT_TTL_BUMP: u32 = 2_073_600;
 #[contract]
 pub struct ZkVerifierContract;
 
+/// Copies a `String`'s bytes into a `Bytes` value. `soroban_sdk::String`
+/// does not implement `Into<Bytes>`, so string slices are copied
+/// element-by-element with `copy_into_slice` — matching the helper in
+/// `report_hash.rs` (issue #1238).
+fn str_to_bytes(env: &Env, s: &String) -> Bytes {
+    let len = s.len() as usize;
+    let mut buf = [0u8; 256];
+    let safe_len = len.min(256);
+    s.copy_into_slice(&mut buf[..safe_len]);
+    let mut result = Bytes::new(env);
+    let mut i = 0;
+    while i < safe_len {
+        result.push_back(buf[i]);
+        i += 1;
+    }
+    result
+}
+
 #[contractimpl]
 impl ZkVerifierContract {
     pub fn initialize(env: Env, admin: Address) {
@@ -216,8 +234,10 @@ impl ZkVerifierContract {
         }
 
         let mut attestation_payload = Bytes::new(&env);
-        attestation_payload.append(&public_inputs.bridge_id.clone().into());
-        attestation_payload.append(&public_inputs.asset_code.clone().into());
+        // `soroban_sdk::String` does not implement `Into<Bytes>`; copy the
+        // string bytes with the shared str_to_bytes helper (issue #1238).
+        attestation_payload.append(&str_to_bytes(&env, &public_inputs.bridge_id));
+        attestation_payload.append(&str_to_bytes(&env, &public_inputs.asset_code));
         attestation_payload.append(&Into::<Bytes>::into(proof.commitment_hash.clone()));
         attestation_payload.append(&Into::<Bytes>::into(BytesN::from_array(&env, &public_inputs.total_reserves.to_be_bytes())));
         attestation_payload.append(&Into::<Bytes>::into(BytesN::from_array(&env, &public_inputs.on_chain_supply.to_be_bytes())));
