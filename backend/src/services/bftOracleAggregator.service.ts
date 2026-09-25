@@ -39,6 +39,7 @@ export interface BftConsensusResult {
   consensusPrice: number;
   medianOfMediansPrice: number;
   weightedMedianPrice: number;
+  trimmedMeanPrice: number;
   meanPrice: number;
   stdDev: number;
   totalProviders: number;
@@ -53,9 +54,29 @@ export interface BftConsensusResult {
   timestamp: string;
 }
 
+/** Fraction of reports trimmed from each tail before averaging (issue #1261). */
+const TRIM_RATIO = 0.2;
+/** Observations deviating by more than this many sigma from the median are rejected (issue #1261). */
+const OUTLIER_SIGMA_THRESHOLD = 3.0;
+
 function mean(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+/**
+ * Sorts the reported values, trims the top and bottom `trimRatio` of the
+ * submissions and averages the remainder, so a single extreme report can
+ * no longer skew the mean (issue #1261).
+ */
+function trimmedMean(values: number[], trimRatio: number = TRIM_RATIO): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const trimCount = Math.floor(sorted.length * trimRatio);
+  if (sorted.length - 2 * trimCount <= 0) {
+    return median(sorted);
+  }
+  return mean(sorted.slice(trimCount, sorted.length - trimCount));
 }
 
 function stdDev(values: number[], mu?: number): number {
@@ -255,6 +276,7 @@ export class BftOracleAggregatorService {
         consensusPrice: 0,
         medianOfMediansPrice: 0,
         weightedMedianPrice: 0,
+        trimmedMeanPrice: 0,
         meanPrice: 0,
         stdDev: 0,
         totalProviders: totalN,
@@ -280,6 +302,10 @@ export class BftOracleAggregatorService {
 
     const initialConsensus = (initialMedMed + initialWeightedMed) / 2;
     const initialSigma = robustStdDev(initialPrices, initialConsensus);
+    // Outliers are measured against the median, not the mean, so a single
+    // extreme submission cannot drag the rejection boundary with it
+    // (issue #1261).
+    const initialCenter = median(initialPrices);
 
 
     const evaluatedSamples: EvaluatedOracleSample[] = [];
@@ -287,8 +313,8 @@ export class BftOracleAggregatorService {
 
     for (const item of validReports) {
       const p = item.report.price;
-      const z = initialSigma > 0 ? Math.abs((p - initialConsensus) / initialSigma) : 0;
-      const isOutlier = initialPrices.length >= 3 && z > 5.0;
+      const z = initialSigma > 0 ? Math.abs((p - initialCenter) / initialSigma) : 0;
+      const isOutlier = initialPrices.length >= 3 && z > OUTLIER_SIGMA_THRESHOLD;
 
       if (isOutlier) {
         slashedProviders.push(item.report.providerKey);
@@ -321,7 +347,9 @@ export class BftOracleAggregatorService {
     const finalWeightedMed = weightedStakeMedian(
       nonOutliers.map((s) => ({ price: s.price, weight: s.stakeWeight }))
     );
-    const finalConsensus = nonOutliers.length > 0 ? (finalMedMed + finalWeightedMed) / 2 : initialConsensus;
+    // 20% trimmed mean of the surviving reports (issue #1261)
+    const finalTrimmedMean = trimmedMean(finalPrices);
+    const finalConsensus = nonOutliers.length > 0 ? (finalMedMed + finalWeightedMed + finalTrimmedMean) / 3 : initialConsensus;
     const finalMean = mean(finalPrices);
     const finalSigma = stdDev(finalPrices, finalMean);
 
@@ -334,6 +362,7 @@ export class BftOracleAggregatorService {
       consensusPrice: finalConsensus,
       medianOfMediansPrice: finalMedMed,
       weightedMedianPrice: finalWeightedMed,
+      trimmedMeanPrice: finalTrimmedMean,
       meanPrice: finalMean,
       stdDev: finalSigma,
       totalProviders: totalN,
