@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DataCorrections } from "../components/DataCorrections";
 import {
   CartesianGrid,
   Line,
@@ -764,6 +765,9 @@ export default function Reconciliation() {
           </div>
         </section>
       )}
+
+      {/* #1241 — Mount orphaned DataCorrections panel */}
+      <DataCorrections />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNotificationContext } from "../hooks/useNotificationContext";
 import { useToast } from "../context/ToastContextValue";
+import { NotificationAnalyticsDashboard } from "../components/NotificationAnalyticsDashboard";
 
 type Channel = "in_app" | "email" | "webhook";
 type Priority = "all" | "high_critical" | "critical_only";
@@ -251,6 +252,9 @@ export default function NotificationPreferencesPage() {
           ))}
         </div>
       </section>
+
+      {/* #1241 — Mount orphaned NotificationAnalyticsDashboard panel */}
+      <NotificationAnalyticsDashboard />
     </div>
   );
 }

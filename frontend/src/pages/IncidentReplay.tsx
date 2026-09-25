@@ -1,6 +1,7 @@
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import IncidentReplayPlayer from "../components/IncidentReplayPlayer";
 import { useIncidentReplay } from "../hooks/useIncidentReplay";
+import { ReplayComparison } from "../components/ReplayComparison";
 
 export default function IncidentReplay() {
   const { id } = useParams<{ id: string }>();
@@ -83,6 +84,9 @@ export default function IncidentReplay() {
           error={error.message}
         />
       )}
+
+      {/* #1241 — Mount orphaned ReplayComparison panel */}
+      <ReplayComparison />
     </div>
   );
 }
