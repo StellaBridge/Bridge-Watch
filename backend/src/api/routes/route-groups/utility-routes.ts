@@ -13,6 +13,7 @@ import { externalDependenciesRoutes } from "../externalDependencies.routes.js";
 import { eventReplayRoutes } from "../eventReplay.routes.js";
 import { eventFederationRoutes } from "../eventFederation.routes.js";
 import jobsRoutes from "../jobs.js";
+import { schedulesRoutes } from "../schedules.routes.js";
 import { platformContractsRoutes } from "../platformContracts.routes.js";
 import { liquidityRouteSimulationRoutes } from "../liquidityRouteSimulation.routes.js";
 import { operatorCapacityMetricsRoutes } from "../operatorCapacityMetrics.routes.js";
@@ -38,6 +39,7 @@ export async function registerUtilityRoutes(server: FastifyInstance): Promise<vo
   server.register(eventReplayRoutes, { prefix: "/api/v1/events/replay" });
   server.register(eventFederationRoutes, { prefix: "/api/v1/event-federation" });
   server.register(jobsRoutes, { prefix: "/api/v1/jobs" });
+  server.register(schedulesRoutes, { prefix: "/api/v1/schedules" });
   server.register(platformContractsRoutes, { prefix: "/api/v1/platform" });
   server.register(liquidityRouteSimulationRoutes, {
     prefix: "/api/v1/liquidity/simulation",

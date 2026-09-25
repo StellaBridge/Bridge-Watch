@@ -152,6 +152,30 @@ export class JobQueue {
     return combined;
   }
 
+  public async getRepeatableJobs() {
+    const keys = Object.keys(this.queues);
+    const entries: Array<{
+      queue: string;
+      name: string;
+      pattern: string | null;
+      every: number | null;
+      nextRunAt: Date | null;
+    }> = [];
+    for (const k of keys) {
+      const jobs: any[] = await this.queues[k].getRepeatableJobs();
+      for (const j of jobs) {
+        entries.push({
+          queue: k,
+          name: typeof j.name === "string" ? j.name : String(j.key ?? "unknown"),
+          pattern: typeof j.pattern === "string" ? j.pattern : null,
+          every: typeof j.every === "number" ? j.every : null,
+          nextRunAt: typeof j.next === "number" ? new Date(j.next) : null,
+        });
+      }
+    }
+    return entries;
+  }
+
   public async stop() {
     for (const w of Object.values(this.workers)) {
       await w.close();
