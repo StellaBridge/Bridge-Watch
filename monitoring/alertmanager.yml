@@ -12,6 +12,11 @@ route:
         - severity="critical"
       receiver: pagerduty
       continue: true
+    # #1245 — Bridge health anomalies also dispatch to Discord and Telegram
+    - matchers:
+        - alertname=~"BridgeReserveMismatchDetected|HorizonCursorLagHigh|DbPoolExhaustionWarning|CircuitBreakerTripped"
+      receiver: bridge-dispatch
+      continue: true
     - matchers:
         - team="bridge"
       receiver: bridge-team
@@ -48,4 +53,14 @@ receivers:
     slack_configs:
       - api_url: "https://hooks.slack.com/services/REPLACE/ME"
         channel: "#api-alerts"
+        send_resolved: true
+
+  # #1245 — Discord and Telegram dispatch channels for bridge health alerts
+  - name: bridge-dispatch
+    discord_configs:
+      - url: "https://discord.com/api/webhooks/REPLACE/ME"
+        send_resolved: true
+    telegram_configs:
+      - bot_token: "REPLACE_WITH_TELEGRAM_BOT_TOKEN"
+        chat_id: -1000000000000
         send_resolved: true

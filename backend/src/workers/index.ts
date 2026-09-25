@@ -22,6 +22,7 @@ import { processSearchIndexRebuild } from "./searchIndexRebuild.job.js";
 import { processIncidentSlaBreach } from "./incidentSlaBreach.job.js";
 import { processProviderCredentialRotation } from "./providerCredentialRotation.job.js";
 import { processApiContractMonitor } from "./apiContractMonitor.job.js";
+import { scheduleEvmReserveAttestations } from "./evmReserveAttestation.worker.js";
 
 export async function initJobSystem() {
   const jobQueue = JobQueue.getInstance();
@@ -210,6 +211,9 @@ export async function initJobSystem() {
 
   // External API contract monitoring: every 15 minutes
   await jobQueue.addRepeatableJob("api-contract-monitor", {}, "*/15 * * * *");
+
+  // #1243 — EVM reserve attestation: poll lock contracts every hour
+  await scheduleEvmReserveAttestations();
 
   logger.info("Scheduled job system initialized");
 }

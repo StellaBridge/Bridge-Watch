@@ -47,6 +47,13 @@ import { signedRequestVerificationRoutes } from "../signedRequestVerification.ro
 import { sensitiveFieldAccessRoutes } from "../sensitiveFieldAccess.routes.js";
 // #1207 — OpenAPI Client Generation Workflow
 import { openApiClientGenRoutes } from "../openApiClientGen.routes.js";
+// #1240 — Register orphaned route modules
+import { loginRiskSignalsRoutes } from "../loginRiskSignals.js";
+import { complianceReportRoutes } from "../complianceReports.routes.js";
+import { complianceRetentionExceptionRoutes } from "../complianceRetentionExceptions.routes.js";
+import { communityAnnotationModerationRoutes } from "../communityAnnotationModeration.routes.js";
+import { outboxAdminRoutes } from "../outbox-admin.js";
+import { reportTemplateVersionRoutes } from "../reportTemplateVersion.routes.js";
 
 export async function registerAdminRoutes(server: FastifyInstance): Promise<void> {
   server.register(apiKeysRoutes, { prefix: "/api/v1/admin/api-keys" });
@@ -175,5 +182,19 @@ export async function registerAdminRoutes(server: FastifyInstance): Promise<void
   // #1207 — OpenAPI Client Generation Workflow
   server.register(openApiClientGenRoutes, {
     prefix: "/api/v1/admin/openapi-client-gen",
+  });
+
+  // #1240 — Register orphaned route modules
+  server.register(loginRiskSignalsRoutes, {
+    prefix: "/api/v1/admin/login-risk-signals",
+  });
+  server.register(complianceReportRoutes, { prefix: "/api/v1/admin" });
+  server.register(complianceRetentionExceptionRoutes, { prefix: "/api/v1/admin" });
+  server.register(communityAnnotationModerationRoutes, {
+    prefix: "/api/v1/admin/community-annotations",
+  });
+  server.register(outboxAdminRoutes, { prefix: "/api/v1/admin/outbox" });
+  server.register(reportTemplateVersionRoutes, {
+    prefix: "/api/v1/admin/report-templates",
   });
 }

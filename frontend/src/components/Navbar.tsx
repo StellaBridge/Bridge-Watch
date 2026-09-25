@@ -69,6 +69,18 @@ export default function Navbar() {
                     </Link>
                   );
                 })}
+                {/* #1241 — Public service status & uptime page */}
+                <Link
+                  to="/status"
+                  className={`rounded-md px-3 py-2 text-sm font-medium transition ${
+                    location.pathname === "/status"
+                      ? "bg-stellar-blue/20 text-white"
+                      : "text-stellar-text-secondary hover:bg-stellar-dark hover:text-white"
+                  }`}
+                  aria-current={location.pathname === "/status" ? "page" : undefined}
+                >
+                  Status
+                </Link>
               </div>
             </div>
 

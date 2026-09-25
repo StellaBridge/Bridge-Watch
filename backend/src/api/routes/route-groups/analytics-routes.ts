@@ -13,6 +13,8 @@ import { liquidityHeatmapExportRoutes } from "../liquidityHeatmapExport.routes.j
 // #1151 — Chart Data Sampling Controls
 import { chartSamplingControlsRoutes } from "../chartSamplingControls.routes.js";
 import { operationalIntelligenceRoutes } from "../operationalIntelligence.routes.js";
+// #1240 — Register orphaned route modules
+import { notificationAnalyticsRoutes } from "../notificationAnalytics.js";
 
 export async function registerAnalyticsRoutes(server: FastifyInstance): Promise<void> {
   server.register(analyticsRoutes, { prefix: "/api/v1/analytics" });
@@ -40,4 +42,7 @@ export async function registerAnalyticsRoutes(server: FastifyInstance): Promise<
   server.register(chartSamplingControlsRoutes, {
     prefix: "/api/v1/chart-sampling",
   });
+
+  // #1240 — Register orphaned route modules
+  server.register(notificationAnalyticsRoutes, { prefix: "/api/v1/notifications" });
 }

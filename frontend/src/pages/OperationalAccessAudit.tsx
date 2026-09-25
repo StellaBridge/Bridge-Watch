@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import UserActivityHeatmap from "../components/UserActivityHeatmap";
+import { LoginRiskSignals } from "../components/LoginRiskSignals";
 
 const API = "/api/v1/admin/access-audit";
 
@@ -479,6 +480,11 @@ export default function OperationalAccessAudit() {
       {tab === "Roles" && <RolesTab />}
       {tab === "Sessions" && <SessionsTab />}
       {tab === "Activity Heatmap" && <UserActivityHeatmap />}
+
+      {/* #1241 — Mount orphaned LoginRiskSignals panel */}
+      <div className="mt-6">
+        <LoginRiskSignals />
+      </div>
     </div>
   );
 }

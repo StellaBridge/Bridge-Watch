@@ -101,6 +101,15 @@ const AdminImpersonationSafeguards = lazy(() => import("./pages/admin/AdminImper
 const QueueFairness = lazy(() => import("./pages/admin/QueueFairness"));
 // #1207 — OpenAPI Client Generation Workflow
 const OpenApiClientGen = lazy(() => import("./pages/admin/OpenApiClientGen"));
+// #1241 — Integrate orphaned pages
+const Status = lazy(() => import("./pages/Status"));
+const OperationsConsole = lazy(() => import("./pages/OperationsConsole"));
+const Dependencies = lazy(() => import("./pages/Dependencies"));
+const AllowlistManagement = lazy(() => import("./pages/admin/AllowlistManagement"));
+const ExportQuotas = lazy(() => import("./pages/admin/ExportQuotas"));
+const RpcCapabilities = lazy(() => import("./pages/admin/RpcCapabilities"));
+const TokenDecimalAlerts = lazy(() => import("./pages/admin/TokenDecimalAlerts"));
+const AuditTrailPage = lazy(() => import("./pages/admin/audit/AuditTrailPage"));
 
 function NotificationInitializer() {
   useNotifications();
@@ -225,6 +234,15 @@ function App() {
               <Route path="/admin/queue-fairness" element={<QueueFairness />} />
               {/* #1207 — OpenAPI Client Generation Workflow */}
               <Route path="/admin/openapi-client-gen" element={<OpenApiClientGen />} />
+              {/* #1241 — Integrate orphaned pages */}
+              <Route path="/status" element={<Status />} />
+              <Route path="/operations-console" element={<OperationsConsole />} />
+              <Route path="/dependencies" element={<Dependencies />} />
+              <Route path="/admin/allowlist-management" element={<AllowlistManagement />} />
+              <Route path="/admin/export-quotas" element={<ExportQuotas />} />
+              <Route path="/admin/rpc-capabilities" element={<RpcCapabilities />} />
+              <Route path="/admin/token-decimal-alerts" element={<TokenDecimalAlerts />} />
+              <Route path="/admin/audit-trail" element={<AuditTrailPage />} />
             </Route>
           </Routes>
         </Suspense>

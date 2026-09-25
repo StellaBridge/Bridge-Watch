@@ -15,6 +15,7 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus-alerts.yml:/etc/prometheus/prometheus-alerts.yml:ro
       - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/bridge-health-alerts.yml:ro
       - prometheus-data:/prometheus
     depends_on:
       - alertmanager

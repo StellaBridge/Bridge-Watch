@@ -1,0 +1,73 @@
+# Bridge health alert rules (#1245).
+#
+# Critical bridge anomalies evaluated against backend Prometheus metrics and
+# routed through Alertmanager to the Discord and Telegram dispatch channels
+# (see alertmanager.yml). Metric sources:
+#   - bridge_reserve_ratio / bridge_reserve_mismatch_detected:
+#       emitted by the EVM reserve attestation worker (#1243).
+#   - db_connections_active / db_connections_idle:
+#       emitted by the backend metrics endpoint (db pool gauges).
+#   - circuit_breaker_trips_total:
+#       emitted by the backend circuit breaker service.
+#   - horizon_cursor_last_sync_timestamp:
+#       emitted by the Horizon cursor audit service (unix seconds).
+groups:
+  - name: bridge-watch-bridge-health
+    interval: 30s
+    rules:
+      - alert: BridgeReserveMismatchDetected
+        expr: max by (bridge_id, asset_code) (bridge_reserve_mismatch_detected) == 1
+        for: 2m
+        labels:
+          severity: critical
+          service: backend
+          team: bridge
+        annotations:
+          summary: "Bridge reserve mismatch detected for {{ $labels.asset_code }}"
+          description: >
+            On-chain EVM reserves for {{ $labels.bridge_id }} / {{ $labels.asset_code }}
+            are below the committed reserves (ratio < 1.00) for more than 2 minutes.
+            Dispatched to Discord and Telegram via Alertmanager.
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#bridgereservemismatchdetected"
+
+      - alert: HorizonCursorLagHigh
+        expr: time() - max by (cursor_key) (horizon_cursor_last_sync_timestamp) > 300
+        for: 2m
+        labels:
+          severity: warning
+          service: backend
+          team: bridge
+        annotations:
+          summary: "Horizon cursor {{ $labels.cursor_key }} is lagging"
+          description: >
+            The Horizon cursor {{ $labels.cursor_key }} has not advanced for more
+            than 5 minutes, so bridge health data may be stale.
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#horizoncursorlaghigh"
+
+      - alert: DbPoolExhaustionWarning
+        expr: (db_connections_active / clamp_min(db_connections_active + db_connections_idle, 1)) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+          team: bridge
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: >
+            More than 85% of database connections have been active for 5 minutes;
+            analysis jobs and API requests may start failing on pool acquisition.
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#dbpoolexhaustionwarning"
+
+      - alert: CircuitBreakerTripped
+        expr: increase(circuit_breaker_trips_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: backend
+          team: bridge
+        annotations:
+          summary: "Circuit breaker tripped for {{ $labels.bridge_id }}"
+          description: >
+            A circuit breaker tripped within the last 5 minutes (reason:
+            {{ $labels.reason }}); bridge operations through it are halted.
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#circuitbreakertripped"
