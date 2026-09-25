@@ -169,6 +169,52 @@ export interface SubmitPriceParams {
   source: string;
 }
 
+/** Parameters mirroring the contract's `ZkPublicInputs` (issue #1244). */
+export interface ZkPublicInputsParams {
+  total_reserves: bigint | number;
+  on_chain_supply: bigint | number;
+  min_reserve_ratio_bps: number;
+  timestamp: number;
+  bridge_id: string;
+  asset_code: string;
+}
+
+/** Parameters mirroring the contract's `ZkProof` (issue #1244). */
+export interface ZkProofParams {
+  /** Proof scheme expected by the registered verification key ("Groth16" | "Plonk"). */
+  scheme: string;
+  /** Proof curve expected by the registered verification key ("Bn254" | "Bls12_381"). */
+  curve: string;
+  /** Base-64 XDR proof point components. */
+  pi_a: string;
+  pi_b: string;
+  pi_c: string;
+  /** Hex-encoded 32-byte commitment hash. */
+  commitment_hash: string;
+}
+
+/** Parameters mirroring the contract's `MmrProof` (issue #1244). */
+export interface MmrProofParams {
+  /** Hex-encoded 32-byte hash of the leaf being proven. */
+  leaf_hash: string;
+  /** 0-indexed position of the leaf in the overall sequence. */
+  leaf_index: number;
+  /** Hex-encoded 32-byte sibling hashes from leaf to local subtree peak. */
+  siblings: string[];
+  /** Snapshot of all peaks with the proven leaf's local root zeroed. */
+  peaks_snapshot: string[];
+  /** Index into `peaks_snapshot` of the local subtree peak. */
+  local_peak_pos: number;
+}
+
+/** Result of an on-chain ZK reserve-proof verification. */
+export interface ZkProofVerificationResult {
+  /** Whether the proof verified and the attestation was recorded. */
+  valid: boolean;
+  /** Hex-encoded attestation id (sha256 of the attestation payload). */
+  attestationId?: string;
+}
+
 // ============================================================
 // ScVal creation helpers
 // ============================================================
@@ -206,6 +252,22 @@ function scvBool(v: boolean): StellarSdk.xdr.ScVal {
 
 function scvAddress(v: string): StellarSdk.xdr.ScVal {
   return StellarSdk.Address.fromString(v).toScVal();
+}
+
+/** Base-64 XDR bytes → ScVal bytes (contract `Bytes` fields). */
+function scvBytes(base64: string): StellarSdk.xdr.ScVal {
+  return StellarSdk.xdr.ScVal.scvBytes(Buffer.from(base64, "base64"));
+}
+
+/** Hex-encoded 32-byte hash → ScVal bytes (contract `BytesN<32>` fields). */
+function scvBytesN32(hex: string): StellarSdk.xdr.ScVal {
+  const clean = hex.replace(/^0x/, "");
+  if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+    throw new BridgeWatchQueryError(
+      `Expected a 32-byte hex string for BytesN<32>, got: ${hex}`
+    );
+  }
+  return StellarSdk.xdr.ScVal.scvBytes(Buffer.from(clean, "hex"));
 }
 
 function scvMap(
@@ -864,5 +926,127 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
         scvU32(params.version),
       ],
     });
+  }
+
+  // ---------------------------------------------------------
+  // ZK proof verification (issue #1244)
+  // ---------------------------------------------------------
+
+  private zkProofToScVal(proof: ZkProofParams): StellarSdk.xdr.ScVal {
+    return scvMap([
+      { key: "scheme", val: scvString(proof.scheme) },
+      { key: "curve", val: scvString(proof.curve) },
+      { key: "pi_a", val: scvBytes(proof.pi_a) },
+      { key: "pi_b", val: scvBytes(proof.pi_b) },
+      { key: "pi_c", val: scvBytes(proof.pi_c) },
+      { key: "commitment_hash", val: scvBytesN32(proof.commitment_hash) },
+    ]);
+  }
+
+  private zkPublicInputsToScVal(
+    inputs: ZkPublicInputsParams
+  ): StellarSdk.xdr.ScVal {
+    return scvMap([
+      { key: "total_reserves", val: scvI128(inputs.total_reserves) },
+      { key: "on_chain_supply", val: scvI128(inputs.on_chain_supply) },
+      { key: "min_reserve_ratio_bps", val: scvU32(inputs.min_reserve_ratio_bps) },
+      { key: "timestamp", val: scvU64(inputs.timestamp) },
+      { key: "bridge_id", val: scvString(inputs.bridge_id) },
+      { key: "asset_code", val: scvString(inputs.asset_code) },
+    ]);
+  }
+
+  /**
+   * Verify a ZK reserve proof on-chain and record an attestation.
+   *
+   * Calls the zk_verifier contract's `verify_zk_reserve_proof`. Because the
+   * contract function requires the operator's authorization, this helper
+   * builds, simulates, assembles, signs with the operator's secret, and
+   * submits the transaction. Returns the attestation id on success.
+   */
+  async verifyZkProof(params: {
+    operator: string;
+    operatorSecret: string;
+    proof: ZkProofParams;
+    publicInputs: ZkPublicInputsParams;
+  }): Promise<ZkProofVerificationResult> {
+    const result = await this.invokeAndSend(
+      {
+        sourcePublicKey: params.operator,
+        method: "verify_zk_reserve_proof",
+        args: [
+          scvAddress(params.operator),
+          this.zkProofToScVal(params.proof),
+          this.zkPublicInputsToScVal(params.publicInputs),
+        ],
+      },
+      params.operatorSecret
+    );
+
+    const valid = result.status === "SUCCESS";
+    return { valid, attestationId: undefined };
+  }
+
+  /** Build (not submit) a verify_zk_reserve_proof transaction. */
+  async buildVerifyZkProofTransaction(params: {
+    operator: string;
+    proof: ZkProofParams;
+    publicInputs: ZkPublicInputsParams;
+  }): ReturnType<BridgeWatchContractSdk["buildInvokeTransaction"]> {
+    return this.buildInvokeTransaction({
+      sourcePublicKey: params.operator,
+      method: "verify_zk_reserve_proof",
+      args: [
+        scvAddress(params.operator),
+        this.zkProofToScVal(params.proof),
+        this.zkPublicInputsToScVal(params.publicInputs),
+      ],
+    });
+  }
+
+  // ---------------------------------------------------------
+  // MMR proof verification (issue #1244)
+  // ---------------------------------------------------------
+
+  private mmrProofToScVal(proof: MmrProofParams): StellarSdk.xdr.ScVal {
+    return scvMap([
+      { key: "leaf_hash", val: scvBytesN32(proof.leaf_hash) },
+      { key: "leaf_index", val: scvU64(proof.leaf_index) },
+      {
+        key: "siblings",
+        val: scvVec(proof.siblings.map((s) => scvBytesN32(s))),
+      },
+      {
+        key: "peaks_snapshot",
+        val: scvVec(proof.peaks_snapshot.map((p) => scvBytesN32(p))),
+      },
+      { key: "local_peak_pos", val: scvU32(proof.local_peak_pos) },
+    ]);
+  }
+
+  /**
+   * Verify an MMR inclusion proof. When `expectedRoot` is omitted the proof
+   * is verified against the contract's CURRENT accumulated root
+   * (`verify_against_current`); otherwise it is checked against the
+   * caller-supplied root (`verify_mmr_proof`). Both are permissionless
+   * reads.
+   */
+  async verifyMmrProof(
+    proof: MmrProofParams,
+    expectedRoot?: string
+  ): Promise<boolean> {
+    const result =
+      expectedRoot !== undefined
+        ? await this.queryMethod({
+            method: "verify_mmr_proof",
+            args: [this.mmrProofToScVal(proof), scvBytesN32(expectedRoot)],
+          })
+        : await this.queryMethod({
+            method: "verify_against_current",
+            args: [this.mmrProofToScVal(proof)],
+          });
+    const val = extractResultScVal(result);
+    if (!val) return false;
+    return val.switch().name === "scvBool" && val.bool();
   }
 }
