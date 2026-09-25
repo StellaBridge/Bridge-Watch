@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { BridgeWatchContractSdk } from "./client";
 import { BridgeWatchConnectionError } from "./errors";
-import type { BridgeWatchSdkConfig } from "./types";
+import type { BackoffState, BridgeWatchSdkConfig } from "./types";
 
 const testConfig: BridgeWatchSdkConfig = {
   rpcUrl: "https://testnet.sorobanrpc.com",
@@ -307,5 +307,167 @@ describe("BridgeWatchContractSdk - subscribeToEvents with exponential backoff", 
     expect(onError).toHaveBeenCalledTimes(1);
 
     subscription.unsubscribe();
+  });
+});
+
+// ── Auto-reconnecting WebSocket subscription (issue #1244) ───────────────────
+
+describe("BridgeWatchContractSdk - auto-reconnecting WebSocket (issue #1244)", () => {
+  class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = 1;
+    onopen: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: ((e: unknown) => void) | null = null;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    sent: string[] = [];
+    closed = false;
+
+    constructor(public url: string) {
+      FakeWebSocket.instances.push(this);
+    }
+
+    send(data: string) {
+      this.sent.push(data);
+    }
+
+    close() {
+      this.closed = true;
+    }
+
+    // Test helpers to simulate the socket lifecycle.
+    open() {
+      this.onopen?.();
+    }
+
+    message(payload: unknown) {
+      this.onmessage?.({ data: JSON.stringify(payload) });
+    }
+
+    fail() {
+      this.onerror?.(new Error("boom"));
+      this.onclose?.();
+    }
+  }
+
+  const wsConfig = {
+    rpcUrl: "https://rpc.example.com",
+    contractId: "CCONTRACT123",
+    networkPassphrase: "Test SDF Network ; September 2015",
+  } as never;
+
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("subscribes on open, resuming from startLedger", async () => {
+    vi.useFakeTimers();
+    const sdk = new BridgeWatchContractSdk(wsConfig);
+    const events: unknown[] = [];
+
+    sdk.subscribeToEventsWebSocket({
+      wsUrl: "wss://events.example.com",
+      startLedger: 42,
+      onEvent: (e) => events.push(e),
+    });
+
+    const socket = FakeWebSocket.instances[0];
+    socket.open();
+
+    expect(JSON.parse(socket.sent[0])).toMatchObject({
+      action: "subscribe",
+      startLedger: 42,
+    });
+    vi.useRealTimers();
+  });
+
+  it("tracks the last received ledger and resumes from it on reconnect", async () => {
+    vi.useFakeTimers();
+    const sdk = new BridgeWatchContractSdk(wsConfig);
+    const events: unknown[] = [];
+
+    sdk.subscribeToEventsWebSocket({
+      wsUrl: "wss://events.example.com",
+      startLedger: 10,
+      minBackoffMs: 100,
+      onEvent: (e) => events.push(e),
+    });
+
+    let socket = FakeWebSocket.instances[0];
+    socket.open();
+    socket.message({ event: { type: "lock" }, latestLedger: 55 });
+    expect(events).toHaveLength(1);
+
+    // Drop the connection → exponential backoff → reconnect.
+    socket.fail();
+    await vi.advanceTimersByTimeAsync(150);
+
+    socket = FakeWebSocket.instances[1];
+    socket.open();
+
+    // The resume message carries the last received ledger, not the start.
+    expect(JSON.parse(socket.sent[0])).toMatchObject({
+      action: "subscribe",
+      startLedger: 55,
+    });
+    vi.useRealTimers();
+  });
+
+  it("applies exponential backoff with jitter between reconnects", async () => {
+    vi.useFakeTimers();
+    const sdk = new BridgeWatchContractSdk(wsConfig);
+    const states: BackoffState[] = [];
+
+    sdk.subscribeToEventsWebSocket({
+      wsUrl: "wss://events.example.com",
+      minBackoffMs: 1000,
+      maxBackoffMs: 8000,
+      onEvent: () => undefined,
+      onBackoffStateChange: (s) => states.push(s),
+    });
+
+    FakeWebSocket.instances[0].fail();
+    // 1st failure: ~1000ms backoff.
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(FakeWebSocket.instances.length).toBe(2);
+
+    FakeWebSocket.instances[1].fail();
+    // 2nd failure: ~2000ms backoff.
+    await vi.advanceTimersByTimeAsync(2200);
+    expect(FakeWebSocket.instances.length).toBe(3);
+
+    const backoffs = states.filter((s) => s.isBackingOff);
+    expect(backoffs[0].currentBackoffMs).toBe(1000);
+    expect(backoffs[1].currentBackoffMs).toBe(2000);
+    vi.useRealTimers();
+  });
+
+  it("unsubscribe stops reconnects and closes the socket", () => {
+    vi.useFakeTimers();
+    const sdk = new BridgeWatchContractSdk(wsConfig);
+
+    const subscription = sdk.subscribeToEventsWebSocket({
+      wsUrl: "wss://events.example.com",
+      onEvent: () => undefined,
+    });
+
+    const socket = FakeWebSocket.instances[0];
+    socket.open();
+    subscription.unsubscribe();
+
+    expect(socket.closed).toBe(true);
+    const count = FakeWebSocket.instances.length;
+    socket.fail();
+    vi.advanceTimersByTime(10_000);
+    expect(FakeWebSocket.instances.length).toBe(count); // no reconnect
+    vi.useRealTimers();
   });
 });
