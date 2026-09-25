@@ -1237,8 +1237,8 @@ mod tests {
     fn test_get_registered_pools_multiple() {
         let env = setup();
 
-        for i in 0..3 {
-            let pool_id = String::from_str(&env, &format!("POOL_{}", i));
+        for name in ["POOL_0", "POOL_1", "POOL_2"] {
+            let pool_id = String::from_str(&env, name);
             record_pool_state(
                 &env,
                 pool_id,

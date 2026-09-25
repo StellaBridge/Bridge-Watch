@@ -17,8 +17,10 @@
 //! - Cross-contract limit enforcement
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
 };
+
+use crate::asset_registry::AssetRegistryContractClient;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -37,7 +39,17 @@ pub const BPS_DENOM: u64 = 10_000;
 /// Default cooldown period after a limit breach (1 hour).
 pub const DEFAULT_COOLDOWN_SECS: u64 = 3_600;
 
-/// Default daily transfer limit (value-based, in smallest unit).
+/// Decimal basis every value limit is expressed in (issue #1248). Amounts of
+/// assets with more or fewer decimals are normalized to this basis before
+/// they are compared against a limit, so `DEFAULT_DAILY_LIMIT` means 1 000
+/// tokens for a 6-decimal stablecoin, a 7-decimal Stellar asset and an
+/// 18-decimal bridged ERC-20 alike.
+pub const BASE_DECIMALS: u32 = 6;
+/// Largest decimal count an asset may declare; 10^38 is the last power of ten
+/// that fits in an i128, and no live asset uses more than 24.
+pub const MAX_ASSET_DECIMALS: u32 = 38;
+
+/// Default daily transfer limit (value-based, in `BASE_DECIMALS` units).
 pub const DEFAULT_DAILY_LIMIT: i128 = 1_000_000_000; // 1 000 tokens (with 6 decimals)
 /// Default weekly transfer limit.
 pub const DEFAULT_WEEKLY_LIMIT: i128 = 5_000_000_000;
@@ -96,6 +108,14 @@ pub enum RateLimitError {
     InvalidRiskScore = 14,
     UserNotFound = 15,
     EmergencyModeActive = 16,
+    /// Asset declares more than `MAX_ASSET_DECIMALS` decimals.
+    InvalidDecimals = 17,
+    /// Normalizing the amount to `BASE_DECIMALS` overflowed i128.
+    AmountOverflow = 18,
+    /// The asset registry has no entry for the asset code.
+    AssetNotRegistered = 19,
+    /// No asset registry address has been configured.
+    AssetRegistryNotSet = 20,
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +312,8 @@ pub enum DataKey {
     CooldownDuration,
     /// Default user limits applied when no custom limits are set.
     DefaultLimits,
+    /// Address of the AssetRegistry consulted for asset decimals.
+    AssetRegistry,
 }
 
 // ---------------------------------------------------------------------------
@@ -942,6 +964,92 @@ impl RateLimiterContract {
     /// Cross-contract limit check. Another contract can call this to verify
     /// a user is within limits before executing a transfer.
     ///
+    // =======================================================================
+    // Asset-aware limits (issue #1248)
+    // =======================================================================
+
+    /// Point the limiter at the AssetRegistry whose `decimals` are used to
+    /// normalize per-asset amounts (admin only).
+    pub fn set_asset_registry(
+        env: Env,
+        admin: Address,
+        registry: Address,
+    ) -> Result<(), RateLimitError> {
+        Self::require_admin(&env, &admin)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::AssetRegistry, &registry);
+        env.events().publish((symbol_short!("rl_reg"),), registry);
+        Ok(())
+    }
+
+    /// The configured AssetRegistry address, if any.
+    pub fn get_asset_registry(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::AssetRegistry)
+    }
+
+    /// Scale `amount` from an asset with `decimals` decimals to the
+    /// `BASE_DECIMALS` basis the limits are expressed in.
+    ///
+    /// Scaling down rounds up, so the smallest positive amount of an
+    /// 18-decimal asset still counts as one base unit; without that, transfers
+    /// below 10^12 wei would consume nothing and slip past every limit.
+    /// Scaling up is checked and fails with `AmountOverflow` instead of
+    /// wrapping.
+    pub fn normalize_amount(amount: i128, decimals: u32) -> Result<i128, RateLimitError> {
+        if decimals > MAX_ASSET_DECIMALS {
+            return Err(RateLimitError::InvalidDecimals);
+        }
+        if amount <= 0 {
+            return Err(RateLimitError::InvalidLimit);
+        }
+        if decimals == BASE_DECIMALS {
+            return Ok(amount);
+        }
+        if decimals > BASE_DECIMALS {
+            let divisor = 10i128.pow(decimals - BASE_DECIMALS);
+            // Ceiling division; `amount` is positive here.
+            return Ok((amount - 1) / divisor + 1);
+        }
+        let multiplier = 10i128.pow(BASE_DECIMALS - decimals);
+        amount
+            .checked_mul(multiplier)
+            .ok_or(RateLimitError::AmountOverflow)
+    }
+
+    /// Look up `asset_code` in the configured registry and normalize `amount`
+    /// to the base basis.
+    pub fn normalize_for_asset(
+        env: Env,
+        asset_code: String,
+        amount: i128,
+    ) -> Result<i128, RateLimitError> {
+        let decimals = Self::asset_decimals(&env, &asset_code)?;
+        Self::normalize_amount(amount, decimals)
+    }
+
+    /// `check_limit` for an amount denominated in `asset_code`'s own decimals.
+    pub fn check_limit_for_asset(
+        env: Env,
+        user: Address,
+        asset_code: String,
+        amount: i128,
+    ) -> Result<LimitCheckResult, RateLimitError> {
+        let normalized = Self::normalize_for_asset(env.clone(), asset_code, amount)?;
+        Self::check_limit(env, user, normalized)
+    }
+
+    /// `consume_limit` for an amount denominated in `asset_code`'s own decimals.
+    pub fn consume_limit_for_asset(
+        env: Env,
+        user: Address,
+        asset_code: String,
+        amount: i128,
+    ) -> Result<ConsumeResult, RateLimitError> {
+        let normalized = Self::normalize_for_asset(env.clone(), asset_code, amount)?;
+        Self::consume_limit(env, user, normalized)
+    }
+
     /// This is a read-only check; callers must also call `consume_limit`
     /// after successful execution.
     pub fn cross_contract_check(
@@ -969,6 +1077,20 @@ impl RateLimiterContract {
             return Err(RateLimitError::NotAuthorized);
         }
         Ok(())
+    }
+
+    /// Decimals registered for `asset_code` in the configured AssetRegistry.
+    fn asset_decimals(env: &Env, asset_code: &String) -> Result<u32, RateLimitError> {
+        let registry: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::AssetRegistry)
+            .ok_or(RateLimitError::AssetRegistryNotSet)?;
+        let client = AssetRegistryContractClient::new(env, &registry);
+        let metadata = client
+            .get_asset(asset_code)
+            .ok_or(RateLimitError::AssetNotRegistered)?;
+        Ok(metadata.decimals)
     }
 
     /// Check emergency mode flag.
@@ -2217,5 +2339,206 @@ mod tests {
             result,
             ConsumeResult::Rejected(RateLimitError::GlobalDailyLimitExceeded as u32)
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Asset-decimal normalization (issue #1248)
+    // -----------------------------------------------------------------------
+
+    use crate::asset_registry::{
+        AssetCategory, AssetRegistryContract, AssetRegistryContractClient,
+    };
+
+    const ONE_BASE_TOKEN: i128 = 1_000_000;
+
+    /// Limiter wired to a real AssetRegistry holding 6-, 7-, 18- and 2-decimal assets.
+    fn setup_with_registry() -> (
+        Env,
+        RateLimiterContractClient<'static>,
+        AssetRegistryContractClient<'static>,
+        Address,
+        Address,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let limiter_id = env.register_contract(None, RateLimiterContract);
+        let limiter = RateLimiterContractClient::new(&env, &limiter_id);
+        let registry_id = env.register_contract(None, AssetRegistryContract);
+        let registry = AssetRegistryContractClient::new(&env, &registry_id);
+        let admin = Address::generate(&env);
+        limiter.initialize(&admin);
+        registry.initialize(&admin);
+        limiter.set_asset_registry(&admin, &registry_id);
+        for (code, decimals) in [("USDC", 6u32), ("XLM", 7), ("WETH", 18), ("CENT", 2)] {
+            registry.register_asset(
+                &admin,
+                &String::from_str(&env, code),
+                &String::from_str(&env, code),
+                &String::from_str(&env, code),
+                &String::from_str(&env, "issuer"),
+                &decimals,
+                &AssetCategory::Stablecoin,
+                &String::from_str(&env, "test asset"),
+                &String::from_str(&env, "https://example.com"),
+            );
+        }
+        let user = Address::generate(&env);
+        (env, limiter, registry, admin, user)
+    }
+
+    fn code(env: &Env, text: &str) -> String {
+        String::from_str(env, text)
+    }
+
+    #[test]
+    fn normalize_amount_scales_to_the_base_basis() {
+        assert_eq!(
+            RateLimiterContract::normalize_amount(ONE_BASE_TOKEN, 6),
+            Ok(ONE_BASE_TOKEN)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(10_000_000, 7),
+            Ok(ONE_BASE_TOKEN)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(1_000_000_000_000_000_000, 18),
+            Ok(ONE_BASE_TOKEN)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(100, 2),
+            Ok(ONE_BASE_TOKEN)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(1, 0),
+            Ok(ONE_BASE_TOKEN)
+        );
+        assert_eq!(BASE_DECIMALS, 6);
+    }
+
+    #[test]
+    fn normalize_amount_rounds_dust_up_so_it_cannot_bypass_limits() {
+        assert_eq!(RateLimiterContract::normalize_amount(1, 18), Ok(1));
+        assert_eq!(
+            RateLimiterContract::normalize_amount(1_000_000_000_001, 18),
+            Ok(2)
+        );
+        assert_eq!(RateLimiterContract::normalize_amount(9, 7), Ok(1));
+    }
+
+    #[test]
+    fn normalize_amount_rejects_bad_inputs() {
+        assert_eq!(
+            RateLimiterContract::normalize_amount(1, MAX_ASSET_DECIMALS + 1),
+            Err(RateLimitError::InvalidDecimals)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(0, 6),
+            Err(RateLimitError::InvalidLimit)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(-5, 18),
+            Err(RateLimitError::InvalidLimit)
+        );
+        assert_eq!(
+            RateLimiterContract::normalize_amount(i128::MAX, 0),
+            Err(RateLimitError::AmountOverflow)
+        );
+    }
+
+    #[test]
+    fn one_token_of_any_asset_consumes_one_base_token() {
+        let (env, limiter, _registry, _admin, user) = setup_with_registry();
+        assert_eq!(
+            limiter.consume_limit_for_asset(&user, &code(&env, "USDC"), &ONE_BASE_TOKEN),
+            ConsumeResult::Allowed
+        );
+        assert_eq!(
+            limiter.consume_limit_for_asset(&user, &code(&env, "XLM"), &10_000_000),
+            ConsumeResult::Allowed
+        );
+        assert_eq!(
+            limiter.consume_limit_for_asset(&user, &code(&env, "WETH"), &1_000_000_000_000_000_000),
+            ConsumeResult::Allowed
+        );
+        assert_eq!(
+            limiter.consume_limit_for_asset(&user, &code(&env, "CENT"), &100),
+            ConsumeResult::Allowed
+        );
+        let usage = limiter.get_user_usage(&user);
+        assert_eq!(usage.daily.value_used, 4 * ONE_BASE_TOKEN);
+        assert_eq!(usage.daily.count_used, 4);
+    }
+
+    #[test]
+    fn eighteen_decimal_asset_is_limited_by_tokens_not_raw_units() {
+        let (env, limiter, _registry, _admin, user) = setup_with_registry();
+        let weth = code(&env, "WETH");
+        let one_weth: i128 = 1_000_000_000_000_000_000;
+        // A single WETH (10^18 raw) used to exceed the 10^9 daily limit outright.
+        let allowance = one_weth * (DEFAULT_DAILY_LIMIT / ONE_BASE_TOKEN);
+        assert!(
+            limiter
+                .check_limit_for_asset(&user, &weth, &allowance)
+                .allowed
+        );
+        assert_eq!(
+            limiter.consume_limit_for_asset(&user, &weth, &allowance),
+            ConsumeResult::Allowed
+        );
+        assert_eq!(
+            limiter.get_user_usage(&user).daily.value_used,
+            DEFAULT_DAILY_LIMIT
+        );
+        // One more wei rounds up to one base unit and trips the limit.
+        assert_eq!(
+            limiter.consume_limit_for_asset(&user, &weth, &1),
+            ConsumeResult::Rejected(RateLimitError::DailyValueLimitExceeded as u32)
+        );
+    }
+
+    #[test]
+    fn seven_decimal_asset_matches_the_six_decimal_limit() {
+        let (env, limiter, _registry, _admin, user) = setup_with_registry();
+        let xlm = code(&env, "XLM");
+        let thousand_xlm: i128 = 1_000 * 10_000_000;
+        assert!(
+            limiter
+                .check_limit_for_asset(&user, &xlm, &thousand_xlm)
+                .allowed
+        );
+        assert!(
+            !limiter
+                .check_limit_for_asset(&user, &xlm, &(thousand_xlm + 10))
+                .allowed
+        );
+    }
+
+    #[test]
+    fn unknown_asset_and_missing_registry_are_reported() {
+        let (env, limiter, _registry, _admin, user) = setup_with_registry();
+        assert_eq!(
+            limiter.try_consume_limit_for_asset(&user, &code(&env, "NOPE"), &1),
+            Err(Ok(RateLimitError::AssetNotRegistered))
+        );
+        let (bare_env, bare, _admin) = setup();
+        assert_eq!(bare.get_asset_registry(), None);
+        assert_eq!(
+            bare.try_check_limit_for_asset(
+                &Address::generate(&bare_env),
+                &code(&bare_env, "USDC"),
+                &1
+            ),
+            Err(Ok(RateLimitError::AssetRegistryNotSet))
+        );
+    }
+
+    #[test]
+    fn only_admin_may_set_the_registry() {
+        let (_env, limiter, registry, _admin, user) = setup_with_registry();
+        assert_eq!(
+            limiter.try_set_asset_registry(&user, &registry.address),
+            Err(Ok(RateLimitError::NotAuthorized))
+        );
+        assert_eq!(limiter.get_asset_registry(), Some(registry.address.clone()));
     }
 }

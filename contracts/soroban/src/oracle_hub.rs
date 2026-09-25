@@ -1,4 +1,49 @@
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
+};
+
+/// Default upper bound on the age of a consensus price a consumer may read,
+/// in seconds (issue #1247). Older aggregates are reported as stale rather
+/// than served, so an upstream oracle outage surfaces as an error instead of
+/// a silently frozen price.
+pub const DEFAULT_MAX_STALENESS_SECS: u64 = 3_600;
+
+/// Delay between proposing a new staleness bound and being able to apply it.
+/// The bound is a safety limit for every downstream consumer, so a single
+/// key must not be able to widen it in the same transaction it uses it.
+pub const STALENESS_TIMELOCK_SECS: u64 = 86_400;
+
+/// Smallest staleness bound that may be configured, so a mis-typed proposal
+/// cannot make every price unreadable.
+pub const MIN_MAX_STALENESS_SECS: u64 = 60;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum OracleHubError {
+    /// The stored aggregate is older than the configured staleness bound.
+    PriceStale = 1,
+    /// No aggregate has reached quorum for the asset.
+    NoAggregate = 2,
+    /// The hub has no admin; call `initialize` first.
+    NotInitialized = 3,
+    AlreadyInitialized = 4,
+    Unauthorized = 5,
+    /// A staleness change is proposed but its timelock has not elapsed.
+    TimelockPending = 6,
+    NoPendingChange = 7,
+    /// Proposed staleness bound is below `MIN_MAX_STALENESS_SECS`.
+    InvalidStaleness = 8,
+}
+
+/// A proposed staleness bound waiting out its timelock.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingStalenessChange {
+    pub max_staleness_secs: u64,
+    pub proposed_at: u64,
+    pub effective_at: u64,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,6 +87,9 @@ pub enum OracleHubKey {
     AllNodes,
     AggregateState(String),
     SlashRecord(Address),
+    Admin,
+    MaxStaleness,
+    PendingStaleness,
 }
 
 #[contracttype]
@@ -187,7 +235,11 @@ pub fn submit_bft_aggregate(
     let mut total_active: u32 = 0;
     for addr in all_nodes.iter() {
         let node_key = OracleHubKey::Node(addr);
-        if let Some(node) = env.storage().persistent().get::<_, BftOracleNode>(&node_key) {
+        if let Some(node) = env
+            .storage()
+            .persistent()
+            .get::<_, BftOracleNode>(&node_key)
+        {
             if node.is_active && !node.is_slashed {
                 total_active += 1;
             }
@@ -213,13 +265,16 @@ pub fn submit_bft_aggregate(
         seen_nodes.push_back(addr.clone());
 
         let node_key = OracleHubKey::Node(addr);
-        if let Some(node) = env.storage().persistent().get::<_, BftOracleNode>(&node_key) {
+        if let Some(node) = env
+            .storage()
+            .persistent()
+            .get::<_, BftOracleNode>(&node_key)
+        {
             if node.is_active && !node.is_slashed {
                 valid_count += 1;
             }
         }
     }
-
 
     let is_valid_quorum = valid_count >= required_quorum && required_quorum > 0;
     let now = env.ledger().timestamp();
@@ -262,6 +317,113 @@ pub fn get_bft_aggregate(env: &Env, asset_code: String) -> Option<BftAggregateSt
 pub fn get_oracle_node(env: &Env, node_address: Address) -> Option<BftOracleNode> {
     let key = OracleHubKey::Node(node_address);
     env.storage().persistent().get(&key)
+}
+
+/// Record the admin that may propose staleness changes. One-shot.
+pub fn initialize(env: &Env, admin: &Address) -> Result<(), OracleHubError> {
+    admin.require_auth();
+    if env.storage().instance().has(&OracleHubKey::Admin) {
+        return Err(OracleHubError::AlreadyInitialized);
+    }
+    env.storage().instance().set(&OracleHubKey::Admin, admin);
+    Ok(())
+}
+
+fn require_admin(env: &Env, caller: &Address) -> Result<(), OracleHubError> {
+    caller.require_auth();
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&OracleHubKey::Admin)
+        .ok_or(OracleHubError::NotInitialized)?;
+    if *caller != admin {
+        return Err(OracleHubError::Unauthorized);
+    }
+    Ok(())
+}
+
+/// The staleness bound consumers are held to: the applied value, or the
+/// default when none has been configured.
+pub fn get_max_staleness(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&OracleHubKey::MaxStaleness)
+        .unwrap_or(DEFAULT_MAX_STALENESS_SECS)
+}
+
+/// Propose a new staleness bound. It takes effect only once
+/// `apply_max_staleness` is called after `STALENESS_TIMELOCK_SECS`.
+pub fn propose_max_staleness(
+    env: &Env,
+    caller: &Address,
+    max_staleness_secs: u64,
+) -> Result<PendingStalenessChange, OracleHubError> {
+    require_admin(env, caller)?;
+    if max_staleness_secs < MIN_MAX_STALENESS_SECS {
+        return Err(OracleHubError::InvalidStaleness);
+    }
+    let now = env.ledger().timestamp();
+    let pending = PendingStalenessChange {
+        max_staleness_secs,
+        proposed_at: now,
+        effective_at: now + STALENESS_TIMELOCK_SECS,
+    };
+    env.storage()
+        .instance()
+        .set(&OracleHubKey::PendingStaleness, &pending);
+    env.events().publish(
+        (symbol_short!("stal_prop"),),
+        (max_staleness_secs, pending.effective_at),
+    );
+    Ok(pending)
+}
+
+/// Apply the proposed staleness bound once its timelock has elapsed. Any
+/// caller may apply it; the delay, not the caller, is the control.
+pub fn apply_max_staleness(env: &Env) -> Result<u64, OracleHubError> {
+    let pending: PendingStalenessChange = env
+        .storage()
+        .instance()
+        .get(&OracleHubKey::PendingStaleness)
+        .ok_or(OracleHubError::NoPendingChange)?;
+    if env.ledger().timestamp() < pending.effective_at {
+        return Err(OracleHubError::TimelockPending);
+    }
+    env.storage()
+        .instance()
+        .set(&OracleHubKey::MaxStaleness, &pending.max_staleness_secs);
+    env.storage()
+        .instance()
+        .remove(&OracleHubKey::PendingStaleness);
+    env.events()
+        .publish((symbol_short!("stal_set"),), pending.max_staleness_secs);
+    Ok(pending.max_staleness_secs)
+}
+
+pub fn get_pending_staleness(env: &Env) -> Option<PendingStalenessChange> {
+    env.storage()
+        .instance()
+        .get(&OracleHubKey::PendingStaleness)
+}
+
+/// Age of an aggregate in seconds. A timestamp in the future (clock skew
+/// between ledgers) counts as age zero rather than underflowing.
+pub fn aggregate_age_secs(now: u64, state: &BftAggregateState) -> u64 {
+    now.saturating_sub(state.timestamp)
+}
+
+/// The consumer-facing read: the quorum aggregate for `asset_code`, or
+/// `PriceStale` once it is older than the configured bound. `get_bft_aggregate`
+/// stays available for callers that want the raw record regardless of age.
+pub fn get_aggregate_state(
+    env: &Env,
+    asset_code: String,
+) -> Result<BftAggregateState, OracleHubError> {
+    let state = get_bft_aggregate(env, asset_code).ok_or(OracleHubError::NoAggregate)?;
+    if aggregate_age_secs(env.ledger().timestamp(), &state) > get_max_staleness(env) {
+        return Err(OracleHubError::PriceStale);
+    }
+    Ok(state)
 }
 
 #[contract]
@@ -326,5 +488,36 @@ impl OracleHubContract {
 
     pub fn get_oracle_node(env: Env, node_address: Address) -> Option<BftOracleNode> {
         get_oracle_node(&env, node_address)
+    }
+
+    pub fn initialize(env: Env, admin: Address) -> Result<(), OracleHubError> {
+        initialize(&env, &admin)
+    }
+
+    pub fn get_max_staleness(env: Env) -> u64 {
+        get_max_staleness(&env)
+    }
+
+    pub fn propose_max_staleness(
+        env: Env,
+        caller: Address,
+        max_staleness_secs: u64,
+    ) -> Result<PendingStalenessChange, OracleHubError> {
+        propose_max_staleness(&env, &caller, max_staleness_secs)
+    }
+
+    pub fn apply_max_staleness(env: Env) -> Result<u64, OracleHubError> {
+        apply_max_staleness(&env)
+    }
+
+    pub fn get_pending_staleness(env: Env) -> Option<PendingStalenessChange> {
+        get_pending_staleness(&env)
+    }
+
+    pub fn get_aggregate_state(
+        env: Env,
+        asset_code: String,
+    ) -> Result<BftAggregateState, OracleHubError> {
+        get_aggregate_state(&env, asset_code)
     }
 }

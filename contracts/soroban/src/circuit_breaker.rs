@@ -662,7 +662,7 @@ impl CircuitBreakerContract {
             "cooldown already started"
         );
 
-        let protocol = Self::get_recovery_protocol(&env);
+        let protocol = Self::get_recovery_protocol(env.clone());
         let record = CooldownRecord {
             pause_id,
             stage: RecoveryStage::Tripped,
@@ -813,7 +813,7 @@ impl CircuitBreakerContract {
             }
 
             // Global pauses suppress everything below full capacity.
-            if scope_match_global_only(&pause_state.scope) {
+            if Self::scope_match_global_only(&pause_state.scope) {
                 // Global pause: if a cooldown is in progress, apply its cap;
                 // otherwise full pause (0%).
                 if let Some(record) = Self::cooldown_for(env.clone(), i) {
@@ -1170,6 +1170,7 @@ mod tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Ledger as _;
 
     fn setup() -> (
