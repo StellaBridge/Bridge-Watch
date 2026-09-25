@@ -62,6 +62,8 @@ import { apiDeprecationDashboardRoutes } from "../apiDeprecationDashboard.routes
 import { backupVerificationDashboardRoutes } from "../backupVerificationDashboard.routes.js";
 // #1209 — Contributor Development Diagnostics
 import { contributorDiagnosticsRoutes } from "../contributorDiagnostics.routes.js";
+// #1188 — Service Dependency Failure Simulator
+import { failureSimulatorRoutes } from "../failureSimulator.routes.js";
 
 export async function registerAdminRoutes(server: FastifyInstance): Promise<void> {
   server.register(apiKeysRoutes, { prefix: "/api/v1/admin/api-keys" });
@@ -217,4 +219,9 @@ export async function registerAdminRoutes(server: FastifyInstance): Promise<void
 
   // #1209 — Contributor Development Diagnostics
   server.register(contributorDiagnosticsRoutes);
+
+  // #1188 — Service Dependency Failure Simulator
+  server.register(failureSimulatorRoutes, {
+    prefix: "/api/v1/admin/failure-simulator",
+  });
 }
