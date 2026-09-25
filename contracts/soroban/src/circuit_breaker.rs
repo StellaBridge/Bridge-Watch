@@ -93,6 +93,50 @@ pub struct CircuitBreakerConfig {
     pub max_whitelist_size: u32,
 }
 
+/// Staged recovery protocol parameters (issue #1242).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecoveryProtocol {
+    /// Ledgers the breaker stays fully tripped before the provisional
+    /// cooldown can begin.
+    pub cooldown_ledger_count: u32,
+    /// Ledgers the provisional cooldown must hold with no health anomalies
+    /// before full restoration.
+    pub recovery_window_ledgers: u32,
+    /// Rate-limit (volume) cap applied during the provisional cooldown,
+    /// in basis points of the normal limit (e.g. 1000 = 10%).
+    pub provisional_rate_cap_bps: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RecoveryStage {
+    /// Circuit breaker tripped — complete pause.
+    Tripped,
+    /// Cooldown after `cooldown_ledger_count`: operations resume under the
+    /// provisional volume cap.
+    ProvisionalCooldown,
+    /// Normal limits restored.
+    FullyRestored,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CooldownRecord {
+    pub pause_id: u32,
+    pub stage: RecoveryStage,
+    pub stage_started_ledger: u32,
+    pub cooldown_ledger_count: u32,
+    pub recovery_window_ledgers: u32,
+    pub provisional_rate_cap_bps: u32,
+}
+
+/// Default staged-recovery parameters: ~1 hour cooldown (~720 ledgers at
+/// 5s/ledger), ~1 day recovery window, 10% provisional volume cap.
+pub const DEFAULT_COOLDOWN_LEDGER_COUNT: u32 = 720;
+pub const DEFAULT_RECOVERY_WINDOW_LEDGERS: u32 = 17_280;
+pub const DEFAULT_PROVISIONAL_RATE_CAP_BPS: u32 = 1_000; // 10%
+
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -108,6 +152,8 @@ pub enum DataKey {
     RecoveryRequests,
     GuardianApprovals(u32),
     RecoveryApprovals(u32),
+    RecoveryProtocol,
+    CooldownState(u32),
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -122,6 +168,9 @@ const EVENT_RECOVERY_REQUESTED: &str = "cb_recovery_requested";
 const EVENT_RECOVERY_EXECUTED: &str = "cb_recovery_executed";
 const EVENT_TRIGGER_CONFIG_UPDATED: &str = "cb_trigger_updated";
 const EVENT_WHITELIST_UPDATED: &str = "cb_whitelist_updated";
+const EVENT_COOLDOWN_START: &str = "cb_cooldown_start";
+const EVENT_COOLDOWN_STEP: &str = "cb_cooldown_step";
+const EVENT_RESTORED: &str = "cb_restored";
 
 // ── Contract ──────────────────────────────────────────────────────────────────
 
@@ -557,6 +606,261 @@ impl CircuitBreakerContract {
             .publish(("cb_whitelist_updated",), ("asset", asset_code, true));
     }
 
+    // ── Staged Recovery Protocol (issue #1242) ────────────────────────────────
+
+    /// Admin configuration for the staged recovery protocol. `rate_cap_bps`
+    /// is the provisional volume cap in basis points of the normal limit
+    /// (e.g. 1000 = 10%).
+    pub fn set_recovery_protocol(
+        env: Env,
+        caller: Address,
+        cooldown_ledger_count: u32,
+        recovery_window_ledgers: u32,
+        rate_cap_bps: u32,
+    ) {
+        Self::only_admin(&env, &caller);
+        assert!(rate_cap_bps > 0 && rate_cap_bps <= 10_000, "rate cap out of range");
+
+        let protocol = RecoveryProtocol {
+            cooldown_ledger_count,
+            recovery_window_ledgers,
+            provisional_rate_cap_bps: rate_cap_bps,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::RecoveryProtocol, &protocol);
+
+        env.events().publish(
+            (EVENT_COOLDOWN_STEP,),
+            (cooldown_ledger_count, recovery_window_ledgers, rate_cap_bps),
+        );
+    }
+
+    pub fn get_recovery_protocol(env: Env) -> RecoveryProtocol {
+        env.storage()
+            .instance()
+            .get(&DataKey::RecoveryProtocol)
+            .unwrap_or(RecoveryProtocol {
+                cooldown_ledger_count: DEFAULT_COOLDOWN_LEDGER_COUNT,
+                recovery_window_ledgers: DEFAULT_RECOVERY_WINDOW_LEDGERS,
+                provisional_rate_cap_bps: DEFAULT_PROVISIONAL_RATE_CAP_BPS,
+            })
+    }
+
+    /// Marks a tripped pause as entering the staged recovery protocol.
+    /// Guardian-gated; records the breaker in the `Tripped` stage.
+    pub fn start_cooldown(env: Env, caller: Address, pause_id: u32) {
+        Self::check_guardian_permission(&env, &caller, GuardianRole::StandardGuardian);
+
+        let pause_state = Self::get_pause_state(env.clone(), pause_id);
+        assert!(
+            pause_state.level != PauseLevel::None,
+            "pause not active"
+        );
+        assert!(
+            !env.storage().persistent().has(&DataKey::CooldownState(pause_id)),
+            "cooldown already started"
+        );
+
+        let protocol = Self::get_recovery_protocol(&env);
+        let record = CooldownRecord {
+            pause_id,
+            stage: RecoveryStage::Tripped,
+            stage_started_ledger: env.ledger().sequence(),
+            cooldown_ledger_count: protocol.cooldown_ledger_count,
+            recovery_window_ledgers: protocol.recovery_window_ledgers,
+            provisional_rate_cap_bps: protocol.provisional_rate_cap_bps,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::CooldownState(pause_id), &record);
+
+        env.events().publish(
+            (EVENT_COOLDOWN_START,),
+            (pause_id, RecoveryStage::Tripped, record.stage_started_ledger),
+        );
+    }
+
+    /// Permissionless staged-recovery tick (issue #1242). Advances the
+    /// breaker automatically:
+    /// - `Tripped` → `ProvisionalCooldown` once `cooldown_ledger_count`
+    ///   ledgers have passed since `cb_cooldown_start` — operations resume
+    ///   under the restricted volume cap (`cb_cooldown_step`).
+    /// - `ProvisionalCooldown` → `FullyRestored` once
+    ///   `recovery_window_ledgers` pass with no new pause for the same
+    ///   scope (`cb_restored`) — the pause state is cleared and normal
+    ///   limits resume.
+    pub fn evaluate_cooldown(env: Env, pause_id: u32) {
+        let mut record: CooldownRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CooldownState(pause_id))
+            .unwrap_or_else(|| panic!("no cooldown in progress"));
+
+        let current = env.ledger().sequence();
+
+        match record.stage {
+            RecoveryStage::Tripped => {
+                if current.saturating_sub(record.stage_started_ledger)
+                    < record.cooldown_ledger_count
+                {
+                    panic!("cooldown ledger count not elapsed");
+                }
+                record.stage = RecoveryStage::ProvisionalCooldown;
+                record.stage_started_ledger = current;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::CooldownState(pause_id), &record);
+
+                env.events().publish(
+                    (EVENT_COOLDOWN_STEP,),
+                    (
+                        pause_id,
+                        RecoveryStage::ProvisionalCooldown,
+                        record.provisional_rate_cap_bps,
+                    ),
+                );
+            }
+            RecoveryStage::ProvisionalCooldown => {
+                if current.saturating_sub(record.stage_started_ledger)
+                    < record.recovery_window_ledgers
+                {
+                    panic!("recovery window not elapsed");
+                }
+
+                // Health-anomaly check: any active pause for the same scope
+                // triggered during the window resets the cooldown instead of
+                // restoring.
+                if let Some(pause_state) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, PauseState>(&DataKey::PauseState(pause_id))
+                {
+                    let pause_count: u32 = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::PauseCount)
+                        .unwrap_or(0);
+                    for i in (record.pause_id + 1)..=pause_count {
+                        if let Some(other) = env
+                            .storage()
+                            .persistent()
+                            .get::<_, PauseState>(&DataKey::PauseState(i))
+                        {
+                            if other.level != PauseLevel::None
+                                && Self::scopes_match(&pause_state.scope, &other.scope)
+                                && other.timestamp >= record.stage_started_ledger as u64
+                            {
+                                record.stage_started_ledger = current;
+                                env.storage().persistent().set(
+                                    &DataKey::CooldownState(pause_id),
+                                    &record,
+                                );
+                                env.events().publish(
+                                    (EVENT_COOLDOWN_STEP,),
+                                    (pause_id, RecoveryStage::ProvisionalCooldown, 0u32),
+                                );
+                                panic!("health anomaly during recovery window — cooldown restarted");
+                            }
+                        }
+                    }
+                }
+
+                // Fully restore: clear pause + cooldown state.
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::PauseState(pause_id));
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::CooldownState(pause_id));
+
+                env.events().publish(
+                    (EVENT_RESTORED,),
+                    (pause_id, RecoveryStage::FullyRestored),
+                );
+            }
+            RecoveryStage::FullyRestored => {
+                panic!("recovery already restored");
+            }
+        }
+    }
+
+    pub fn get_recovery_state(env: Env, pause_id: u32) -> CooldownRecord {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CooldownState(pause_id))
+            .unwrap_or_else(|| panic!("no cooldown in progress"))
+    }
+
+    /// The effective volume/rate cap for a scope in basis points of the
+    /// normal limit (issue #1242): 0 while fully tripped, the provisional
+    /// cap during cooldown, and 100% once restored.
+    pub fn effective_volume_cap_bps(env: Env, scope: PauseScope) -> u32 {
+        let pause_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseCount)
+            .unwrap_or(0);
+
+        let mut cap: u32 = 10_000;
+        for i in 1..=pause_count {
+            let pause_state = Self::get_pause_state(env.clone(), i);
+            if pause_state.level == PauseLevel::None {
+                continue;
+            }
+            if !Self::scopes_match(&pause_state.scope, &scope) {
+                continue;
+            }
+
+            // Global pauses suppress everything below full capacity.
+            if scope_match_global_only(&pause_state.scope) {
+                // Global pause: if a cooldown is in progress, apply its cap;
+                // otherwise full pause (0%).
+                if let Some(record) = Self::cooldown_for(env.clone(), i) {
+                    match record.stage {
+                        RecoveryStage::ProvisionalCooldown => {
+                            cap = cap.min(record.provisional_rate_cap_bps);
+                            continue;
+                        }
+                        _ => return 0,
+                    }
+                }
+                return 0;
+            }
+
+            if let Some(record) = Self::cooldown_for(env.clone(), i) {
+                match record.stage {
+                    RecoveryStage::ProvisionalCooldown => {
+                        cap = cap.min(record.provisional_rate_cap_bps);
+                    }
+                    RecoveryStage::FullyRestored => continue,
+                    RecoveryStage::Tripped => return 0,
+                }
+            } else {
+                return 0;
+            }
+        }
+        cap
+    }
+
+    fn cooldown_for(env: Env, pause_id: u32) -> Option<CooldownRecord> {
+        env.storage().persistent().get(&DataKey::CooldownState(pause_id))
+    }
+
+    /// True when the pause scope is a global pause (suppresses everything).
+    fn scope_match_global_only(scope: &PauseScope) -> bool {
+        matches!(scope, PauseScope::Global)
+    }
+
+    fn scopes_match(a: &PauseScope, b: &PauseScope) -> bool {
+        match (a, b) {
+            (PauseScope::Global, _) => true,
+            (PauseScope::Bridge(id1), PauseScope::Bridge(id2)) if id1 == id2 => true,
+            (PauseScope::Asset(code1), PauseScope::Asset(code2)) if code1 == code2 => true,
+            _ => false,
+        }
+    }
+
     // ── Query Functions ───────────────────────────────────────────────────────
 
     pub fn get_pause_state(env: Env, pause_id: u32) -> PauseState {
@@ -858,5 +1162,170 @@ mod tests {
 
         client.initialize(&admin, &2, &3600, &7200, &14400, &100);
         client.add_to_address_whitelist(&user, &guardian1);
+    }
+}
+
+// ── Staged recovery protocol tests (issue #1242) ─────────────────────────────
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use soroban_sdk::testutils::Ledger as _;
+
+    fn setup() -> (
+        Env,
+        CircuitBreakerContractClient<'static>,
+        Address,
+        Address,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let guardian = Address::generate(&env);
+        let contract_id = env.register_contract(None, CircuitBreakerContract);
+        let client = CircuitBreakerContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &2, &3600, &7200, &14400, &100);
+        client.add_guardian(&admin, &guardian, &GuardianRole::EmergencyGuardian);
+        (env, client, admin, guardian)
+    }
+
+    fn set_fast_protocol(client: &CircuitBreakerContractClient, admin: &Address) {
+        // 5-ledger cooldown, 10-ledger recovery window, 10% provisional cap.
+        client.set_recovery_protocol(admin, &5, &10, &1_000);
+    }
+
+    #[test]
+    fn staged_recovery_progresses_tripped_to_cooldown_to_restored() {
+        let (env, client, admin, guardian) = setup();
+        set_fast_protocol(&client, &admin);
+
+        let reason = String::from_str(&env, "anomaly burst");
+        client.pause_global(&guardian, &reason);
+
+        // Enter the protocol: Tripped.
+        client.start_cooldown(&guardian, &1);
+        let record = client.get_recovery_state(&1);
+        assert_eq!(record.stage, RecoveryStage::Tripped);
+
+        // Still fully tripped before the cooldown elapses — volume cap is 0%.
+        assert_eq!(client.effective_volume_cap_bps(&PauseScope::Global), 0);
+
+        // Advance past cooldown_ledger_count, then tick.
+        env.ledger().with_mut(|li| li.sequence_number += 10);
+        client.evaluate_cooldown(&1);
+
+        let record = client.get_recovery_state(&1);
+        assert_eq!(record.stage, RecoveryStage::ProvisionalCooldown);
+
+        // Operations resume under the provisional 10% volume cap.
+        assert_eq!(
+            client.effective_volume_cap_bps(&PauseScope::Global),
+            1_000
+        );
+
+        // Advance past recovery_window_ledgers, then tick again.
+        env.ledger().with_mut(|li| li.sequence_number += 20);
+        client.evaluate_cooldown(&1);
+
+        // Fully restored: pause cleared, normal limits (100%) resume.
+        assert!(!client.is_paused(&PauseScope::Global));
+        assert_eq!(client.effective_volume_cap_bps(&PauseScope::Global), 10_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "cooldown ledger count not elapsed")]
+    fn cooldown_cannot_advance_before_cooldown_ledger_count() {
+        let (env, client, admin, guardian) = setup();
+        set_fast_protocol(&client, &admin);
+
+        let reason = String::from_str(&env, "test");
+        client.pause_global(&guardian, &reason);
+        client.start_cooldown(&guardian, &1);
+
+        client.evaluate_cooldown(&1);
+    }
+
+    #[test]
+    #[should_panic(expected = "recovery window not elapsed")]
+    fn full_restoration_requires_the_recovery_window() {
+        let (env, client, admin, guardian) = setup();
+        set_fast_protocol(&client, &admin);
+
+        let reason = String::from_str(&env, "test");
+        client.pause_global(&guardian, &reason);
+        client.start_cooldown(&guardian, &1);
+
+        env.ledger().with_mut(|li| li.sequence_number += 10);
+        client.evaluate_cooldown(&1);
+
+        // Skip part of the window only.
+        env.ledger().with_mut(|li| li.sequence_number += 5);
+        client.evaluate_cooldown(&1);
+    }
+
+    #[test]
+    fn health_anomaly_during_window_restarts_the_cooldown() {
+        let (env, client, admin, guardian) = setup();
+        set_fast_protocol(&client, &admin);
+
+        let reason = String::from_str(&env, "test");
+        client.pause_global(&guardian, &reason);
+        client.start_cooldown(&guardian, &1);
+
+        // Enter provisional cooldown.
+        env.ledger().with_mut(|li| li.sequence_number += 10);
+        client.evaluate_cooldown(&1);
+
+        // A new pause for the same scope lands during the window (anomaly).
+        client.pause_global(&guardian, &String::from_str(&env, "second trip"));
+        // pause_global issues pause_id 2.
+
+        // Wait out the window, then tick — anomaly detected, cooldown restart.
+        env.ledger().with_mut(|li| li.sequence_number += 20);
+        client.evaluate_cooldown(&1);
+
+        // Should still be in provisional cooldown (not restored), window reset.
+        let record = client.get_recovery_state(&1);
+        assert_eq!(record.stage, RecoveryStage::ProvisionalCooldown);
+    }
+
+    #[test]
+    fn effective_volume_cap_reflects_scope_cooldown() {
+        let (env, client, admin, guardian) = setup();
+        set_fast_protocol(&client, &admin);
+
+        let asset_code = String::from_str(&env, "USDC");
+        client.pause_asset(&guardian, &asset_code, &String::from_str(&env, "test"));
+        client.start_cooldown(&guardian, &1);
+
+        // Tripped: paused hard.
+        assert_eq!(client.effective_volume_cap_bps(&PauseScope::Asset(asset_code.clone())), 0);
+
+        env.ledger().with_mut(|li| li.sequence_number += 10);
+        client.evaluate_cooldown(&1);
+
+        // Provisional cooldown: 10% cap for this asset only.
+        assert_eq!(
+            client.effective_volume_cap_bps(&PauseScope::Asset(asset_code.clone())),
+            1_000
+        );
+        // Other assets remain at normal capacity.
+        assert_eq!(
+            client.effective_volume_cap_bps(&PauseScope::Asset(String::from_str(&env, "XLM"))),
+            10_000
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "cooldown already started")]
+    fn cooldown_cannot_be_started_twice() {
+        let (env, client, admin, guardian) = setup();
+        set_fast_protocol(&client, &admin);
+
+        let reason = String::from_str(&env, "test");
+        client.pause_global(&guardian, &reason);
+        client.start_cooldown(&guardian, &1);
+
+        client.start_cooldown(&guardian, &1);
     }
 }
