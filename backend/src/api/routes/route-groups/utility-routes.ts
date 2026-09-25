@@ -19,6 +19,9 @@ import { liquidityRouteSimulationRoutes } from "../liquidityRouteSimulation.rout
 import { operatorCapacityMetricsRoutes } from "../operatorCapacityMetrics.routes.js";
 import { ingestionWatermarkRoutes } from "../ingestionWatermarks.routes.js";
 import { sessionDeviceRoutes } from "../sessionDevice.routes.js";
+// #1240 — Register orphaned route modules (aliased: `jobsRoutes` above)
+import { exportIntegrityRoutes } from "../exportIntegrity.routes.js";
+import { jobsRoutes as jobExecutionRoutes } from "../jobs.routes.js";
 
 export async function registerUtilityRoutes(server: FastifyInstance): Promise<void> {
   server.register(exportsRoutes, { prefix: "/api/v1/exports" });
@@ -49,4 +52,8 @@ export async function registerUtilityRoutes(server: FastifyInstance): Promise<vo
   });
   server.register(ingestionWatermarkRoutes, { prefix: "/api/v1/ingestion-watermarks" });
   server.register(sessionDeviceRoutes, { prefix: "/api/v1/user/devices" });
+
+  // #1240 — Register orphaned route modules
+  server.register(exportIntegrityRoutes, { prefix: "/api/v1" });
+  server.register(jobExecutionRoutes, { prefix: "/api/v1" });
 }

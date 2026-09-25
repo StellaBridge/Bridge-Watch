@@ -7,6 +7,9 @@ import { riskClusteringRoutes } from "../riskClustering.routes.js";
 import { trustlineAnalyticsRoutes } from "../trustlineAnalytics.routes.js";
 import { issuerAuthRoutes } from "../issuerAuth.routes.js";
 import { contractEventSchemaRoutes } from "../contractEventSchema.routes.js";
+// #1240 — Register orphaned route modules
+import { deploymentDriftRoutes } from "../deploymentDrift.routes.js";
+import { queryPerformanceRoutes } from "../queryPerformance.routes.js";
 
 export async function registerOperationalRoutes(server: FastifyInstance): Promise<void> {
   server.register(slowQueryRegressionRoutes);
@@ -17,4 +20,8 @@ export async function registerOperationalRoutes(server: FastifyInstance): Promis
   server.register(trustlineAnalyticsRoutes, { prefix: "/api/v1" });
   server.register(issuerAuthRoutes, { prefix: "/api/v1" });
   server.register(contractEventSchemaRoutes, { prefix: "/api/v1" });
+
+  // #1240 — Register orphaned route modules
+  server.register(deploymentDriftRoutes, { prefix: "/api/v1/deployment-drift" });
+  server.register(queryPerformanceRoutes, { prefix: "/api/v1/query-performance" });
 }
