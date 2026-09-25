@@ -284,7 +284,7 @@ describe("Outbox Pattern Implementation", () => {
       await outboxProducer.markForRetry(eventId, "Final error", 5);
       
       const [finalEvent] = await db("outbox_events").select("*");
-      expect(finalEvent.status).toBe("failed");
+      expect(finalEvent.status).toBe("dead_letter");
 
       const deadLetterEvents = await db("dead_letter_events").select("*");
       expect(deadLetterEvents).toHaveLength(1);

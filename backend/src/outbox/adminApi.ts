@@ -9,6 +9,7 @@ export interface OutboxAdminStats {
     processing: number;
     delivered: number;
     failed: number;
+    deadLetter: number;
     totalEvents: number;
   };
   deadLetter: {
@@ -33,6 +34,8 @@ export interface DeadLetterEvent {
   lastError: string;
   lastAttempt: Date;
   createdAt: Date;
+  outboxStatus: string;
+  outboxErrorMessage: string | null;
 }
 
 export class OutboxAdminApi {
@@ -85,6 +88,7 @@ export class OutboxAdminApi {
       processing: 0,
       delivered: 0,
       failed: 0,
+      deadLetter: 0,
       totalEvents,
     };
 
@@ -103,10 +107,96 @@ export class OutboxAdminApi {
         case "failed":
           stats.failed = count;
           break;
+        case "dead_letter":
+          stats.deadLetter = count;
+          break;
       }
     });
 
     return stats;
+  }
+
+  /**
+   * List dead letter queue rows for inspection (issue #1260)
+   */
+  async getDeadLetterEvents(
+    limit = 100,
+    offset = 0,
+    eventType?: string
+  ): Promise<{
+    events: DeadLetterEvent[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const result = await this.outboxProducer.getDeadLetterEvents(limit, offset, eventType);
+    return {
+      events: result.events.map(this.mapDeadLetterRecord),
+      total: result.total,
+      hasMore: result.hasMore,
+    };
+  }
+
+  /**
+   * Get a single dead letter row including payload and last error stack
+   * trace (issue #1260)
+   */
+  async getDeadLetterEvent(id: string): Promise<DeadLetterEvent | null> {
+    const record = await this.outboxProducer.getDeadLetterEvent(id);
+    return record ? this.mapDeadLetterRecord(record) : null;
+  }
+
+  /**
+   * Manually re-enqueue one or more dead letter events (issue #1260)
+   */
+  async redriveDeadLetterEvents(
+    ids: string[]
+  ): Promise<{ success: number; failed: number }> {
+    let success = 0;
+    let failed = 0;
+
+    for (const id of ids) {
+      try {
+        const redriven = await this.outboxProducer.redriveDeadLetter(id);
+        if (redriven) {
+          success++;
+        } else {
+          failed++;
+        }
+      } catch (error) {
+        logger.error({ deadLetterId: id, error }, "Failed to redrive dead letter event");
+        failed++;
+      }
+    }
+
+    return { success, failed };
+  }
+
+  private mapDeadLetterRecord(record: {
+    id: string;
+    outboxId: string;
+    eventType: string;
+    aggregateId: string;
+    payload: any;
+    errorCount: number;
+    lastError: string;
+    lastAttempt: Date;
+    createdAt: Date;
+    outboxStatus: string;
+    outboxErrorMessage: string | null;
+  }): DeadLetterEvent {
+    return {
+      id: record.id,
+      outboxId: record.outboxId,
+      eventType: record.eventType,
+      aggregateId: record.aggregateId,
+      payload: record.payload,
+      errorCount: record.errorCount,
+      lastError: record.lastError,
+      lastAttempt: record.lastAttempt,
+      createdAt: record.createdAt,
+      outboxStatus: record.outboxStatus,
+      outboxErrorMessage: record.outboxErrorMessage,
+    };
   }
 
   /**
@@ -167,10 +257,10 @@ export class OutboxAdminApi {
         };
       }
 
-      if (event.status !== "failed") {
+      if (event.status !== "failed" && event.status !== "dead_letter") {
         return {
           success: false,
-          message: `Event is not in failed state: ${event.status}`,
+          message: `Event is not in a retryable state: ${event.status}`,
         };
       }
 

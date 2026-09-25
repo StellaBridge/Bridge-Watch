@@ -205,9 +205,9 @@ describe("Outbox Pattern Integration Tests", () => {
         await outboxProducer.markForRetry(eventId, `Failure ${i}`, 3);
       }
 
-      // Verify event is failed and in DLQ
+      // Verify event is dead-lettered and in DLQ
       const [failedEvent] = await db("outbox_events").where({ id: eventId });
-      expect(failedEvent.status).toBe("failed");
+      expect(failedEvent.status).toBe("dead_letter");
 
       const dlqEvents = await db("dead_letter_events").select("*");
       expect(dlqEvents).toHaveLength(1);
