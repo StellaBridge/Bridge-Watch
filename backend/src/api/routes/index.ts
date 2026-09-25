@@ -19,6 +19,7 @@ import { registerCompatibilityRoutes } from "./route-groups/compatibility-routes
 import { registerOperationalRoutes } from "./route-groups/operational-routes.js";
 import { registerOperationalMonitoringRoutes } from "./route-groups/operational-monitoring-routes.js";
 import { registerLiquidityRoutes } from "./route-groups/liquidity-routes.js";
+import { registerDbPoolRoutes } from "./route-groups/db-pool-routes.js";
 import { sorobanEventsRoutes } from "./sorobanEvents.routes.js";
 import { contractInstanceDiscoveryRoutes } from "./contractInstanceDiscovery.routes.js";
 import { backfillRoutes } from "./backfill.routes.js";
