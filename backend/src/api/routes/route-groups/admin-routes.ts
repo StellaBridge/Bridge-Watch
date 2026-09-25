@@ -54,6 +54,14 @@ import { complianceRetentionExceptionRoutes } from "../complianceRetentionExcept
 import { communityAnnotationModerationRoutes } from "../communityAnnotationModeration.routes.js";
 import { outboxAdminRoutes } from "../outbox-admin.js";
 import { reportTemplateVersionRoutes } from "../reportTemplateVersion.routes.js";
+// #1193 — Health Check Dependency Policies
+import { healthCheckDependencyPolicyRoutes } from "../healthCheckDependencyPolicy.routes.js";
+// #1208 — API Deprecation Dashboard
+import { apiDeprecationDashboardRoutes } from "../apiDeprecationDashboard.routes.js";
+// #1194 — Backup Verification Dashboard
+import { backupVerificationDashboardRoutes } from "../backupVerificationDashboard.routes.js";
+// #1209 — Contributor Development Diagnostics
+import { contributorDiagnosticsRoutes } from "../contributorDiagnostics.routes.js";
 
 export async function registerAdminRoutes(server: FastifyInstance): Promise<void> {
   server.register(apiKeysRoutes, { prefix: "/api/v1/admin/api-keys" });
@@ -197,4 +205,16 @@ export async function registerAdminRoutes(server: FastifyInstance): Promise<void
   server.register(reportTemplateVersionRoutes, {
     prefix: "/api/v1/admin/report-templates",
   });
+
+  // #1193 — Health Check Dependency Policies
+  server.register(healthCheckDependencyPolicyRoutes);
+
+  // #1208 — API Deprecation Dashboard
+  server.register(apiDeprecationDashboardRoutes);
+
+  // #1194 — Backup Verification Dashboard
+  server.register(backupVerificationDashboardRoutes);
+
+  // #1209 — Contributor Development Diagnostics
+  server.register(contributorDiagnosticsRoutes);
 }
