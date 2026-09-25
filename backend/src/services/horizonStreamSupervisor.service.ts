@@ -336,6 +336,8 @@ export class HorizonStreamSupervisor extends EventEmitter {
         activeNode: nextNode,
         isPrimary: this.isPrimaryActive(),
       });
+
+      getMetricsService().workerRestartsTotal.inc({ worker: this.streamId, reason: "failover" });
     }
 
     if (this.reconnectCount >= this.maxReconnectAttempts) {
@@ -344,6 +346,7 @@ export class HorizonStreamSupervisor extends EventEmitter {
         "Horizon stream max reconnect attempts reached — emitting outage alert"
       );
       this.emit("outage", { streamId: this.streamId, reconnectCount: this.reconnectCount });
+      getMetricsService().workerRestartsTotal.inc({ worker: this.streamId, reason: "max-attempts-exhausted" });
       return;
     }
 
@@ -358,6 +361,8 @@ export class HorizonStreamSupervisor extends EventEmitter {
       { streamId: this.streamId, attempt: this.reconnectCount, backoffMs: Math.round(backoff) },
       "Scheduling Horizon stream reconnect"
     );
+
+    getMetricsService().workerRestartsTotal.inc({ worker: this.streamId, reason: "reconnect-scheduled" });
 
     this.reconnectTimer = setTimeout(() => {
       if (!this.closed) this._connect();
@@ -407,6 +412,8 @@ export class HorizonStreamSupervisor extends EventEmitter {
             activeNode: primaryUrl,
             isPrimary: true,
           });
+
+          getMetricsService().workerRestartsTotal.inc({ worker: this.streamId, reason: "failback" });
 
           this._connect();
         }

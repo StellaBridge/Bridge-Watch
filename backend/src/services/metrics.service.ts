@@ -43,6 +43,7 @@ class MetricsService {
   public liquidityTVL: Gauge;
   public alertsTriggered: Counter;
   public circuitBreakerTrips: Counter;
+  public workerRestartsTotal: Counter;
 
   // Cache Metrics
   public cacheHits: Counter;
@@ -104,6 +105,7 @@ class MetricsService {
     this.liquidityTVL = undefined as any;
     this.alertsTriggered = undefined as any;
     this.circuitBreakerTrips = undefined as any;
+    this.workerRestartsTotal = undefined as any;
     this.cacheHits = undefined as any;
     this.cacheMisses = undefined as any;
     this.cacheSize = undefined as any;
@@ -322,6 +324,13 @@ class MetricsService {
       name: "circuit_breaker_trips_total",
       help: "Total number of circuit breaker trips",
       labelNames: ["bridge_id", "reason"],
+      registers: [this.registry],
+    });
+
+    this.workerRestartsTotal = new Counter({
+      name: "worker_restarts_total",
+      help: "Total number of worker restarts by worker and reason",
+      labelNames: ["worker", "reason"],
       registers: [this.registry],
     });
 

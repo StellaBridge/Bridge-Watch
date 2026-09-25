@@ -15,6 +15,9 @@ interface CreateEndpointBody {
   eventTypes?: WebhookEventType[];
   isBatchDeliveryEnabled?: boolean;
   batchWindowMs?: number;
+  retryBackoffMultiplier?: number;
+  retryMaxDelayMs?: number;
+  retryJitterRatio?: number;
 }
 
 interface UpdateEndpointBody {
@@ -27,6 +30,9 @@ interface UpdateEndpointBody {
   eventTypes?: WebhookEventType[];
   isBatchDeliveryEnabled?: boolean;
   batchWindowMs?: number;
+  retryBackoffMultiplier?: number;
+  retryMaxDelayMs?: number;
+  retryJitterRatio?: number;
 }
 
 interface EndpointParams {
@@ -212,6 +218,23 @@ export async function webhooksRoutes(server: FastifyInstance) {
         return logs;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to get delivery logs";
+        return reply.code(500).send({ error: message });
+      }
+    }
+  );
+
+  // Get retry timeline for a delivery (status plus ordered attempts)
+  server.get<{ Params: { deliveryId: string } }>(
+    "/deliveries/:deliveryId/timeline",
+    async (request: FastifyRequest<{ Params: { deliveryId: string } }>, reply: FastifyReply) => {
+      try {
+        const timeline = await webhookService.getDeliveryTimeline(request.params.deliveryId);
+        if (!timeline) {
+          return reply.code(404).send({ error: "Delivery not found" });
+        }
+        return timeline;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to get delivery timeline";
         return reply.code(500).send({ error: message });
       }
     }
