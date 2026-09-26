@@ -112,6 +112,30 @@ const CACHE_KEY_PATTERNS: Record<string, string[]> = {
   pool_events: ["bw:pool:*"],
 };
 
+/**
+ * Segment-by columns for TimescaleDB columnar compression, per entity.
+ * Grouping each chunk by its natural series key keeps compressed reads fast.
+ */
+const COMPRESSION_SEGMENTBY: Record<string, string> = {
+  prices: "symbol",
+  health_scores: "symbol",
+  liquidity_snapshots: "symbol, dex",
+  pool_events: "pool_id",
+};
+
+export interface ChunkCompressionStats {
+  entityType: string;
+  hotTable: string;
+  totalChunks: number;
+  compressedChunks: number;
+  /** Share of chunks compressed, null when the table has no chunks. */
+  compressionRatio: number | null;
+  /** Bounded recent-rows scan latency in ms, null when not measured. */
+  readProbeMs: number | null;
+  /** False when TimescaleDB is absent or the stats query failed. */
+  timescaledbAvailable: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Checksum helpers
 // ---------------------------------------------------------------------------
@@ -429,6 +453,107 @@ export class HotColdMigrationService {
       checksumMatch,
       gapFree,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // TimescaleDB chunk compression (issue #1273)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Ensure columnar compression + a 7-day compression policy on the entity's
+   * hot hypertable. Safe to call when TimescaleDB is absent: the statements
+   * fail, the error is logged, and `{ applied: false }` is returned so
+   * callers (and jobs) can continue against regular tables.
+   */
+  async ensureChunkCompression(
+    entityType: string,
+    compressAfterDays = 7
+  ): Promise<{ applied: boolean; reason?: string }> {
+    const entity = this.requireEntity(entityType);
+    const segmentby = COMPRESSION_SEGMENTBY[entityType] ?? "";
+    try {
+      await this.db.raw(
+        `ALTER TABLE ?? SET (timescaledb.compress = true${
+          segmentby ? `, timescaledb.compress_segmentby = '${segmentby}'` : ""
+        });`,
+        [entity.hotTable]
+      );
+      await this.db.raw(
+        `SELECT add_compression_policy(?, INTERVAL '${compressAfterDays} days', if_not_exists => true);`,
+        [entity.hotTable]
+      );
+      logger.info(
+        { entityType, hotTable: entity.hotTable, compressAfterDays },
+        "hot-cold-migration: chunk compression policy ensured"
+      );
+      return { applied: true };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { entityType, reason },
+        "hot-cold-migration: TimescaleDB compression unavailable, continuing uncompressed"
+      );
+      return { applied: false, reason };
+    }
+  }
+
+  /**
+   * Report chunk compression state for the entity's hot hypertable and probe
+   * read performance with a bounded recent-rows scan. Logs the compression
+   * ratio so jobs can alert on uncompressed growth.
+   */
+  async getChunkCompressionStats(entityType: string): Promise<ChunkCompressionStats> {
+    const entity = this.requireEntity(entityType);
+    const base: ChunkCompressionStats = {
+      entityType,
+      hotTable: entity.hotTable,
+      totalChunks: 0,
+      compressedChunks: 0,
+      compressionRatio: null,
+      readProbeMs: null,
+      timescaledbAvailable: false,
+    };
+    try {
+      const raw = await this.db.raw(
+        `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE is_compressed) AS compressed
+           FROM timescaledb_information.chunks WHERE hypertable_name = ?;`,
+        [entity.hotTable]
+      );
+      const row = (Array.isArray(raw) ? raw[0] : raw?.rows?.[0]) as
+        | Record<string, unknown>
+        | undefined;
+      const total = Number(row?.total ?? 0);
+      const compressed = Number(row?.compressed ?? 0);
+      base.totalChunks = total;
+      base.compressedChunks = compressed;
+      base.compressionRatio = total > 0 ? compressed / total : null;
+      base.timescaledbAvailable = true;
+
+      const startedAt = Date.now();
+      await this.db.raw(
+        `SELECT * FROM ?? ORDER BY ?? DESC LIMIT 100;`,
+        [entity.hotTable, entity.timeColumn]
+      );
+      base.readProbeMs = Date.now() - startedAt;
+
+      logger.info(
+        {
+          entityType,
+          hotTable: entity.hotTable,
+          totalChunks: total,
+          compressedChunks: compressed,
+          compressionRatio: base.compressionRatio,
+          readProbeMs: base.readProbeMs,
+        },
+        "hot-cold-migration: chunk compression stats"
+      );
+    } catch (err) {
+      logger.warn(
+        { entityType, reason: err instanceof Error ? err.message : String(err) },
+        "hot-cold-migration: compression stats unavailable"
+      );
+    }
+    return base;
   }
 
   // -------------------------------------------------------------------------
