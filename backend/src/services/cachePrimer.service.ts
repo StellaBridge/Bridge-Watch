@@ -72,7 +72,11 @@ export class CachePrimerService {
             (a) => !["XLM", "USDC", "USDT", "BTC", "ETH"].includes(a.code) && a.code !== "native"
           );
           for (const asset of otherAssets) {
-            await this.priceService.getAggregatedPrice(asset.code, true).catch(() => {});
+            await this.priceService.getAggregatedPrice(asset.code, true).catch((err: unknown) => {
+              const reason = err instanceof Error ? err.message : "unknown";
+              logger.warn({ asset: asset.code, err }, "cache_prime_failure: price aggregation error for asset");
+              this.metricsService.cachePrimingFailure.inc({ task_name: "all_prices", reason });
+            });
           }
         },
       },
