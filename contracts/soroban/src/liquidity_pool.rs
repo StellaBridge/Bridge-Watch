@@ -42,6 +42,16 @@ pub const SIGNIFICANT_CHANGE_BPS: u32 = 1_000;
 /// Precision multiplier for fixed-point math (7 decimals like Stellar)
 pub const PRECISION: i128 = 10_000_000; // 1e7
 
+/// Capacity of the cumulative price observation ring buffer per pool.
+pub const MAX_PRICE_OBSERVATIONS: u32 = 64;
+
+/// Minimum TWAP window: 30 minutes (~360 ledgers at 5s close time).
+pub const TWAP_MIN_WINDOW_SECS: u64 = 1_800;
+
+/// Max tolerated spot/TWAP deviation before a reading is treated as a
+/// flash-loan or sandwich spike (5% = 500 basis points).
+pub const MAX_SPOT_TWAP_DEVIATION_BPS: u32 = 500;
+
 // ---------------------------------------------------------------------------
 // Pool types
 // ---------------------------------------------------------------------------
@@ -193,6 +203,49 @@ pub struct DailyRingMeta {
     pub capacity: u32,
 }
 
+/// A cumulative price observation (Uniswap-v2 style accumulator).
+///
+/// `price_cumulative` is the running sum of `price × seconds_elapsed`, so the
+/// TWAP between two observations is `Δcumulative / Δtimestamp`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceObservation {
+    pub timestamp: u64,
+    pub price_cumulative: i128,
+}
+
+/// Accumulator state and ring buffer metadata for price observations.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceAccumulator {
+    pub head: u32,
+    pub count: u32,
+    pub capacity: u32,
+    /// Price that has been in effect since `last_timestamp`.
+    pub last_price: i128,
+    pub last_timestamp: u64,
+    /// Cumulative price as of `last_timestamp`.
+    pub price_cumulative: i128,
+}
+
+/// Time-weighted average price and spot comparison for a pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TwapResult {
+    pub pool_id: String,
+    /// Time-weighted average price over the window, scaled by PRECISION.
+    pub twap: i128,
+    /// Latest recorded spot price, scaled by PRECISION.
+    pub spot_price: i128,
+    /// |spot − twap| / twap in basis points.
+    pub deviation_bps: i128,
+    /// Effective window actually covered, in seconds.
+    pub window_secs: u64,
+    /// True when the spot deviates from the TWAP beyond the tolerance,
+    /// indicating a likely flash-loan / sandwich manipulation.
+    pub manipulation_suspected: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Storage keys
 // ---------------------------------------------------------------------------
@@ -213,6 +266,10 @@ pub enum LiquidityKey {
     DailyBucket(String, u32),
     /// Set of all registered pool IDs
     RegisteredPools,
+    /// Price accumulator + observation ring metadata for a pool
+    PriceAccumulator(String),
+    /// Individual price observation: (pool_id, ring_index)
+    PriceObservation(String, u32),
 }
 
 // ---------------------------------------------------------------------------
