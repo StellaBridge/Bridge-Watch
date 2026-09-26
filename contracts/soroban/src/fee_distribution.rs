@@ -326,6 +326,22 @@ impl FeeDistributionContract {
         env.storage().instance().set(&FeeDistDataKey::MinDisbursement, &threshold);
     }
 
+    /// Force-transfer any buffered treasury dust for `token`, regardless of the
+    /// threshold.  Returns the amount transferred.  Admin only.
+    pub fn flush_treasury_buffer(env: Env, token: Address) -> i128 {
+        Self::require_admin(&env);
+        let key = FeeDistDataKey::TreasuryBuffer(token.clone());
+        let buffered: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        if buffered == 0 {
+            return 0;
+        }
+        env.storage().persistent().remove(&key);
+        let treasury: Address = env.storage().instance().get(&FeeDistDataKey::Treasury).unwrap();
+        token::Client::new(&env, &token)
+            .transfer(&env.current_contract_address(), &treasury, &buffered);
+        buffered
+    }
+
     /// Update the treasury address.  Admin only.
     pub fn update_treasury(env: Env, new_treasury: Address) {
         Self::require_admin(&env);
@@ -1040,6 +1056,7 @@ impl FeeDistributionContract {
         let treasury: Address = env
             .storage().instance().get(&FeeDistDataKey::Treasury).unwrap();
         let contract_addr = env.current_contract_address();
+        let threshold = Self::min_disbursement(env);
 
         for token in tokens.iter() {
             let mut pool: FeePool = match env
@@ -1050,7 +1067,9 @@ impl FeeDistributionContract {
                 None => continue,
             };
 
-            if pool.pending == 0 {
+            // Dust buffer: leave small accruals pending until they clear the
+            // threshold rather than running a distribution round for them.
+            if pool.pending == 0 || pool.pending < threshold {
                 continue;
             }
 
@@ -1080,10 +1099,18 @@ impl FeeDistributionContract {
             pool.governance_pool = pool.governance_pool
                 .checked_add(governance_amt).expect("overflow");
 
-            // Sweep treasury directly.
-            if treasury_amt > 0 {
+            // Sweep treasury once its buffered allocation clears the threshold.
+            let buffer_key = FeeDistDataKey::TreasuryBuffer(token.clone());
+            let buffered: i128 = env.storage().persistent().get(&buffer_key).unwrap_or(0);
+            let treasury_due = buffered.checked_add(treasury_amt).expect("overflow");
+            if treasury_due > 0 && treasury_due >= threshold {
                 token::Client::new(env, &token)
-                    .transfer(&contract_addr, &treasury, &treasury_amt);
+                    .transfer(&contract_addr, &treasury, &treasury_due);
+                if buffered > 0 {
+                    env.storage().persistent().remove(&buffer_key);
+                }
+            } else if treasury_amt > 0 {
+                env.storage().persistent().set(&buffer_key, &treasury_due);
             }
 
             pool.total_distributed = pool.total_distributed
