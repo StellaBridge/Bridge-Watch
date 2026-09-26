@@ -83,6 +83,31 @@ k6 run --env PROFILE=load --env BACKLOG_SIZE=500 \
   load-tests/scenarios/soroban-batch-planner.js
 ```
 
+### 4. WebSocket Broadcast Concurrency (`websocket-concurrency.js`)
+Scalability of the real-time broadcaster under 5,000 concurrent subscribers - **Closes #1296**
+
+Each VU connects to `/api/v1/ws`, subscribes to `bridges`, `events`, `health`, `prices`, and holds the connection for `HOLD_SECONDS`.
+
+#### Metrics Collected
+- `ws_broadcast_latency` - server message `timestamp` to client receipt (p95 < 1s, p99 < 2.5s)
+- `ws_message_drop_rate` - sessions that received no broadcast while subscribed (< 1%)
+- `ws_connection_drop_rate` - sessions closed before the hold window ended (< 1%)
+- `redis_memory_used_bytes` - sampled every 5s from a [redis_exporter](https://github.com/oliver006/redis_exporter) when `REDIS_EXPORTER_URL` is set
+
+Drop rate assumes the backend is broadcasting during the run. On an idle environment, publish events (e.g. via ingestion or a Redis `PUBLISH`) while the test holds.
+
+#### Test Execution
+```bash
+k6 run load-tests/websocket-concurrency.js
+
+k6 run --env TARGET_VUS=500 --env HOLD_SECONDS=120 \
+  --env BASE_URL=http://localhost:3001 \
+  --env REDIS_EXPORTER_URL=http://localhost:9121/metrics \
+  load-tests/websocket-concurrency.js
+```
+
+5,000 connections need a raised file-descriptor limit on the load generator (`ulimit -n 20000`).
+
 ## Quick Start
 
 1. Start the backend service:
