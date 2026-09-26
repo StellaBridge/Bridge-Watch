@@ -1,4 +1,6 @@
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
+};
 
 const BPS_DENOM: i128 = 10_000;
 const REWARD_SCALE: i128 = 1_000_000_000;
@@ -611,31 +613,49 @@ impl InsurancePoolContract {
     }
 
     /// Executes payout for approved claims and updates historical totals.
-    pub fn execute_payout(env: Env, admin: Address, claim_id: u64) {
+    ///
+    /// Payouts are bounded by two solvency caps:
+    /// - a single payout may not exceed `max_claim_fraction_bps` of available liquidity;
+    /// - total payouts in an epoch may not exceed `epoch_drain_cap_bps` of the
+    ///   liquidity the pool held when the epoch opened.
+    ///
+    /// Any remainder is queued and paid in subsequent epochs via this function or
+    /// `process_payout_queue`. Returns the amount disbursed by this call.
+    pub fn execute_payout(env: Env, admin: Address, claim_id: u64) -> i128 {
         require_admin(&env, &admin);
 
         let mut claim = load_claim(&env, claim_id);
-        if claim.status != ClaimStatus::Approved {
+        if claim.status != ClaimStatus::Approved && claim.status != ClaimStatus::PartiallyPaid {
             panic!("claim not approved");
         }
 
-        let mut pool = load_pool(&env, &claim.pool_id);
-        if pool.total_liquidity < claim.amount {
-            panic!("insufficient pool liquidity");
-        }
-        if pool.active_coverage < claim.amount {
-            panic!("coverage accounting mismatch");
-        }
-
-        pool.total_liquidity = checked_sub(pool.total_liquidity, claim.amount, "underflow");
-        pool.active_coverage = checked_sub(pool.active_coverage, claim.amount, "underflow");
-        pool.payout_total = checked_add(pool.payout_total, claim.amount, "overflow");
-        pool.paid_claims = pool.paid_claims.saturating_add(1);
-
-        claim.status = ClaimStatus::Paid;
-
-        save_pool(&env, &pool);
+        let paid = pay_claim_tranche(&env, &mut claim);
         save_claim(&env, &claim);
+        paid
+    }
+
+    /// Pays queued claim remainders for a pool in FIFO order, within the current caps.
+    /// Returns the total amount disbursed.
+    pub fn process_payout_queue(env: Env, admin: Address, pool_id: String) -> i128 {
+        require_admin(&env, &admin);
+
+        let queue = load_payout_queue(&env, &pool_id);
+        let mut total_paid: i128 = 0;
+        for i in 0..queue.len() {
+            let claim_id = queue.get(i).unwrap();
+            let mut claim = load_claim(&env, claim_id);
+            if claim.status != ClaimStatus::PartiallyPaid {
+                continue;
+            }
+            let paid = pay_claim_tranche(&env, &mut claim);
+            save_claim(&env, &claim);
+            if paid == 0 {
+                // Epoch cap exhausted; remaining claims wait for the next epoch.
+                break;
+            }
+            total_paid = checked_add(total_paid, paid, "overflow");
+        }
+        total_paid
     }
 
     /// Claims accrued premium rewards for a staker.
@@ -743,6 +763,92 @@ fn save_claim(env: &Env, claim: &ClaimInfo) {
     env.storage()
         .instance()
         .set(&DataKey::InsuranceClaim(claim.claim_id), claim);
+}
+
+/// Disburses as much of the claim's outstanding balance as the caps allow and
+/// updates pool, epoch and queue state. The caller persists the claim.
+fn pay_claim_tranche(env: &Env, claim: &mut ClaimInfo) -> i128 {
+    let remaining = checked_sub(claim.amount, claim.paid_amount, "underflow");
+    if remaining <= 0 {
+        panic!("claim already settled");
+    }
+
+    let config = load_payout_caps(env);
+    let mut pool = load_pool(env, &claim.pool_id);
+    if pool.active_coverage < remaining {
+        panic!("coverage accounting mismatch");
+    }
+
+    let mut epoch = current_payout_epoch(env, &pool, &config);
+    let per_claim_cap = bps_of(pool.total_liquidity, config.max_claim_fraction_bps);
+    let epoch_budget = bps_of(epoch.opening_liquidity, config.epoch_drain_cap_bps);
+    let epoch_remaining = if epoch_budget > epoch.paid_in_epoch {
+        epoch_budget - epoch.paid_in_epoch
+    } else {
+        0
+    };
+
+    let mut payable = remaining;
+    if payable > per_claim_cap {
+        payable = per_claim_cap;
+    }
+    if payable > epoch_remaining {
+        payable = epoch_remaining;
+    }
+    if payable > pool.total_liquidity {
+        payable = pool.total_liquidity;
+    }
+
+    let mut queue = load_payout_queue(env, &claim.pool_id);
+    let queued_idx = queue.first_index_of(claim.claim_id);
+
+    if payable <= 0 {
+        if queued_idx.is_none() {
+            queue.push_back(claim.claim_id);
+            save_payout_queue(env, &claim.pool_id, &queue);
+        }
+        claim.status = ClaimStatus::PartiallyPaid;
+        save_payout_epoch(env, &epoch);
+        env.events().publish(
+            (symbol_short!("ins_pool"), symbol_short!("pay_queue")),
+            (claim.claim_id, remaining),
+        );
+        return 0;
+    }
+
+    pool.total_liquidity = checked_sub(pool.total_liquidity, payable, "underflow");
+    pool.active_coverage = checked_sub(pool.active_coverage, payable, "underflow");
+    pool.payout_total = checked_add(pool.payout_total, payable, "overflow");
+    epoch.paid_in_epoch = checked_add(epoch.paid_in_epoch, payable, "overflow");
+    claim.paid_amount = checked_add(claim.paid_amount, payable, "overflow");
+
+    let outstanding = checked_sub(claim.amount, claim.paid_amount, "underflow");
+    if outstanding == 0 {
+        claim.status = ClaimStatus::Paid;
+        pool.paid_claims = pool.paid_claims.saturating_add(1);
+        if let Some(idx) = queued_idx {
+            queue.remove(idx);
+            save_payout_queue(env, &claim.pool_id, &queue);
+        }
+    } else {
+        claim.status = ClaimStatus::PartiallyPaid;
+        if queued_idx.is_none() {
+            queue.push_back(claim.claim_id);
+            save_payout_queue(env, &claim.pool_id, &queue);
+        }
+        env.events().publish(
+            (symbol_short!("ins_pool"), symbol_short!("pay_queue")),
+            (claim.claim_id, outstanding),
+        );
+    }
+
+    save_pool(env, &pool);
+    save_payout_epoch(env, &epoch);
+    env.events().publish(
+        (symbol_short!("ins_pool"), symbol_short!("payout")),
+        (claim.claim_id, payable, outstanding),
+    );
+    payable
 }
 
 fn load_payout_caps(env: &Env) -> PayoutCapConfig {
