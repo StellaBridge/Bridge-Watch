@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { BridgeRegistryService } from "../../services/bridge-registry.service.js";
+import {
+  BridgeRegistryService,
+  OptimisticLockConflictError,
+} from "../../services/bridge-registry.service.js";
 
 const STATUSES = ["active", "inactive", "deprecated", "pending"] as const;
 
@@ -135,20 +138,38 @@ export async function bridgeRegistryRoutes(server: FastifyInstance) {
             documentation_url: { type: "string" },
             changed_by: { type: "string" },
             change_reason: { type: "string" },
+            version: {
+              type: "integer",
+              minimum: 1,
+              description: "Revision read from GET; when supplied, the update applies only if the row still carries it",
+            },
           },
         },
         response: {
           200: { type: "object", additionalProperties: true },
           404: { $ref: "Error#" },
+          409: { $ref: "Error#" },
         },
       },
     },
     async (request, reply) => {
-      const updated = await service.update(request.params.bridgeId, request.body as any);
-      if (!updated) {
-        return reply.status(404).send({ error: "Bridge not found in registry" });
+      const { version, ...input } = request.body as Record<string, unknown>;
+      try {
+        const updated = await service.update(
+          request.params.bridgeId,
+          input as any,
+          typeof version === "number" ? version : undefined
+        );
+        if (!updated) {
+          return reply.status(404).send({ error: "Bridge not found in registry" });
+        }
+        return updated;
+      } catch (err) {
+        if (err instanceof OptimisticLockConflictError) {
+          return reply.status(409).send({ error: err.message });
+        }
+        throw err;
       }
-      return updated;
     }
   );
 

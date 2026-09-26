@@ -19,8 +19,26 @@ export interface BridgeRegistryEntry {
   description: string | null;
   homepage_url: string | null;
   documentation_url: string | null;
+  /** Optimistic-locking revision, bumped on every update (issue #1279). */
+  version: number;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Thrown when an update carries a stale `version` — another writer changed
+ * the row first. Routes map this to HTTP 409 Conflict.
+ */
+export class OptimisticLockConflictError extends Error {
+  readonly statusCode = 409;
+  readonly bridgeId: string;
+  constructor(bridgeId: string) {
+    super(
+      `Bridge registry entry '${bridgeId}' was modified by another writer; refresh and retry`
+    );
+    this.name = "OptimisticLockConflictError";
+    this.bridgeId = bridgeId;
+  }
 }
 
 export interface CreateBridgeRegistryInput {
@@ -95,7 +113,10 @@ export class BridgeRegistryService {
         bridge_id: input.bridge_id,
         name: input.name,
         display_name: input.display_name,
-        supported_chains: JSON.stringify(input.supported_chains),
+        // text[] column: pass the JS array through so pg serializes a proper
+        // array literal (JSON.stringify produced '["a","b"]', which Postgres
+        // rejects as a malformed array literal).
+        supported_chains: input.supported_chains,
         owner_name: input.owner_name ?? null,
         owner_contact: input.owner_contact ?? null,
         owner_url: input.owner_url ?? null,
@@ -110,12 +131,23 @@ export class BridgeRegistryService {
     return this.mapRow(row);
   }
 
-  async update(bridgeId: string, input: UpdateBridgeRegistryInput): Promise<BridgeRegistryEntry | null> {
+  async update(
+    bridgeId: string,
+    input: UpdateBridgeRegistryInput,
+    expectedVersion?: number
+  ): Promise<BridgeRegistryEntry | null> {
     logger.info({ bridgeId }, "Updating bridge registry entry");
     const db = getDatabase();
 
     const existing = await db("bridge_registry").where({ bridge_id: bridgeId }).first();
     if (!existing) return null;
+
+    if (
+      expectedVersion !== undefined &&
+      Number(existing.version ?? 1) !== expectedVersion
+    ) {
+      throw new OptimisticLockConflictError(bridgeId);
+    }
 
     const updatePayload: Record<string, unknown> = { updated_at: new Date() };
     const changedFields: Array<{ field: string; old: string; next: string }> = [];
@@ -138,16 +170,28 @@ export class BridgeRegistryService {
             next: JSON.stringify(newVal),
           });
         }
-        updatePayload[field] = field === "supported_chains" || field === "validation_rules"
-          ? JSON.stringify(newVal)
-          : newVal;
+        updatePayload[field] =
+          field === "validation_rules"
+            ? JSON.stringify(newVal)
+            : newVal;
       }
     }
 
+    // Bump the revision so concurrent writers detect the change. When the
+    // caller supplied the version they read, guard the write with it: zero
+    // affected rows means someone else won the race.
+    const where =
+      expectedVersion !== undefined
+        ? { bridge_id: bridgeId, version: expectedVersion }
+        : { bridge_id: bridgeId };
     const [updated] = await db("bridge_registry")
-      .where({ bridge_id: bridgeId })
-      .update(updatePayload)
+      .where(where)
+      .update({ ...updatePayload, version: Number(existing.version ?? 1) + 1 })
       .returning("*");
+
+    if (!updated) {
+      throw new OptimisticLockConflictError(bridgeId);
+    }
 
     if (changedFields.length > 0) {
       await db("bridge_registry_history").insert(
@@ -219,6 +263,7 @@ export class BridgeRegistryService {
       description: (row.description ?? null) as string | null,
       homepage_url: (row.homepage_url ?? null) as string | null,
       documentation_url: (row.documentation_url ?? null) as string | null,
+      version: Number(row.version ?? 1),
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
     };
