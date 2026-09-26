@@ -38,6 +38,13 @@
 //! created by the admin.  A cliff period must pass before any tokens vest.
 //! After the cliff, tokens vest proportionally to elapsed / total duration.
 //!
+//! ### Dust Buffering
+//!
+//! Transfers below `MIN_DISBURSEMENT_THRESHOLD` (1 XLM by default, admin
+//! configurable) are deferred.  Pending fees are not distributed, treasury
+//! allocations are buffered per token, and staker claims are refused until the
+//! accrued amount clears the threshold.
+//!
 //! ### Compounding
 //!
 //! Stakers may opt in to auto-compounding.  When enabled, claimed rewards are
@@ -552,6 +559,8 @@ impl FeeDistributionContract {
     ///
     /// # Panics
     /// - Nothing to claim.
+    /// - Pending rewards are below the minimum disbursement threshold
+    ///   (non-compounding stakers only).
     /// - Contract is in emergency mode.
     pub fn claim_fees(env: Env, staker: Address, token: Address) {
         staker.require_auth();
@@ -571,12 +580,19 @@ impl FeeDistributionContract {
             panic!("nothing to claim");
         }
 
-        env.storage().persistent().set(&FeeDistDataKey::StakerPending(key), &0i128);
-
         let compound: bool = env
             .storage().persistent()
             .get(&FeeDistDataKey::StakerCompound(staker.clone()))
             .unwrap_or(false);
+
+        // Transfers of dust are deferred: rewards keep accruing in the pending
+        // buffer until they clear the threshold. Compounding moves no tokens,
+        // so it is not subject to the threshold.
+        if !compound && pending < Self::min_disbursement(&env) {
+            panic!("below minimum disbursement threshold");
+        }
+
+        env.storage().persistent().set(&FeeDistDataKey::StakerPending(key), &0i128);
 
         if compound {
             // Re-stake: boost the staker's weight by the pending reward amount.
