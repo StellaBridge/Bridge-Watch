@@ -73,9 +73,12 @@ export class DepegService {
 
   private readonly CHECK_INTERVAL_MS = 10000; // 10 seconds
   private readonly TREND_WINDOW_MINUTES = 5;
+  private readonly MIN_SOURCES_FOR_CRITICAL = 2; // Require 2+ sources to confirm critical depeg
+  private readonly CONSECUTIVE_INTERVALS_FOR_CRITICAL = 3; // Require 3 consecutive confirmations
+  private readonly DEVIATION_HISTORY_KEY_PREFIX = "depeg:deviation:"; // Track deviations per symbol
 
   /**
-   * Monitor stablecoin for depeg
+   * Monitor stablecoin for depeg with multi-source confidence weighting
    */
   async monitorStablecoin(symbol: string): Promise<DepegAnalysis> {
     try {
@@ -86,21 +89,28 @@ export class DepegService {
         throw new Error(`No price sources available for ${symbol}`);
       }
 
-      // Calculate average price
-      const avgPrice =
-        sources.reduce((sum, s) => sum + s.price, 0) / sources.length;
-
       // Get peg value
       const pegValue = this.PEG_VALUES[symbol] || 1.0;
 
-      // Calculate deviation
-      const deviation = Math.abs(avgPrice - pegValue) / pegValue;
+      // Calculate median price and MAD
+      const { median: medianPrice, mad } = this.calculateMedianAndMAD(
+        sources.map((s) => s.price),
+      );
+
+      // Calculate deviation using median (more resistant to outliers)
+      const deviation = Math.abs(medianPrice - pegValue) / pegValue;
 
       // Determine if depegged
       const isDepegged = deviation >= this.THRESHOLDS.warning;
 
-      // Get severity
+      // Get severity with multi-source confirmation for critical alerts
       const severity = this.calculateSeverity(deviation);
+      const confirmedSeverity = await this.confirmSeverityWithMultipleSources(
+        symbol,
+        severity,
+        deviation,
+        sources.length,
+      );
 
       // Analyze trend
       const trend = await this.analyzeTrend(symbol, deviation);
@@ -116,7 +126,7 @@ export class DepegService {
         symbol,
         is_depegged: isDepegged,
         current_deviation: deviation,
-        severity,
+        severity: confirmedSeverity,
         trend,
         time_in_depeg: timeInDepeg,
         sources,
@@ -128,9 +138,9 @@ export class DepegService {
       if (isDepegged) {
         await this.handleDepegEvent(
           symbol,
-          avgPrice,
+          medianPrice,
           deviation,
-          severity,
+          confirmedSeverity,
           sources,
           trend,
         );
@@ -436,6 +446,109 @@ export class DepegService {
     } catch (error) {
       return 0;
     }
+  }
+
+  /**
+   * Calculate median and median absolute deviation (MAD)
+   */
+  private calculateMedianAndMAD(prices: number[]): { median: number; mad: number } {
+    if (prices.length === 0) {
+      return { median: 0, mad: 0 };
+    }
+
+    const sorted = [...prices].sort((a, b) => a - b);
+    const n = sorted.length;
+    const median =
+      n % 2 === 0
+        ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+        : sorted[Math.floor(n / 2)];
+
+    // Calculate median absolute deviation
+    const deviations = sorted.map((p) => Math.abs(p - median));
+    const sortedDeviations = deviations.sort((a, b) => a - b);
+    const madIndex = Math.floor(sortedDeviations.length / 2);
+    const mad =
+      sortedDeviations.length % 2 === 0
+        ? (sortedDeviations[madIndex - 1] + sortedDeviations[madIndex]) / 2
+        : sortedDeviations[madIndex];
+
+    return { median, mad };
+  }
+
+  /**
+   * Confirm severity with multiple independent sources
+   * Only triggers CRITICAL_DEPEG if 2+ sources confirm for 3 consecutive intervals
+   */
+  private async confirmSeverityWithMultipleSources(
+    symbol: string,
+    severity: DepegSeverity | null,
+    deviation: number,
+    sourceCount: number,
+  ): Promise<DepegSeverity | null> {
+    // If not critical, return as-is
+    if (severity !== "critical") {
+      return severity;
+    }
+
+    // If fewer than minimum sources, downgrade to severe
+    if (sourceCount < this.MIN_SOURCES_FOR_CRITICAL) {
+      logger.warn(
+        {
+          symbol,
+          deviation: `${(deviation * 100).toFixed(2)}%`,
+          sourceCount,
+          minRequired: this.MIN_SOURCES_FOR_CRITICAL,
+        },
+        "Critical depeg requires multiple sources — downgrading to severe",
+      );
+      return "severe";
+    }
+
+    // Track consecutive confirmations
+    const key = `${this.DEVIATION_HISTORY_KEY_PREFIX}${symbol}`;
+    const historyStr = await redis.get(key);
+    let history: Array<{ deviation: number; timestamp: number }> = [];
+
+    if (historyStr) {
+      try {
+        history = JSON.parse(historyStr);
+      } catch {
+        history = [];
+      }
+    }
+
+    // Add current reading
+    history.push({ deviation, timestamp: Date.now() });
+
+    // Keep only recent readings (last 3 intervals)
+    history = history.slice(-this.CONSECUTIVE_INTERVALS_FOR_CRITICAL);
+
+    // Store updated history
+    await redis.setex(key, 300, JSON.stringify(history));
+
+    // Check if we have enough consecutive confirmations
+    const consecutiveConfirmations = history.filter(
+      (h) => Math.abs(h.deviation - this.THRESHOLDS.critical) < 0.001 ||
+        h.deviation > this.THRESHOLDS.critical,
+    ).length;
+
+    if (
+      consecutiveConfirmations < this.CONSECUTIVE_INTERVALS_FOR_CRITICAL
+    ) {
+      logger.warn(
+        {
+          symbol,
+          deviation: `${(deviation * 100).toFixed(2)}%`,
+          consecutiveConfirmations,
+          required: this.CONSECUTIVE_INTERVALS_FOR_CRITICAL,
+        },
+        "Critical depeg requires consecutive confirmations — downgrading to severe",
+      );
+      return "severe";
+    }
+
+    // Critical depeg confirmed by multiple sources and consecutive intervals
+    return "critical";
   }
 
   /**
