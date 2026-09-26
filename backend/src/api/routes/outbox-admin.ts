@@ -34,6 +34,22 @@ const PurgeSchema = z.object({
   olderThanDays: z.coerce.number().min(1).max(365).default(30),
 });
 
+// Manual bulk re-enqueue from the dead letter queue (issue #1260)
+const DlqRedriveSchema = z
+  .object({
+    eventIds: z.array(z.string().uuid()).min(1).max(100).optional(),
+    all: z.boolean().optional(),
+  })
+  .refine((body) => body.all === true || (body.eventIds?.length ?? 0) > 0, {
+    message: "Provide eventIds or all=true",
+  });
+
+const DlqPaginationSchema = z.object({
+  limit: z.coerce.number().min(1).max(1000).default(100),
+  offset: z.coerce.number().min(0).default(0),
+  eventType: z.string().optional(),
+});
+
 export async function outboxAdminRoutes(fastify: FastifyInstance) {
   const db = getDatabase();
   const adminApi = new OutboxAdminApi(db);
@@ -68,6 +84,7 @@ export async function outboxAdminRoutes(fastify: FastifyInstance) {
                 processing: { type: "number" },
                 delivered: { type: "number" },
                 failed: { type: "number" },
+                deadLetter: { type: "number" },
                 totalEvents: { type: "number" },
               },
             },
@@ -300,6 +317,104 @@ export async function outboxAdminRoutes(fastify: FastifyInstance) {
       return reply.send(eventRecord);
     } catch (error) {
       logger.error({ error, eventId: request.params }, "Failed to get event details");
+      return reply.code(500).send({ error: "Internal server error" });
+    }
+  });
+
+  // GET /admin/outbox/dlq - List dead letter events for inspection (#1260)
+  fastify.get("/dlq", {
+    schema: {
+      description: "List dead letter queue rows with failed payloads and linked outbox status",
+      tags: ["outbox-admin"],
+      querystring: {
+        type: "object",
+        properties: {
+          limit: { type: "number", minimum: 1, maximum: 1000, default: 100 },
+          offset: { type: "number", minimum: 0, default: 0 },
+          eventType: { type: "string" },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const { limit, offset, eventType } = DlqPaginationSchema.parse(request.query);
+      const result = await adminApi.getDeadLetterEvents(limit, offset, eventType);
+      return reply.send(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.code(400).send({ error: "Invalid query parameters", details: error.errors });
+      }
+      logger.error({ error }, "Failed to list dead letter events");
+      return reply.code(500).send({ error: "Internal server error" });
+    }
+  });
+
+  // GET /admin/outbox/dlq/:eventId - Inspect a poisoned payload (#1260)
+  fastify.get("/dlq/:eventId", {
+    schema: {
+      description: "Get a dead letter event including payload and the last error stack trace",
+      tags: ["outbox-admin"],
+      params: {
+        type: "object",
+        properties: {
+          eventId: { type: "string", format: "uuid" },
+        },
+        required: ["eventId"],
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const { eventId } = request.params as { eventId: string };
+      const event = await adminApi.getDeadLetterEvent(eventId);
+      if (!event) {
+        return reply.code(404).send({ error: "Dead letter event not found" });
+      }
+      return reply.send(event);
+    } catch (error) {
+      logger.error({ error, eventId: request.params }, "Failed to get dead letter event");
+      return reply.code(500).send({ error: "Internal server error" });
+    }
+  });
+
+  // POST /admin/outbox/dlq/redrive - Manual bulk re-enqueue (#1260)
+  fastify.post("/dlq/redrive", {
+    schema: {
+      description: "Manually re-enqueue dead letter events by ids, or every parked event with all=true",
+      tags: ["outbox-admin"],
+      body: {
+        type: "object",
+        properties: {
+          eventIds: {
+            type: "array",
+            items: { type: "string", format: "uuid" },
+            minItems: 1,
+            maxItems: 100,
+          },
+          all: { type: "boolean" },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const body = DlqRedriveSchema.parse(request.body ?? {});
+
+      let ids = body.eventIds ?? [];
+      if (body.all) {
+        const listed = await adminApi.getDeadLetterEvents(1000, 0);
+        ids = listed.events.map((event) => event.id);
+      }
+
+      if (ids.length === 0) {
+        return reply.code(400).send({ error: "No dead letter events to redrive" });
+      }
+
+      const result = await adminApi.redriveDeadLetterEvents(ids);
+      return reply.send(result);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.code(400).send({ error: "Invalid request body", details: error.errors });
+      }
+      logger.error({ error }, "Failed to redrive dead letter events");
       return reply.code(500).send({ error: "Internal server error" });
     }
   });

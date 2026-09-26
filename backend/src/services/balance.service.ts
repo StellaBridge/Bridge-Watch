@@ -2,6 +2,7 @@ import { getDatabase } from "../database/connection.js";
 import { config, SUPPORTED_ASSETS } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { HorizonClient } from "./stellar/horizon.client.js";
+import { SorobanRpcClient } from "./stellar/soroban.client.js";
 import { EthereumRpcClient } from "./ethereum/client.js";
 import type { ChainId, ChainConfig } from "./ethereum/types.js";
 
@@ -53,6 +54,16 @@ interface BalanceSnapshotRequest {
 }
 
 const DEFAULT_SIGNIFICANT_CHANGE_THRESHOLD = 5;
+
+/**
+ * Converts a raw SAC balance (integer stroops returned by the contract's
+ * `balance(address)`) into display units using the token's `decimals()`
+ * (issue #1262).
+ */
+export function scaleTokenAmount(raw: number, decimals: number): number {
+  if (!Number.isFinite(raw)) return 0;
+  return raw / Math.pow(10, Math.max(0, decimals));
+}
 
 const DEFAULT_TRACKED_ADDRESSES: BalanceSnapshotRequest[] = [
   {
@@ -247,6 +258,36 @@ export class BalanceService {
         return code === request.assetCode && (request.assetIssuer ? issuer === request.assetIssuer : true);
       });
 
+      if (match) {
+        return {
+          ...request,
+          balance: Number(match.balance ?? 0),
+          blockNumber: account.lastModifiedLedger,
+          metadata: {
+            source: "horizon",
+            subentryCount: account.subentryCount,
+          },
+        };
+      }
+
+      // Horizon only reports Classic trustlines. Soroban SAC (Stellar
+      // Asset Contract) token balances live in smart contract storage and
+      // are invisible to /accounts/{id} — read them from the contract
+      // instead of reporting 0 (issue #1262).
+      const contractId = await this.resolveSorobanContractId(request);
+      if (contractId) {
+        const balance = await this.fetchSorobanBalance(contractId, request.address);
+        return {
+          ...request,
+          balance,
+          blockNumber: await this.getSorobanLatestLedger(),
+          metadata: {
+            source: "soroban-rpc",
+            contractId,
+          },
+        };
+      }
+
       return {
         ...request,
         balance: Number(match?.balance ?? 0),
@@ -281,6 +322,79 @@ export class BalanceService {
         tokenAddress: request.tokenAddress,
       },
     };
+  }
+
+  /**
+   * Resolves the Soroban contract id for a bridged asset from the asset
+   * registry (assets + asset_metadata.contract_address). An explicit
+   * `tokenAddress` on the request takes precedence (issue #1262).
+   */
+  private async resolveSorobanContractId(request: BalanceSnapshotRequest): Promise<string | null> {
+    if (request.tokenAddress) {
+      return request.tokenAddress;
+    }
+
+    try {
+      let query = this.db("asset_metadata")
+        .select("asset_metadata.contract_address as contractAddress")
+        .join("assets", "asset_metadata.asset_id", "assets.id")
+        .where("assets.symbol", request.assetCode)
+        .whereNotNull("asset_metadata.contract_address");
+
+      if (request.assetIssuer) {
+        query = query.where("assets.issuer", request.assetIssuer);
+      }
+
+      const row = await query.first();
+      return row?.contractAddress ?? null;
+    } catch (error) {
+      logger.warn(
+        { assetCode: request.assetCode, error },
+        "Failed to resolve Soroban contract id from asset registry"
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Reads a Soroban SAC token balance on-chain: `balance(address)` returns
+   * raw units scaled by the contract's `decimals()` (issue #1262).
+   */
+  private async fetchSorobanBalance(contractId: string, address: string): Promise<number> {
+    try {
+      const client = new SorobanRpcClient();
+      const balanceResult = await client.simulateInvocation<unknown>({
+        contractId,
+        functionName: "balance",
+        args: [address],
+      });
+      const decimalsResult = await client.simulateInvocation<unknown>({
+        contractId,
+        functionName: "decimals",
+        args: [],
+      });
+
+      const raw = Number(balanceResult.returnValue ?? 0);
+      const decimals = Number(decimalsResult.returnValue ?? 7);
+      return scaleTokenAmount(raw, decimals);
+    } catch (error) {
+      logger.error(
+        { contractId, address, error },
+        "Failed to read Soroban SAC token balance"
+      );
+      return 0;
+    }
+  }
+
+  private async getSorobanLatestLedger(): Promise<number | null> {
+    try {
+      const client = new SorobanRpcClient();
+      const latest = (await client.getLatestLedger()) as { sequence?: number };
+      return Number(latest.sequence ?? 0) || null;
+    } catch (error) {
+      logger.warn({ error }, "Failed to read latest Soroban ledger");
+      return null;
+    }
   }
 
   private async upsertBalanceSnapshot(

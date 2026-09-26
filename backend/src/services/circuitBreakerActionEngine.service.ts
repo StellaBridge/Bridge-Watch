@@ -5,9 +5,19 @@ import fetch from "node-fetch";
 import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
 import { getCircuitBreakerService, PauseScope } from "./circuitBreaker.service.js";
+import { changeApprovalService } from "./changeApproval.service.js";
+import type { ChangeRequest } from "./changeApproval.service.js";
 import { CircuitBreakerActionConfig, CircuitBreakerActionLog, CircuitBreakerActionType } from "../database/types.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Elevated role required for submitting and approving manual circuit
+ * breaker overrides (issue #1259).
+ */
+const OPERATOR_ADMIN_SCOPE = "operator:admin";
+
+export interface ScriptActionPayload {
 
 export interface ScriptActionPayload {
   command?: string;
@@ -42,6 +52,28 @@ export interface TriggerEventData {
   reason?: string;
 }
 
+export interface ManualOverrideRequestParams {
+  title: string;
+  description: string;
+  actionType: CircuitBreakerActionType;
+  config: object | string;
+  requestedBy: string;
+  requesterScopes: string[];
+}
+
+export interface ExecuteManualOverrideParams {
+  changeRequestId: string;
+  approvedBy: string;
+  approverScopes: string[];
+}
+
+function hasScope(grantedScopes: string[], requiredScope: string): boolean {
+  if (grantedScopes.includes("*")) {
+    return true;
+  }
+  return grantedScopes.includes(requiredScope);
+}
+
 export class CircuitBreakerActionEngine {
   /**
    * Fetch all active action configurations for a given alert type (or 'all')
@@ -54,6 +86,104 @@ export class CircuitBreakerActionEngine {
         builder.where("alert_type", alertType).orWhere("alert_type", "all");
       });
     return configs;
+  }
+
+  /**
+   * Queue a manual circuit breaker override as a pending change request
+   * (issue #1259).
+   *
+   * Manual trips and resets are never executed directly from a single
+   * operator: the requester must hold the elevated `operator:admin` scope
+   * and the action is only recorded as a pending change request awaiting a
+   * second distinct admin approval. Executing requires
+   * `executeApprovedManualOverride`.
+   */
+  async requestManualOverride(
+    params: ManualOverrideRequestParams
+  ): Promise<ChangeRequest> {
+    if (!hasScope(params.requesterScopes, OPERATOR_ADMIN_SCOPE)) {
+      throw new Error(
+        `Manual circuit breaker override requires the elevated '${OPERATOR_ADMIN_SCOPE}' scope`
+      );
+    }
+
+    const request = await changeApprovalService.createDraft({
+      title: params.title,
+      description: params.description,
+      changeType: "other",
+      payload: {
+        engine: "circuit_breaker_action_engine",
+        actionType: params.actionType,
+        config: params.config,
+        requestedBy: params.requestedBy,
+      },
+      createdBy: params.requestedBy,
+    });
+
+    return changeApprovalService.submitForApproval(request.id, params.requestedBy);
+  }
+
+  /**
+   * Execute a manual override that a second, distinct admin has approved.
+   *
+   * Requires the approver to hold the elevated `operator:admin` scope, the
+   * change request to be a circuit breaker override, and enforces the
+   * four-eyes principle: the approver must not be the original submitter.
+   * Only then is the action executed and the change request marked applied.
+   */
+  async executeApprovedManualOverride(
+    params: ExecuteManualOverrideParams
+  ): Promise<CircuitBreakerActionLog> {
+    if (!hasScope(params.approverScopes, OPERATOR_ADMIN_SCOPE)) {
+      throw new Error(
+        `Approving a manual circuit breaker override requires the elevated '${OPERATOR_ADMIN_SCOPE}' scope`
+      );
+    }
+
+    const request = await changeApprovalService.getById(params.changeRequestId);
+    if (!request) {
+      throw new Error(`Change request not found: ${params.changeRequestId}`);
+    }
+
+    if (request.submittedBy === params.approvedBy) {
+      throw new Error(
+        `Four-eyes principle violation: the approver (${params.approvedBy}) must not ` +
+          `be the same as the submitter (${request.submittedBy}).`
+      );
+    }
+
+    const payload = request.payload as {
+      engine?: string;
+      actionType?: CircuitBreakerActionType;
+      config?: object | string;
+      requestedBy?: string;
+    };
+
+    if (payload.engine !== "circuit_breaker_action_engine") {
+      throw new Error(
+        `Change request ${params.changeRequestId} is not a circuit breaker override`
+      );
+    }
+
+    await changeApprovalService.approve(params.changeRequestId, params.approvedBy);
+    await changeApprovalService.applyChange(params.changeRequestId, params.approvedBy);
+
+    const actionConfig: CircuitBreakerActionConfig = {
+      id: `manual-override-${request.id}`,
+      name: request.title,
+      alert_type: "all",
+      action_type: payload.actionType as CircuitBreakerActionType,
+      config: typeof payload.config === "string" ? payload.config : JSON.stringify(payload.config ?? {}),
+      enabled: true,
+      timeout_ms: 30000,
+      created_at: request.createdAt,
+      updated_at: request.updatedAt,
+    };
+
+    return this.executeSingleAction(actionConfig, {
+      alertType: "manual_override",
+      reason: `Manual override ${request.id}: requested by ${request.submittedBy}, approved by ${params.approvedBy}`,
+    });
   }
 
   /**

@@ -39,11 +39,11 @@ export async function up(knex: Knex): Promise<void> {
     table.unique(["aggregate_type", "aggregate_id", "sequence_no"]);
   });
 
-  // Add check constraint for status
+  // Add check constraint for status ('dead_letter' = parked in DLQ awaiting redrive, issue #1260)
   await knex.raw(`
     ALTER TABLE outbox_events 
     ADD CONSTRAINT chk_outbox_status 
-    CHECK (status IN ('pending', 'processing', 'delivered', 'failed'))
+    CHECK (status IN ('pending', 'processing', 'delivered', 'failed', 'dead_letter'))
   `);
 
   // Add check constraint for retry_count

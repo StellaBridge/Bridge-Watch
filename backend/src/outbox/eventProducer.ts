@@ -35,12 +35,26 @@ export interface OutboxEventRecord {
   eventType: string;
   payload: any;
   metadata: any;
-  status: "pending" | "processing" | "delivered" | "failed";
+  status: "pending" | "processing" | "delivered" | "failed" | "dead_letter";
   retryCount: number;
   retryAfter: Date;
   deliveredAt: Date | null;
   errorMessage: string | null;
   createdAt: Date;
+}
+
+export interface DeadLetterEventRecord {
+  id: string;
+  outboxId: string;
+  eventType: string;
+  aggregateId: string;
+  payload: any;
+  errorCount: number;
+  lastError: string;
+  lastAttempt: Date;
+  createdAt: Date;
+  outboxStatus: OutboxEventRecord["status"];
+  outboxErrorMessage: string | null;
 }
 
 export class OutboxProducer {
@@ -211,6 +225,12 @@ export class OutboxProducer {
 
   /**
    * Move event to dead letter queue
+   *
+   * The outbox row receives the dedicated `dead_letter` status (issue #1260)
+   * and the DLQ row is kept unique per outbox event: when a re-driven event
+   * fails its way back to the DLQ, the existing row is updated with the
+   * cumulative failure count so redrive backoff keeps growing instead of
+   * restarting.
    */
   private async moveToDeadLetter(
     eventId: string,
@@ -227,22 +247,37 @@ export class OutboxProducer {
         throw new Error(`Event not found: ${eventId}`);
       }
 
-      // Insert into dead letter queue
-      await tx("dead_letter_events").insert({
-        outbox_id: eventId,
-        event_type: event.event_type,
-        aggregate_id: event.aggregate_id,
-        payload: event.payload,
-        error_count: errorCount,
-        last_error: error,
-        last_attempt: new Date(),
-      });
+      // Upsert into dead letter queue (one row per outbox event)
+      const [existingDlqRow] = await tx("dead_letter_events")
+        .select("*")
+        .where({ outbox_id: eventId });
 
-      // Mark original event as failed
+      if (existingDlqRow) {
+        await tx("dead_letter_events")
+          .where({ id: existingDlqRow.id })
+          .update({
+            error_count: Number(existingDlqRow.error_count) + errorCount,
+            last_error: error,
+            last_attempt: new Date(),
+          });
+      } else {
+        // Insert into dead letter queue
+        await tx("dead_letter_events").insert({
+          outbox_id: eventId,
+          event_type: event.event_type,
+          aggregate_id: event.aggregate_id,
+          payload: event.payload,
+          error_count: errorCount,
+          last_error: error,
+          last_attempt: new Date(),
+        });
+      }
+
+      // Mark original event as dead-lettered
       await tx("outbox_events")
         .where({ id: eventId })
         .update({
-          status: "failed",
+          status: "dead_letter",
           error_message: error,
         });
     });
@@ -290,6 +325,116 @@ export class OutboxProducer {
     };
   }
 
+  /**
+   * List dead letter queue rows with their linked outbox status, newest
+   * first (issue #1260). Used by the DLQ admin API to inspect poisoned
+   * payloads and stack traces.
+   */
+  async getDeadLetterEvents(
+    limit = 100,
+    offset = 0,
+    eventType?: string
+  ): Promise<{ events: DeadLetterEventRecord[]; total: number; hasMore: boolean }> {
+    let query = this.db("dead_letter_events")
+      .select(
+        "dead_letter_events.*",
+        "outbox_events.status as outbox_status",
+        "outbox_events.error_message as outbox_error_message"
+      )
+      .join("outbox_events", "dead_letter_events.outbox_id", "outbox_events.id");
+
+    if (eventType) {
+      query = query.where("dead_letter_events.event_type", eventType);
+    }
+
+    const [totalResult] = await query.clone().count("* as count");
+    const total = parseInt(totalResult.count as string);
+
+    const rows = await query
+      .orderBy("dead_letter_events.last_attempt", "desc")
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      events: rows.map(this.mapToDeadLetterRecord),
+      total,
+      hasMore: offset + limit < total,
+    };
+  }
+
+  /**
+   * Get a single dead letter queue row including payload and last error
+   * stack trace (issue #1260).
+   */
+  async getDeadLetterEvent(id: string): Promise<DeadLetterEventRecord | null> {
+    const [row] = await this.db("dead_letter_events")
+      .select(
+        "dead_letter_events.*",
+        "outbox_events.status as outbox_status",
+        "outbox_events.error_message as outbox_error_message"
+      )
+      .join("outbox_events", "dead_letter_events.outbox_id", "outbox_events.id")
+      .where("dead_letter_events.id", id);
+
+    return row ? this.mapToDeadLetterRecord(row) : null;
+  }
+
+  /**
+   * Re-enqueue a dead-lettered event: the outbox row returns to `pending`
+   * with its retry budget reset while the DLQ row stays behind as the
+   * redrive audit trail (issue #1260).
+   */
+  async redriveDeadLetter(id: string): Promise<boolean> {
+    const [dlqRow] = await this.db("dead_letter_events")
+      .select("*")
+      .where({ id });
+
+    if (!dlqRow) {
+      return false;
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx("outbox_events")
+        .where({ id: dlqRow.outbox_id })
+        .update({
+          status: "pending",
+          retry_count: 0,
+          retry_after: new Date(),
+          error_message: null,
+        });
+
+      await tx("dead_letter_events")
+        .where({ id })
+        .update({ last_attempt: new Date() });
+    });
+
+    logger.info(
+      { deadLetterId: id, outboxId: dlqRow.outbox_id },
+      "Dead letter event re-enqueued for redrive"
+    );
+    return true;
+  }
+
+  /**
+   * Drop the DLQ row once its linked outbox event has been successfully
+   * delivered after a redrive (issue #1260).
+   */
+  async releaseDeadLetter(id: string): Promise<void> {
+    await this.db("dead_letter_events").where({ id }).delete();
+  }
+
+  /**
+   * Status of the outbox row linked to a DLQ row (issue #1260).
+   */
+  async getOutboxStatusForDeadLetter(id: string): Promise<OutboxEventRecord["status"] | null> {
+    const [row] = await this.db("dead_letter_events")
+      .select("outbox_events.status as status")
+      .join("outbox_events", "dead_letter_events.outbox_id", "outbox_events.id")
+      .where("dead_letter_events.id", id);
+
+    return row ? (row.status as OutboxEventRecord["status"]) : null;
+  }
+
   private mapToEventRecord(row: any): OutboxEventRecord {
     return {
       id: row.id.toString(),
@@ -305,6 +450,22 @@ export class OutboxProducer {
       deliveredAt: row.delivered_at,
       errorMessage: row.error_message,
       createdAt: row.created_at,
+    };
+  }
+
+  private mapToDeadLetterRecord(row: any): DeadLetterEventRecord {
+    return {
+      id: row.id,
+      outboxId: row.outbox_id,
+      eventType: row.event_type,
+      aggregateId: row.aggregate_id,
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      errorCount: Number(row.error_count),
+      lastError: row.last_error,
+      lastAttempt: new Date(row.last_attempt),
+      createdAt: new Date(row.created_at),
+      outboxStatus: row.outbox_status,
+      outboxErrorMessage: row.outbox_error_message ?? null,
     };
   }
 }
