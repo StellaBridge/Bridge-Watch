@@ -3097,4 +3097,157 @@ mod tests {
 
         assert!(!client.is_asset_frozen(&asset_code));
     }
+
+    // -----------------------------------------------------------------------
+    // Issuer validation and duplicate symbol protection
+    // -----------------------------------------------------------------------
+
+    const ALT_ISSUER: &str = "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA";
+
+    fn try_register(
+        env: &Env,
+        client: &AssetRegistryContractClient,
+        admin: &Address,
+        code: &str,
+        symbol: &str,
+        issuer: &str,
+        category: AssetCategory,
+    ) -> Result<(), RegistryError> {
+        match client.try_register_asset(
+            admin,
+            &String::from_str(env, code),
+            &String::from_str(env, code),
+            &String::from_str(env, symbol),
+            &String::from_str(env, issuer),
+            &7,
+            &category,
+            &String::from_str(env, "desc"),
+            &String::from_str(env, "url"),
+        ) {
+            Ok(_) => Ok(()),
+            Err(Ok(e)) => Err(e),
+            Err(Err(_)) => panic!("unexpected host error"),
+        }
+    }
+
+    #[test]
+    fn test_strkey_validation() {
+        let env = Env::default();
+        let valid = String::from_str(&env, ALT_ISSUER);
+        assert!(is_valid_account_strkey(&valid));
+
+        // Bad checksum (last char altered).
+        let bad_crc = String::from_str(
+            &env,
+            "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXB",
+        );
+        assert!(!is_valid_account_strkey(&bad_crc));
+
+        // Wrong length, lowercase and domain-style issuers are rejected.
+        assert!(!is_valid_account_strkey(&String::from_str(&env, "GABAEAQ")));
+        assert!(!is_valid_account_strkey(&String::from_str(&env, "circle.com")));
+        assert!(!is_valid_account_strkey(&String::from_str(
+            &env,
+            "gabaeaqcaibaeaqcaibaeaqcaibaeaqcaibaeaqcaibaeaqcaibaejxa"
+        )));
+    }
+
+    #[test]
+    fn test_register_invalid_issuer_rejected() {
+        let (env, client, admin) = setup();
+        let result = try_register(
+            &env,
+            &client,
+            &admin,
+            "USDC",
+            "USDC",
+            "circle.com",
+            AssetCategory::Stablecoin,
+        );
+        assert_eq!(result, Err(RegistryError::InvalidIssuer));
+    }
+
+    #[test]
+    fn test_native_asset_skips_issuer_check() {
+        let (env, client, admin) = setup();
+        let result = try_register(&env, &client, &admin, "XLM", "XLM", "", AssetCategory::Native);
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn test_spoofed_symbol_under_other_issuer_rejected() {
+        let (env, client, admin) = setup();
+        register_usdc(&env, &client, &admin);
+
+        // Same symbol, different asset code and issuer: spoof attempt.
+        let result = try_register(
+            &env,
+            &client,
+            &admin,
+            "USDC_FAKE",
+            "USDC",
+            ALT_ISSUER,
+            AssetCategory::Bridged,
+        );
+        assert_eq!(result, Err(RegistryError::DuplicateAssetRegistrationRejected));
+        assert!(client.get_asset(&String::from_str(&env, "USDC_FAKE")).is_none());
+    }
+
+    #[test]
+    fn test_update_metadata_cannot_hijack_symbol() {
+        let (env, client, admin) = setup();
+        register_usdc(&env, &client, &admin);
+        try_register(
+            &env,
+            &client,
+            &admin,
+            "EURC",
+            "EURC",
+            ALT_ISSUER,
+            AssetCategory::Stablecoin,
+        )
+        .unwrap();
+
+        let result = client.try_update_metadata(
+            &admin,
+            &String::from_str(&env, "EURC"),
+            &String::from_str(&env, "Euro Coin"),
+            &String::from_str(&env, "USDC"),
+            &String::from_str(&env, ALT_ISSUER),
+            &String::from_str(&env, "desc"),
+            &String::from_str(&env, "url"),
+            &String::from_str(&env, "rename"),
+        );
+        assert_eq!(
+            result,
+            Err(Ok(RegistryError::DuplicateAssetRegistrationRejected))
+        );
+    }
+
+    #[test]
+    fn test_bridge_cannot_carry_two_assets_with_same_symbol() {
+        let (env, client, admin) = setup();
+        let usdc = register_usdc(&env, &client, &admin);
+        let bridge_id = String::from_str(&env, "CIRCLE_USDC");
+
+        client.link_bridge_contract(
+            &admin,
+            &usdc,
+            &bridge_id,
+            &String::from_str(&env, "0xbridge..."),
+            &String::from_str(&env, "ethereum"),
+            &String::from_str(&env, "stellar"),
+        );
+
+        // Relinking the same asset on the same bridge hits the existing duplicate check.
+        let again = client.try_link_bridge_contract(
+            &admin,
+            &usdc,
+            &bridge_id,
+            &String::from_str(&env, "0xbridge..."),
+            &String::from_str(&env, "ethereum"),
+            &String::from_str(&env, "stellar"),
+        );
+        assert_eq!(again, Err(Ok(RegistryError::DuplicateBridge)));
+    }
 }
