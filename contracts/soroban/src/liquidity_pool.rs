@@ -1462,4 +1462,93 @@ mod tests {
         let pools = get_registered_pools(&env);
         assert!(pools.len() >= 3);
     }
+
+    // ── TWAP / sandwich protection tests ─────────────────────────────────
+
+    fn record_price(env: &Env, pool_id: &String, ts: u64, reserve_b: i128) {
+        env.ledger().set_timestamp(ts);
+        record_pool_state(
+            env,
+            pool_id.clone(),
+            1_000 * PRECISION,
+            reserve_b,
+            2_000 * PRECISION,
+            0,
+            0,
+            PoolType::Amm,
+        );
+    }
+
+    #[test]
+    fn test_twap_requires_full_window_of_history() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        record_price(&env, &pool_id, 10_000, 5_000 * PRECISION);
+        record_price(&env, &pool_id, 10_600, 5_000 * PRECISION);
+
+        assert!(calculate_twap(&env, pool_id.clone(), TWAP_MIN_WINDOW_SECS).is_none());
+        assert!(!is_price_manipulated(&env, pool_id));
+    }
+
+    #[test]
+    fn test_twap_matches_stable_price() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        for ts in [10_000u64, 11_000, 12_000, 13_000] {
+            record_price(&env, &pool_id, ts, 5_000 * PRECISION);
+        }
+
+        let result = calculate_twap(&env, pool_id, TWAP_MIN_WINDOW_SECS).unwrap();
+        assert_eq!(result.twap, 5 * PRECISION);
+        assert_eq!(result.spot_price, 5 * PRECISION);
+        assert_eq!(result.deviation_bps, 0);
+        assert!(!result.manipulation_suspected);
+    }
+
+    #[test]
+    fn test_twap_short_window_is_clamped_to_minimum() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        for ts in [10_000u64, 11_000, 12_000, 13_000] {
+            record_price(&env, &pool_id, ts, 5_000 * PRECISION);
+        }
+
+        let result = calculate_twap(&env, pool_id, 60).unwrap();
+        assert!(result.window_secs >= TWAP_MIN_WINDOW_SECS);
+    }
+
+    #[test]
+    fn test_flash_spike_flagged_against_twap() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        record_price(&env, &pool_id, 10_000, 5_000 * PRECISION);
+        record_price(&env, &pool_id, 11_800, 5_000 * PRECISION);
+        // Single-ledger spike doubles the spot price.
+        record_price(&env, &pool_id, 13_600, 10_000 * PRECISION);
+
+        let result = calculate_twap(&env, pool_id.clone(), TWAP_MIN_WINDOW_SECS).unwrap();
+        assert_eq!(result.twap, 5 * PRECISION);
+        assert_eq!(result.spot_price, 10 * PRECISION);
+        assert!(result.deviation_bps > MAX_SPOT_TWAP_DEVIATION_BPS as i128);
+        assert!(result.manipulation_suspected);
+        assert!(is_price_manipulated(&env, pool_id));
+    }
+
+    #[test]
+    fn test_same_ledger_updates_do_not_move_accumulator() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        record_price(&env, &pool_id, 10_000, 5_000 * PRECISION);
+        record_price(&env, &pool_id, 12_000, 5_000 * PRECISION);
+        // Sandwich legs inside the same ledger timestamp are ignored.
+        record_price(&env, &pool_id, 12_000, 50_000 * PRECISION);
+
+        let acc: PriceAccumulator = env
+            .storage()
+            .persistent()
+            .get(&LiquidityKey::PriceAccumulator(pool_id))
+            .unwrap();
+        assert_eq!(acc.last_price, 5 * PRECISION);
+        assert_eq!(acc.count, 2);
+    }
 }
