@@ -4,6 +4,13 @@ const BPS_DENOM: i128 = 10_000;
 const REWARD_SCALE: i128 = 1_000_000_000;
 const DEFAULT_WITHDRAW_DELAY_SECS: u64 = 86_400;
 
+/// Maximum fraction of available pool liquidity a single claim may draw in one payout (30%).
+pub const MAX_CLAIM_FRACTION_BPS: u32 = 3_000;
+/// Maximum fraction of pool liquidity that may be paid out within one payout epoch (50%).
+pub const EPOCH_DRAIN_CAP_BPS: u32 = 5_000;
+/// Length of a payout epoch in seconds (24 hours).
+pub const PAYOUT_EPOCH_SECS: u64 = 86_400;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CoverageTier {
@@ -19,6 +26,8 @@ pub enum ClaimStatus {
     Verified,
     Approved,
     Rejected,
+    /// Part of the approved amount has been paid; the remainder is queued for later epochs.
+    PartiallyPaid,
     Paid,
 }
 
@@ -84,6 +93,31 @@ pub struct ClaimInfo {
     pub approvals: Vec<Address>,
     pub slash_bps: u32,
     pub slashed_amount: i128,
+    /// Cumulative amount already disbursed for this claim.
+    pub paid_amount: i128,
+}
+
+/// Per-pool payout cap configuration.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PayoutCapConfig {
+    /// Max share of available liquidity a single claim payout may consume (bps).
+    pub max_claim_fraction_bps: u32,
+    /// Max share of epoch-opening liquidity that may be drained within one epoch (bps).
+    pub epoch_drain_cap_bps: u32,
+    /// Epoch length in seconds.
+    pub epoch_secs: u64,
+}
+
+/// Rolling payout epoch accounting for a pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PayoutEpoch {
+    pub pool_id: String,
+    pub epoch_start: u64,
+    /// Pool liquidity snapshot taken when the epoch opened; the drain cap is relative to it.
+    pub opening_liquidity: i128,
+    pub paid_in_epoch: i128,
 }
 
 #[contracttype]
@@ -97,6 +131,9 @@ pub enum DataKey {
     WithdrawalRequest(u64),
     ClaimCount,
     WithdrawalCount,
+    PayoutCapConfig,
+    PayoutEpoch(String),
+    PayoutQueue(String),
 }
 
 #[contract]
@@ -158,6 +195,59 @@ impl InsurancePoolContract {
         env.storage()
             .instance()
             .set(&DataKey::Governance, &governance);
+    }
+
+    /// Updates the claim payout caps that protect pool solvency.
+    ///
+    /// - `max_claim_fraction_bps`: largest slice of available liquidity one payout may take.
+    /// - `epoch_drain_cap_bps`: largest slice of epoch-opening liquidity paid out per epoch.
+    /// - `epoch_secs`: epoch window length.
+    pub fn configure_payout_caps(
+        env: Env,
+        admin: Address,
+        max_claim_fraction_bps: u32,
+        epoch_drain_cap_bps: u32,
+        epoch_secs: u64,
+    ) {
+        require_admin(&env, &admin);
+        if max_claim_fraction_bps == 0 || max_claim_fraction_bps > 10_000 {
+            panic!("invalid claim fraction");
+        }
+        if epoch_drain_cap_bps == 0 || epoch_drain_cap_bps > 10_000 {
+            panic!("invalid epoch drain cap");
+        }
+        if max_claim_fraction_bps > epoch_drain_cap_bps {
+            panic!("claim fraction exceeds epoch cap");
+        }
+        if epoch_secs == 0 {
+            panic!("invalid epoch length");
+        }
+
+        let config = PayoutCapConfig {
+            max_claim_fraction_bps,
+            epoch_drain_cap_bps,
+            epoch_secs,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::PayoutCapConfig, &config);
+    }
+
+    /// Returns the active payout cap configuration (defaults when unset).
+    pub fn get_payout_caps(env: Env) -> PayoutCapConfig {
+        load_payout_caps(&env)
+    }
+
+    /// Returns the current payout epoch accounting for a pool, if any payout happened.
+    pub fn get_payout_epoch(env: Env, pool_id: String) -> Option<PayoutEpoch> {
+        env.storage()
+            .instance()
+            .get(&DataKey::PayoutEpoch(pool_id))
+    }
+
+    /// Returns claim ids with outstanding balances queued for future epochs.
+    pub fn get_payout_queue(env: Env, pool_id: String) -> Vec<u64> {
+        load_payout_queue(&env, &pool_id)
     }
 
     /// Creates or updates a coverage pool for an asset.
@@ -431,6 +521,7 @@ impl InsurancePoolContract {
             approvals: Vec::new(&env),
             slash_bps: 0,
             slashed_amount: 0,
+            paid_amount: 0,
         };
 
         env.storage()
@@ -652,6 +743,62 @@ fn save_claim(env: &Env, claim: &ClaimInfo) {
     env.storage()
         .instance()
         .set(&DataKey::InsuranceClaim(claim.claim_id), claim);
+}
+
+fn load_payout_caps(env: &Env) -> PayoutCapConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::PayoutCapConfig)
+        .unwrap_or(PayoutCapConfig {
+            max_claim_fraction_bps: MAX_CLAIM_FRACTION_BPS,
+            epoch_drain_cap_bps: EPOCH_DRAIN_CAP_BPS,
+            epoch_secs: PAYOUT_EPOCH_SECS,
+        })
+}
+
+/// Loads the pool's payout epoch, rolling it over when the window has elapsed.
+fn current_payout_epoch(env: &Env, pool: &PoolInfo, config: &PayoutCapConfig) -> PayoutEpoch {
+    let now = env.ledger().timestamp();
+    let existing: Option<PayoutEpoch> = env
+        .storage()
+        .instance()
+        .get(&DataKey::PayoutEpoch(pool.pool_id.clone()));
+
+    match existing {
+        Some(epoch) if now < epoch.epoch_start.saturating_add(config.epoch_secs) => epoch,
+        _ => PayoutEpoch {
+            pool_id: pool.pool_id.clone(),
+            epoch_start: now,
+            opening_liquidity: pool.total_liquidity,
+            paid_in_epoch: 0,
+        },
+    }
+}
+
+fn save_payout_epoch(env: &Env, epoch: &PayoutEpoch) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PayoutEpoch(epoch.pool_id.clone()), epoch);
+}
+
+fn load_payout_queue(env: &Env, pool_id: &String) -> Vec<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PayoutQueue(pool_id.clone()))
+        .unwrap_or(Vec::new(env))
+}
+
+fn save_payout_queue(env: &Env, pool_id: &String, queue: &Vec<u64>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PayoutQueue(pool_id.clone()), queue);
+}
+
+fn bps_of(amount: i128, bps: u32) -> i128 {
+    amount
+        .checked_mul(bps as i128)
+        .and_then(|v| v.checked_div(BPS_DENOM))
+        .unwrap_or_else(|| panic!("bps overflow"))
 }
 
 fn next_claim_id(env: &Env) -> u64 {
