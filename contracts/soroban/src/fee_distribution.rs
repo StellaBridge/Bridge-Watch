@@ -38,6 +38,13 @@
 //! created by the admin.  A cliff period must pass before any tokens vest.
 //! After the cliff, tokens vest proportionally to elapsed / total duration.
 //!
+//! ### Dust Buffering
+//!
+//! Transfers below `MIN_DISBURSEMENT_THRESHOLD` (1 XLM by default, admin
+//! configurable) are deferred.  Pending fees are not distributed, treasury
+//! allocations are buffered per token, and staker claims are refused until the
+//! accrued amount clears the threshold.
+//!
 //! ### Compounding
 //!
 //! Stakers may opt in to auto-compounding.  When enabled, claimed rewards are
@@ -55,6 +62,11 @@ const PRECISION: i128 = 1_000_000_000_000i128;
 
 /// Denominator for basis-point calculations (10 000 = 100 %).
 const BPS_DENOM: u32 = 10_000;
+
+/// Default minimum amount (1 XLM = 10 000 000 stroops) that must accrue before
+/// a balance transfer is made. Smaller amounts stay in a pending buffer so
+/// micro-transactions do not burn CPU instructions or grow storage with dust.
+pub const MIN_DISBURSEMENT_THRESHOLD: i128 = 10_000_000;
 
 // ─── Data Structures ──────────────────────────────────────────────────────────
 
@@ -176,6 +188,10 @@ pub enum FeeDistDataKey {
     DistributionInterval,
     /// Ledger timestamp of the last automatic distribution.
     LastAutoDistribution,
+    /// Minimum amount required before a fee disbursement transfer is made.
+    MinDisbursement,
+    /// Per-token treasury allocation buffered until it clears the threshold.
+    TreasuryBuffer(Address),
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -222,6 +238,7 @@ impl FeeDistributionContract {
         env.storage().instance().set(&FeeDistDataKey::Emergency, &false);
         env.storage().instance().set(&FeeDistDataKey::DistributionInterval, &0u64);
         env.storage().instance().set(&FeeDistDataKey::LastAutoDistribution, &0u64);
+        env.storage().instance().set(&FeeDistDataKey::MinDisbursement, &MIN_DISBURSEMENT_THRESHOLD);
 
         let empty_addrs: Vec<Address> = Vec::new(&env);
         env.storage().instance().set(&FeeDistDataKey::Collectors, &empty_addrs.clone());
@@ -303,6 +320,33 @@ impl FeeDistributionContract {
     pub fn set_distribution_interval(env: Env, interval_secs: u64) {
         Self::require_admin(&env);
         env.storage().instance().set(&FeeDistDataKey::DistributionInterval, &interval_secs);
+    }
+
+    /// Set the minimum disbursement threshold.  Pending fees, treasury
+    /// allocations and staker claims below this amount are buffered instead of
+    /// transferred.  Pass `0` to disable buffering.  Admin only.
+    pub fn set_min_disbursement_threshold(env: Env, threshold: i128) {
+        Self::require_admin(&env);
+        if threshold < 0 {
+            panic!("threshold must be non-negative");
+        }
+        env.storage().instance().set(&FeeDistDataKey::MinDisbursement, &threshold);
+    }
+
+    /// Force-transfer any buffered treasury dust for `token`, regardless of the
+    /// threshold.  Returns the amount transferred.  Admin only.
+    pub fn flush_treasury_buffer(env: Env, token: Address) -> i128 {
+        Self::require_admin(&env);
+        let key = FeeDistDataKey::TreasuryBuffer(token.clone());
+        let buffered: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        if buffered == 0 {
+            return 0;
+        }
+        env.storage().persistent().remove(&key);
+        let treasury: Address = env.storage().instance().get(&FeeDistDataKey::Treasury).unwrap();
+        token::Client::new(&env, &token)
+            .transfer(&env.current_contract_address(), &treasury, &buffered);
+        buffered
     }
 
     /// Update the treasury address.  Admin only.
@@ -515,6 +559,8 @@ impl FeeDistributionContract {
     ///
     /// # Panics
     /// - Nothing to claim.
+    /// - Pending rewards are below the minimum disbursement threshold
+    ///   (non-compounding stakers only).
     /// - Contract is in emergency mode.
     pub fn claim_fees(env: Env, staker: Address, token: Address) {
         staker.require_auth();
@@ -534,12 +580,19 @@ impl FeeDistributionContract {
             panic!("nothing to claim");
         }
 
-        env.storage().persistent().set(&FeeDistDataKey::StakerPending(key), &0i128);
-
         let compound: bool = env
             .storage().persistent()
             .get(&FeeDistDataKey::StakerCompound(staker.clone()))
             .unwrap_or(false);
+
+        // Transfers of dust are deferred: rewards keep accruing in the pending
+        // buffer until they clear the threshold. Compounding moves no tokens,
+        // so it is not subject to the threshold.
+        if !compound && pending < Self::min_disbursement(&env) {
+            panic!("below minimum disbursement threshold");
+        }
+
+        env.storage().persistent().set(&FeeDistDataKey::StakerPending(key), &0i128);
 
         if compound {
             // Re-stake: boost the staker's weight by the pending reward amount.
@@ -851,11 +904,31 @@ impl FeeDistributionContract {
     }
 
     /// Return the treasury address.
+    pub fn get_min_disbursement_threshold(env: Env) -> i128 {
+        Self::min_disbursement(&env)
+    }
+
+    /// Treasury allocation for `token` buffered below the disbursement threshold.
+    pub fn get_treasury_buffer(env: Env, token: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&FeeDistDataKey::TreasuryBuffer(token))
+            .unwrap_or(0)
+    }
+
     pub fn get_treasury(env: Env) -> Address {
         env.storage().instance().get(&FeeDistDataKey::Treasury).unwrap()
     }
 
     // ── Internal helpers ───────────────────────────────────────────────────────
+
+    /// Active minimum disbursement threshold (defaults for pre-upgrade state).
+    fn min_disbursement(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&FeeDistDataKey::MinDisbursement)
+            .unwrap_or(MIN_DISBURSEMENT_THRESHOLD)
+    }
 
     /// Require the caller to be the admin; panics otherwise.
     fn require_admin(env: &Env) {
@@ -999,6 +1072,7 @@ impl FeeDistributionContract {
         let treasury: Address = env
             .storage().instance().get(&FeeDistDataKey::Treasury).unwrap();
         let contract_addr = env.current_contract_address();
+        let threshold = Self::min_disbursement(env);
 
         for token in tokens.iter() {
             let mut pool: FeePool = match env
@@ -1009,7 +1083,9 @@ impl FeeDistributionContract {
                 None => continue,
             };
 
-            if pool.pending == 0 {
+            // Dust buffer: leave small accruals pending until they clear the
+            // threshold rather than running a distribution round for them.
+            if pool.pending == 0 || pool.pending < threshold {
                 continue;
             }
 
@@ -1039,10 +1115,18 @@ impl FeeDistributionContract {
             pool.governance_pool = pool.governance_pool
                 .checked_add(governance_amt).expect("overflow");
 
-            // Sweep treasury directly.
-            if treasury_amt > 0 {
+            // Sweep treasury once its buffered allocation clears the threshold.
+            let buffer_key = FeeDistDataKey::TreasuryBuffer(token.clone());
+            let buffered: i128 = env.storage().persistent().get(&buffer_key).unwrap_or(0);
+            let treasury_due = buffered.checked_add(treasury_amt).expect("overflow");
+            if treasury_due > 0 && treasury_due >= threshold {
                 token::Client::new(env, &token)
-                    .transfer(&contract_addr, &treasury, &treasury_amt);
+                    .transfer(&contract_addr, &treasury, &treasury_due);
+                if buffered > 0 {
+                    env.storage().persistent().remove(&buffer_key);
+                }
+            } else if treasury_amt > 0 {
+                env.storage().persistent().set(&buffer_key, &treasury_due);
             }
 
             pool.total_distributed = pool.total_distributed
@@ -1122,6 +1206,8 @@ mod tests {
         };
         client.initialize(&admin, &treasury, &staking_token, &ratios);
         client.add_fee_token(&fee_token);
+        // Legacy tests use small amounts; dust buffering is exercised separately.
+        client.set_min_disbursement_threshold(&0);
 
         TestEnv { env, contract, admin, treasury, staking_token, fee_token }
     }
@@ -1937,5 +2023,125 @@ mod tests {
         let t = setup();
         let nobody = Address::generate(&t.env);
         assert_eq!(client(&t).get_pending_rewards(&nobody, &t.fee_token), 0);
+    }
+
+    // ── Minimum disbursement threshold ────────────────────────────────────────
+
+    #[test]
+    fn test_default_threshold_set_on_initialize() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let staking_token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let contract = env.register_contract(None, FeeDistributionContract);
+        let c = FeeDistributionContractClient::new(&env, &contract);
+        c.initialize(
+            &admin,
+            &Address::generate(&env),
+            &staking_token,
+            &DistributionRatios { stakers_bps: 5_000, governance_bps: 3_000, treasury_bps: 2_000 },
+        );
+        assert_eq!(c.get_min_disbursement_threshold(), MIN_DISBURSEMENT_THRESHOLD);
+    }
+
+    #[test]
+    fn test_dust_fees_stay_pending_below_threshold() {
+        let t = setup();
+        let c = client(&t);
+        c.set_min_disbursement_threshold(&MIN_DISBURSEMENT_THRESHOLD);
+
+        mint_fee(&t, &t.admin, 99);
+        c.collect_fees(&t.admin, &t.fee_token, &99);
+        c.distribute_fees(&Vec::new(&t.env));
+
+        let pool = c.get_fee_pool(&t.fee_token).unwrap();
+        assert_eq!(pool.pending, 99);
+        assert_eq!(pool.total_distributed, 0);
+        assert_eq!(c.get_distribution_count(), 0);
+        assert_eq!(TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury), 0);
+    }
+
+    #[test]
+    fn test_buffered_fees_distribute_once_threshold_reached() {
+        let t = setup();
+        let c = client(&t);
+        c.set_min_disbursement_threshold(&MIN_DISBURSEMENT_THRESHOLD);
+
+        mint_fee(&t, &t.admin, MIN_DISBURSEMENT_THRESHOLD);
+        c.collect_fees(&t.admin, &t.fee_token, &(MIN_DISBURSEMENT_THRESHOLD / 2));
+        c.distribute_fees(&Vec::new(&t.env));
+        assert_eq!(c.get_distribution_count(), 0);
+
+        c.collect_fees(&t.admin, &t.fee_token, &(MIN_DISBURSEMENT_THRESHOLD / 2));
+        c.distribute_fees(&Vec::new(&t.env));
+
+        let pool = c.get_fee_pool(&t.fee_token).unwrap();
+        assert_eq!(pool.pending, 0);
+        assert_eq!(pool.total_distributed, MIN_DISBURSEMENT_THRESHOLD);
+        assert_eq!(c.get_distribution_count(), 1);
+    }
+
+    #[test]
+    fn test_treasury_dust_buffered_until_threshold() {
+        let t = setup();
+        let c = client(&t);
+        // Pool threshold met but 20% treasury slice (2 XLM of 10) stays below 3 XLM.
+        c.set_min_disbursement_threshold(&30_000_000);
+
+        mint_fee(&t, &t.admin, 200_000_000);
+        c.collect_fees(&t.admin, &t.fee_token, &100_000_000);
+        c.distribute_fees(&Vec::new(&t.env));
+        assert_eq!(c.get_treasury_buffer(&t.fee_token), 20_000_000);
+        assert_eq!(TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury), 0);
+
+        c.collect_fees(&t.admin, &t.fee_token, &100_000_000);
+        c.distribute_fees(&Vec::new(&t.env));
+        assert_eq!(c.get_treasury_buffer(&t.fee_token), 0);
+        assert_eq!(
+            TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury),
+            40_000_000
+        );
+    }
+
+    #[test]
+    fn test_flush_treasury_buffer() {
+        let t = setup();
+        let c = client(&t);
+        c.set_min_disbursement_threshold(&30_000_000);
+
+        mint_fee(&t, &t.admin, 100_000_000);
+        c.collect_fees(&t.admin, &t.fee_token, &100_000_000);
+        c.distribute_fees(&Vec::new(&t.env));
+
+        assert_eq!(c.flush_treasury_buffer(&t.fee_token), 20_000_000);
+        assert_eq!(c.get_treasury_buffer(&t.fee_token), 0);
+        assert_eq!(
+            TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury),
+            20_000_000
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "below minimum disbursement threshold")]
+    fn test_claim_below_threshold_deferred() {
+        let t = setup();
+        let c = client(&t);
+        let staker = Address::generate(&t.env);
+        mint_stake(&t, &staker, 1_000);
+        c.stake_for_fees(&staker, &1_000, &false);
+
+        mint_fee(&t, &t.admin, 1_000);
+        c.collect_fees(&t.admin, &t.fee_token, &1_000);
+        c.distribute_fees(&Vec::new(&t.env));
+
+        c.set_min_disbursement_threshold(&MIN_DISBURSEMENT_THRESHOLD);
+        c.claim_fees(&staker, &t.fee_token);
+    }
+
+    #[test]
+    #[should_panic(expected = "threshold must be non-negative")]
+    fn test_negative_threshold_rejected() {
+        let t = setup();
+        client(&t).set_min_disbursement_threshold(&-1);
     }
 }

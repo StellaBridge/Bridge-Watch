@@ -11,6 +11,8 @@
 //! - Volume tracking and fee accumulation analytics
 //! - Aggregated statistics: 24h volume, 7d average depth, 30d performance
 //! - Event emissions for significant liquidity changes
+//! - Cumulative price observations and TWAP with spot/TWAP deviation
+//!   screening to filter flash-loan and sandwich spikes
 //! - Public read access with permissioned write access
 //!
 //! ## Supported Asset Pairs (Phase 1)
@@ -41,6 +43,16 @@ pub const SIGNIFICANT_CHANGE_BPS: u32 = 1_000;
 
 /// Precision multiplier for fixed-point math (7 decimals like Stellar)
 pub const PRECISION: i128 = 10_000_000; // 1e7
+
+/// Capacity of the cumulative price observation ring buffer per pool.
+pub const MAX_PRICE_OBSERVATIONS: u32 = 64;
+
+/// Minimum TWAP window: 30 minutes (~360 ledgers at 5s close time).
+pub const TWAP_MIN_WINDOW_SECS: u64 = 1_800;
+
+/// Max tolerated spot/TWAP deviation before a reading is treated as a
+/// flash-loan or sandwich spike (5% = 500 basis points).
+pub const MAX_SPOT_TWAP_DEVIATION_BPS: u32 = 500;
 
 // ---------------------------------------------------------------------------
 // Pool types
@@ -193,6 +205,49 @@ pub struct DailyRingMeta {
     pub capacity: u32,
 }
 
+/// A cumulative price observation (Uniswap-v2 style accumulator).
+///
+/// `price_cumulative` is the running sum of `price × seconds_elapsed`, so the
+/// TWAP between two observations is `Δcumulative / Δtimestamp`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceObservation {
+    pub timestamp: u64,
+    pub price_cumulative: i128,
+}
+
+/// Accumulator state and ring buffer metadata for price observations.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceAccumulator {
+    pub head: u32,
+    pub count: u32,
+    pub capacity: u32,
+    /// Price that has been in effect since `last_timestamp`.
+    pub last_price: i128,
+    pub last_timestamp: u64,
+    /// Cumulative price as of `last_timestamp`.
+    pub price_cumulative: i128,
+}
+
+/// Time-weighted average price and spot comparison for a pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TwapResult {
+    pub pool_id: String,
+    /// Time-weighted average price over the window, scaled by PRECISION.
+    pub twap: i128,
+    /// Latest recorded spot price, scaled by PRECISION.
+    pub spot_price: i128,
+    /// |spot − twap| / twap in basis points.
+    pub deviation_bps: i128,
+    /// Effective window actually covered, in seconds.
+    pub window_secs: u64,
+    /// True when the spot deviates from the TWAP beyond the tolerance,
+    /// indicating a likely flash-loan / sandwich manipulation.
+    pub manipulation_suspected: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Storage keys
 // ---------------------------------------------------------------------------
@@ -213,6 +268,10 @@ pub enum LiquidityKey {
     DailyBucket(String, u32),
     /// Set of all registered pool IDs
     RegisteredPools,
+    /// Price accumulator + observation ring metadata for a pool
+    PriceAccumulator(String),
+    /// Individual price observation: (pool_id, ring_index)
+    PriceObservation(String, u32),
 }
 
 // ---------------------------------------------------------------------------
@@ -283,8 +342,28 @@ pub fn record_pool_state(
     // --- Update daily bucket ---
     update_daily_bucket(env, &pool_id, &snapshot);
 
+    // --- Update TWAP accumulator and screen the spot price against it ---
+    record_price_observation(env, &pool_id, price, timestamp);
+    let spot_suspect = match calculate_twap(env, pool_id.clone(), TWAP_MIN_WINDOW_SECS) {
+        Some(twap) => {
+            let dev = deviation_bps(price, twap.twap);
+            if dev > MAX_SPOT_TWAP_DEVIATION_BPS as i128 {
+                env.events().publish(
+                    (pool_id.clone(), soroban_sdk::symbol_short!("flash_sus")),
+                    (price, twap.twap, dev, timestamp),
+                );
+                true
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
+
     // --- Detect significant liquidity changes ---
-    if meta.count > 1 {
+    // Skipped when the spot price is a suspected flash-loan / sandwich spike so
+    // single-transaction distortions do not raise false anomaly alerts.
+    if meta.count > 1 && !spot_suspect {
         let prev_idx = if write_idx == 0 {
             meta.capacity - 1
         } else {
@@ -552,6 +631,78 @@ pub fn get_daily_history(
     result
 }
 
+/// Calculate the time-weighted average price over `window_secs`.
+///
+/// The window is clamped up to `TWAP_MIN_WINDOW_SECS`. Returns `None` until
+/// the pool has an observation at least one full window old, so thin history
+/// cannot be used to derive a manipulable average.
+pub fn calculate_twap(env: &Env, pool_id: String, window_secs: u64) -> Option<TwapResult> {
+    let acc: PriceAccumulator = env
+        .storage()
+        .persistent()
+        .get(&LiquidityKey::PriceAccumulator(pool_id.clone()))?;
+    if acc.count == 0 {
+        return None;
+    }
+
+    let window = if window_secs < TWAP_MIN_WINDOW_SECS {
+        TWAP_MIN_WINDOW_SECS
+    } else {
+        window_secs
+    };
+    let now = env.ledger().timestamp();
+    let target = now.checked_sub(window)?;
+
+    // Newest observation at or before the window start.
+    let actual_count = if acc.count > acc.capacity {
+        acc.capacity
+    } else {
+        acc.count
+    };
+    let mut anchor: Option<PriceObservation> = None;
+    for i in 0..actual_count {
+        let idx = (acc.head + acc.capacity - 1 - i) % acc.capacity;
+        let obs: Option<PriceObservation> = env
+            .storage()
+            .persistent()
+            .get(&LiquidityKey::PriceObservation(pool_id.clone(), idx));
+        if let Some(o) = obs {
+            if o.timestamp <= target {
+                anchor = Some(o);
+                break;
+            }
+        }
+    }
+    let anchor = anchor?;
+
+    let cumulative_now = current_cumulative(&acc, now);
+    let elapsed = now - anchor.timestamp;
+    if elapsed == 0 {
+        return None;
+    }
+    let twap = (cumulative_now - anchor.price_cumulative) / elapsed as i128;
+    let deviation_bps = deviation_bps(acc.last_price, twap);
+
+    Some(TwapResult {
+        pool_id,
+        twap,
+        spot_price: acc.last_price,
+        deviation_bps,
+        window_secs: elapsed,
+        manipulation_suspected: deviation_bps > MAX_SPOT_TWAP_DEVIATION_BPS as i128,
+    })
+}
+
+/// Returns true if the latest spot price deviates from the minimum-window TWAP
+/// by more than `MAX_SPOT_TWAP_DEVIATION_BPS`. Pools without enough history
+/// are not flagged.
+pub fn is_price_manipulated(env: &Env, pool_id: String) -> bool {
+    match calculate_twap(env, pool_id, TWAP_MIN_WINDOW_SECS) {
+        Some(r) => r.manipulation_suspected,
+        None => false,
+    }
+}
+
 /// Get all registered pool IDs.
 pub fn get_registered_pools(env: &Env) -> Vec<String> {
     env.storage()
@@ -632,6 +783,63 @@ fn get_snapshots_in_window(env: &Env, pool_id: &String, from: u64, to: u64) -> V
     }
 
     result
+}
+
+/// Cumulative price extrapolated to `now` using the price in effect since the
+/// last observation.
+fn current_cumulative(acc: &PriceAccumulator, now: u64) -> i128 {
+    let dt = now.saturating_sub(acc.last_timestamp) as i128;
+    acc.price_cumulative + acc.last_price * dt
+}
+
+fn deviation_bps(spot: i128, reference: i128) -> i128 {
+    if reference <= 0 {
+        return 0;
+    }
+    ((spot - reference).abs() * 10_000) / reference
+}
+
+/// Advance the cumulative price accumulator and append an observation.
+///
+/// Only the first price recorded in a given ledger timestamp is accepted into
+/// the accumulator: later same-timestamp updates carry zero time weight, so a
+/// sandwich executed within a single ledger cannot move the TWAP.
+fn record_price_observation(env: &Env, pool_id: &String, price: i128, timestamp: u64) {
+    let key = LiquidityKey::PriceAccumulator(pool_id.clone());
+    let existing: Option<PriceAccumulator> = env.storage().persistent().get(&key);
+
+    let mut acc = match existing {
+        Some(a) => {
+            if timestamp <= a.last_timestamp {
+                return;
+            }
+            a
+        }
+        None => PriceAccumulator {
+            head: 0,
+            count: 0,
+            capacity: MAX_PRICE_OBSERVATIONS,
+            last_price: price,
+            last_timestamp: timestamp,
+            price_cumulative: 0,
+        },
+    };
+
+    acc.price_cumulative = current_cumulative(&acc, timestamp);
+    acc.last_price = price;
+    acc.last_timestamp = timestamp;
+
+    let observation = PriceObservation {
+        timestamp,
+        price_cumulative: acc.price_cumulative,
+    };
+    env.storage().persistent().set(
+        &LiquidityKey::PriceObservation(pool_id.clone(), acc.head),
+        &observation,
+    );
+    acc.head = (acc.head + 1) % acc.capacity;
+    acc.count += 1;
+    env.storage().persistent().set(&key, &acc);
 }
 
 /// Update (or create) the daily bucket for the day containing this snapshot.
@@ -1253,5 +1461,94 @@ mod tests {
 
         let pools = get_registered_pools(&env);
         assert!(pools.len() >= 3);
+    }
+
+    // ── TWAP / sandwich protection tests ─────────────────────────────────
+
+    fn record_price(env: &Env, pool_id: &String, ts: u64, reserve_b: i128) {
+        env.ledger().set_timestamp(ts);
+        record_pool_state(
+            env,
+            pool_id.clone(),
+            1_000 * PRECISION,
+            reserve_b,
+            2_000 * PRECISION,
+            0,
+            0,
+            PoolType::Amm,
+        );
+    }
+
+    #[test]
+    fn test_twap_requires_full_window_of_history() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        record_price(&env, &pool_id, 10_000, 5_000 * PRECISION);
+        record_price(&env, &pool_id, 10_600, 5_000 * PRECISION);
+
+        assert!(calculate_twap(&env, pool_id.clone(), TWAP_MIN_WINDOW_SECS).is_none());
+        assert!(!is_price_manipulated(&env, pool_id));
+    }
+
+    #[test]
+    fn test_twap_matches_stable_price() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        for ts in [10_000u64, 11_000, 12_000, 13_000] {
+            record_price(&env, &pool_id, ts, 5_000 * PRECISION);
+        }
+
+        let result = calculate_twap(&env, pool_id, TWAP_MIN_WINDOW_SECS).unwrap();
+        assert_eq!(result.twap, 5 * PRECISION);
+        assert_eq!(result.spot_price, 5 * PRECISION);
+        assert_eq!(result.deviation_bps, 0);
+        assert!(!result.manipulation_suspected);
+    }
+
+    #[test]
+    fn test_twap_short_window_is_clamped_to_minimum() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        for ts in [10_000u64, 11_000, 12_000, 13_000] {
+            record_price(&env, &pool_id, ts, 5_000 * PRECISION);
+        }
+
+        let result = calculate_twap(&env, pool_id, 60).unwrap();
+        assert!(result.window_secs >= TWAP_MIN_WINDOW_SECS);
+    }
+
+    #[test]
+    fn test_flash_spike_flagged_against_twap() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        record_price(&env, &pool_id, 10_000, 5_000 * PRECISION);
+        record_price(&env, &pool_id, 11_800, 5_000 * PRECISION);
+        // Single-ledger spike doubles the spot price.
+        record_price(&env, &pool_id, 13_600, 10_000 * PRECISION);
+
+        let result = calculate_twap(&env, pool_id.clone(), TWAP_MIN_WINDOW_SECS).unwrap();
+        assert_eq!(result.twap, 5 * PRECISION);
+        assert_eq!(result.spot_price, 10 * PRECISION);
+        assert!(result.deviation_bps > MAX_SPOT_TWAP_DEVIATION_BPS as i128);
+        assert!(result.manipulation_suspected);
+        assert!(is_price_manipulated(&env, pool_id));
+    }
+
+    #[test]
+    fn test_same_ledger_updates_do_not_move_accumulator() {
+        let env = setup();
+        let pool_id = String::from_str(&env, "USDC_XLM");
+        record_price(&env, &pool_id, 10_000, 5_000 * PRECISION);
+        record_price(&env, &pool_id, 12_000, 5_000 * PRECISION);
+        // Sandwich legs inside the same ledger timestamp are ignored.
+        record_price(&env, &pool_id, 12_000, 50_000 * PRECISION);
+
+        let acc: PriceAccumulator = env
+            .storage()
+            .persistent()
+            .get(&LiquidityKey::PriceAccumulator(pool_id))
+            .unwrap();
+        assert_eq!(acc.last_price, 5 * PRECISION);
+        assert_eq!(acc.count, 2);
     }
 }

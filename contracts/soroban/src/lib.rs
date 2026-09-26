@@ -52,7 +52,7 @@ use acl::{
 
 use liquidity_pool::{
     DailyBucket, ImpermanentLossResult, LiquidityDepth as PoolLiquidityDepth, PoolMetrics,
-    PoolSnapshot, PoolType,
+    PoolSnapshot, PoolType, TwapResult,
 };
 
 use emergency_multisig::{EmergencyAction, MultisigActionLog, MultisigConfig, OperatorSignature};
@@ -5990,6 +5990,19 @@ impl BridgeWatchContract {
     /// Get all registered liquidity pool IDs.
     pub fn get_registered_pools(env: Env) -> Vec<String> {
         liquidity_pool::get_registered_pools(&env)
+    }
+
+    /// Time-weighted average price for a pool over `window_secs`
+    /// (clamped to a 30-minute minimum). Returns `None` until the pool has a
+    /// full window of price history. Public read access.
+    pub fn get_pool_twap(env: Env, pool_id: String, window_secs: u64) -> Option<TwapResult> {
+        liquidity_pool::calculate_twap(&env, pool_id, window_secs)
+    }
+
+    /// Whether the pool's latest spot price deviates from its TWAP enough to
+    /// be treated as a flash-loan or sandwich spike.
+    pub fn is_pool_price_manipulated(env: Env, pool_id: String) -> bool {
+        liquidity_pool::is_price_manipulated(&env, pool_id)
     }
 
     // -----------------------------------------------------------------------

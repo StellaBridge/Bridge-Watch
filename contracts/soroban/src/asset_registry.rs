@@ -40,6 +40,15 @@ pub const MAX_BRIDGES: u32 = 10;
 /// Maximum number of liquidity pool associations per asset.
 pub const MAX_POOLS: u32 = 20;
 
+/// Length of an encoded Stellar account strkey (G...).
+pub const STRKEY_ENCODED_LEN: u32 = 56;
+
+/// Decoded strkey length: 1 version byte + 32-byte Ed25519 key + 2-byte CRC16.
+const STRKEY_DECODED_LEN: usize = 35;
+
+/// Strkey version byte for an Ed25519 account public key (6 << 3, renders as 'G').
+const STRKEY_VERSION_ACCOUNT_ID: u8 = 6 << 3;
+
 // ---------------------------------------------------------------------------
 // Error codes
 // ---------------------------------------------------------------------------
@@ -74,6 +83,12 @@ pub enum RegistryError {
     /// Attempted to restore an asset that is not in a Deactivated state.
     /// Only deactivated assets can be restored. Use the asset's current status to determine next actions.
     AssetNotDeactivated = 22,
+    /// Issuer is not a valid Stellar Ed25519 public key (G... strkey with checksum).
+    InvalidIssuer = 23,
+    /// The asset symbol is already registered under a different issuer, or the
+    /// bridge already carries a different asset with the same symbol. Rejected to
+    /// prevent cross-namespace asset spoofing.
+    DuplicateAssetRegistrationRejected = 24,
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +345,19 @@ pub enum DataKey {
     Whitelist,
     /// Frozen state for an asset (FrozenAsset).
     Frozen(String),
+    /// Canonical owner of a symbol: the (issuer, asset_code) it was first registered under.
+    CanonicalSymbol(String),
+    /// Asset code a bridge carries for a given symbol, keyed by (bridge_id, symbol).
+    BridgeSymbol(String, String),
+}
+
+/// Canonical registration of a symbol, used to reject spoofed duplicates.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonicalSymbolEntry {
+    pub symbol: String,
+    pub issuer: String,
+    pub asset_code: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +392,10 @@ impl AssetRegistryContract {
     // =======================================================================
 
     /// Register a new asset with initial metadata.
+    ///
+    /// The issuer must be a valid Stellar account strkey (except for `Native`
+    /// assets), and the symbol must not already be registered under another
+    /// issuer or asset code.
     #[allow(clippy::too_many_arguments)]
     pub fn register_asset(
         env: Env,
@@ -401,6 +433,12 @@ impl AssetRegistryContract {
         {
             return Err(RegistryError::AssetAlreadyRegistered);
         }
+
+        // Reject malformed issuers and symbols already owned by another issuer
+        // or asset code (cross-namespace spoofing).
+        Self::validate_issuer(&category, &issuer)?;
+        Self::check_symbol_conflict(&env, &symbol, &issuer, &asset_code)?;
+        Self::set_canonical_symbol(&env, &symbol, &issuer, &asset_code);
 
         let now = env.ledger().timestamp();
         let metadata = AssetMetadata {
@@ -525,6 +563,16 @@ impl AssetRegistryContract {
         if metadata.status == AssetStatus::Deprecated {
             return Err(RegistryError::AssetDeprecated);
         }
+
+        Self::validate_issuer(&metadata.category, &issuer)?;
+        Self::check_symbol_conflict(&env, &symbol, &issuer, &asset_code)?;
+        if metadata.symbol != symbol {
+            // Release the previous symbol so it can be claimed canonically elsewhere.
+            env.storage()
+                .persistent()
+                .remove(&DataKey::CanonicalSymbol(metadata.symbol.clone()));
+        }
+        Self::set_canonical_symbol(&env, &symbol, &issuer, &asset_code);
 
         let now = env.ledger().timestamp();
         metadata.name = name;
@@ -932,6 +980,9 @@ impl AssetRegistryContract {
     // =======================================================================
 
     /// Associate a bridge contract with an asset (admin only).
+    ///
+    /// Rejects the link with `DuplicateAssetRegistrationRejected` if the bridge
+    /// already carries a different asset with the same symbol.
     pub fn link_bridge_contract(
         env: Env,
         admin: Address,
@@ -942,7 +993,21 @@ impl AssetRegistryContract {
         dest_chain: String,
     ) -> Result<(), RegistryError> {
         Self::require_admin(&env, &admin)?;
-        Self::require_asset_exists(&env, &asset_code)?;
+        let metadata = Self::get_asset_or_err(&env, &asset_code)?;
+
+        // Composite uniqueness on (bridge_id, symbol): a bridge may not carry two
+        // different assets presenting the same symbol.
+        let bridge_symbol_key = DataKey::BridgeSymbol(bridge_id.clone(), metadata.symbol.clone());
+        let existing_code: Option<String> = env.storage().persistent().get(&bridge_symbol_key);
+        if let Some(code) = existing_code {
+            if code != asset_code {
+                env.events().publish(
+                    (symbol_short!("ar_dup"), metadata.symbol.clone()),
+                    (asset_code.clone(), code),
+                );
+                return Err(RegistryError::DuplicateAssetRegistrationRejected);
+            }
+        }
 
         let mut bridges: Vec<BridgeAssociation> = env
             .storage()
@@ -970,6 +1035,9 @@ impl AssetRegistryContract {
             created_at: now,
         });
 
+        env.storage()
+            .persistent()
+            .set(&bridge_symbol_key, &asset_code);
         env.storage()
             .persistent()
             .set(&DataKey::BridgeAssocs(asset_code), &bridges);
@@ -1429,6 +1497,53 @@ impl AssetRegistryContract {
             .set(&DataKey::Versions(asset_code.clone()), &versions);
     }
 
+    /// Validate the issuer for an asset. Native assets have no issuer account;
+    /// every other category must name a valid Stellar Ed25519 account.
+    fn validate_issuer(category: &AssetCategory, issuer: &String) -> Result<(), RegistryError> {
+        if *category == AssetCategory::Native {
+            return Ok(());
+        }
+        if is_valid_account_strkey(issuer) {
+            Ok(())
+        } else {
+            Err(RegistryError::InvalidIssuer)
+        }
+    }
+
+    /// Ensure `symbol` is not already owned by a different issuer or asset code.
+    fn check_symbol_conflict(
+        env: &Env,
+        symbol: &String,
+        issuer: &String,
+        asset_code: &String,
+    ) -> Result<(), RegistryError> {
+        let existing: Option<CanonicalSymbolEntry> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CanonicalSymbol(symbol.clone()));
+        if let Some(entry) = existing {
+            if entry.issuer != *issuer || entry.asset_code != *asset_code {
+                env.events().publish(
+                    (symbol_short!("ar_dup"), symbol.clone()),
+                    (asset_code.clone(), entry.asset_code),
+                );
+                return Err(RegistryError::DuplicateAssetRegistrationRejected);
+            }
+        }
+        Ok(())
+    }
+
+    fn set_canonical_symbol(env: &Env, symbol: &String, issuer: &String, asset_code: &String) {
+        env.storage().persistent().set(
+            &DataKey::CanonicalSymbol(symbol.clone()),
+            &CanonicalSymbolEntry {
+                symbol: symbol.clone(),
+                issuer: issuer.clone(),
+                asset_code: asset_code.clone(),
+            },
+        );
+    }
+
     /// Add an asset code to a persistent index Vec.
     fn add_to_index(env: &Env, key: &DataKey, asset_code: &String) {
         let mut list: Vec<String> = env
@@ -1466,6 +1581,81 @@ impl AssetRegistryContract {
 }
 
 // ===========================================================================
+// Strkey validation
+// ===========================================================================
+
+/// Returns true when `issuer` is a well-formed Stellar account strkey: 56 base32
+/// characters decoding to version byte `G`, a 32-byte Ed25519 key and a valid
+/// CRC16-XModem checksum.
+pub fn is_valid_account_strkey(issuer: &String) -> bool {
+    if issuer.len() != STRKEY_ENCODED_LEN {
+        return false;
+    }
+    let mut encoded = [0u8; STRKEY_ENCODED_LEN as usize];
+    issuer.copy_into_slice(&mut encoded);
+
+    let mut decoded = [0u8; STRKEY_DECODED_LEN];
+    if !base32_decode(&encoded, &mut decoded) {
+        return false;
+    }
+    if decoded[0] != STRKEY_VERSION_ACCOUNT_ID {
+        return false;
+    }
+
+    let payload_len = STRKEY_DECODED_LEN - 2;
+    let expected = crc16_xmodem(&decoded[..payload_len]);
+    let actual = (decoded[payload_len] as u16) | ((decoded[payload_len + 1] as u16) << 8);
+    expected == actual
+}
+
+fn base32_value(c: u8) -> Option<u8> {
+    match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'2'..=b'7' => Some(c - b'2' + 26),
+        _ => None,
+    }
+}
+
+/// Decodes unpadded RFC4648 base32. 56 chars map exactly onto 35 bytes.
+fn base32_decode(input: &[u8], out: &mut [u8]) -> bool {
+    let mut buffer: u32 = 0;
+    let mut bits: u32 = 0;
+    let mut idx = 0usize;
+    for &c in input {
+        let v = match base32_value(c) {
+            Some(v) => v as u32,
+            None => return false,
+        };
+        buffer = (buffer << 5) | v;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            if idx >= out.len() {
+                return false;
+            }
+            out[idx] = ((buffer >> bits) & 0xff) as u8;
+            idx += 1;
+        }
+    }
+    idx == out.len() && bits == 0
+}
+
+fn crc16_xmodem(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for &byte in data {
+        crc ^= (byte as u16) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -1493,7 +1683,7 @@ mod tests {
         let asset_code = String::from_str(env, "USDC");
         let name = String::from_str(env, "USD Coin");
         let symbol = String::from_str(env, "USDC");
-        let issuer = String::from_str(env, "circle.com");
+        let issuer = String::from_str(env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H");
         let desc = String::from_str(env, "Fiat-backed stablecoin");
         let url = String::from_str(env, "https://www.circle.com");
 
@@ -1570,7 +1760,7 @@ mod tests {
             &asset_code2,
             &String::from_str(&env, "Euro Coin"),
             &String::from_str(&env, "EURC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &6,
             &AssetCategory::Stablecoin,
             &String::from_str(&env, "Euro stablecoin"),
@@ -1591,7 +1781,7 @@ mod tests {
             &String::from_str(&env, "USDC"),
             &String::from_str(&env, "USD Coin"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &6,
             &AssetCategory::Stablecoin,
             &String::from_str(&env, "desc"),
@@ -1610,7 +1800,7 @@ mod tests {
             &String::from_str(&env, "USDC"),
             &String::from_str(&env, "USD Coin"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &6,
             &AssetCategory::Stablecoin,
             &String::from_str(&env, "desc"),
@@ -1634,7 +1824,7 @@ mod tests {
             &asset_code,
             &String::from_str(&env, "USD Coin v2"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &String::from_str(&env, "Updated stablecoin"),
             &String::from_str(&env, "https://new.circle.com"),
             &String::from_str(&env, "Name update"),
@@ -1656,7 +1846,7 @@ mod tests {
             &asset_code,
             &String::from_str(&env, "USD Coin v2"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &String::from_str(&env, "desc"),
             &String::from_str(&env, "url"),
             &String::from_str(&env, "Test update"),
@@ -1849,7 +2039,7 @@ mod tests {
             &asset_code,
             &String::from_str(&env, "New Name"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &String::from_str(&env, "desc"),
             &String::from_str(&env, "url"),
             &String::from_str(&env, "reason"),
@@ -2070,7 +2260,7 @@ mod tests {
             &asset_code,
             &String::from_str(&env, "Legacy Token"),
             &String::from_str(&env, "LEG"),
-            &String::from_str(&env, "legacy.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &8u32,
             &AssetCategory::Other,
             &String::from_str(&env, "Historical asset"),
@@ -2457,7 +2647,7 @@ mod tests {
                 &asset_code,
                 &name,
                 &String::from_str(&env, "USDC"),
-                &String::from_str(&env, "circle.com"),
+                &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
                 &String::from_str(&env, "desc"),
                 &String::from_str(&env, "url"),
                 &String::from_str(&env, "update"),
@@ -2479,7 +2669,7 @@ mod tests {
             &asset_code,
             &String::from_str(&env, "USD Coin v2"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &String::from_str(&env, "desc"),
             &String::from_str(&env, "url"),
             &String::from_str(&env, "Name update"),
@@ -2728,7 +2918,7 @@ mod tests {
             &String::from_str(&env, "USDC"),
             &String::from_str(&env, "USD Coin"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &6,
             &AssetCategory::Stablecoin,
             &String::from_str(&env, "desc"),
@@ -2777,7 +2967,7 @@ mod tests {
                 &asset_code,
                 &String::from_str(&env, code),
                 &String::from_str(&env, code),
-                &String::from_str(&env, "issuer"),
+                &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
                 &6,
                 cat,
                 &String::from_str(&env, "desc"),
@@ -2866,7 +3056,7 @@ mod tests {
             &asset_code,
             &String::from_str(&env, "New Name"),
             &String::from_str(&env, "USDC"),
-            &String::from_str(&env, "circle.com"),
+            &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
             &String::from_str(&env, "desc"),
             &String::from_str(&env, "url"),
             &String::from_str(&env, "reason"),
@@ -2906,5 +3096,158 @@ mod tests {
         assert!(state.is_none());
 
         assert!(!client.is_asset_frozen(&asset_code));
+    }
+
+    // -----------------------------------------------------------------------
+    // Issuer validation and duplicate symbol protection
+    // -----------------------------------------------------------------------
+
+    const ALT_ISSUER: &str = "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXA";
+
+    fn try_register(
+        env: &Env,
+        client: &AssetRegistryContractClient,
+        admin: &Address,
+        code: &str,
+        symbol: &str,
+        issuer: &str,
+        category: AssetCategory,
+    ) -> Result<(), RegistryError> {
+        match client.try_register_asset(
+            admin,
+            &String::from_str(env, code),
+            &String::from_str(env, code),
+            &String::from_str(env, symbol),
+            &String::from_str(env, issuer),
+            &7,
+            &category,
+            &String::from_str(env, "desc"),
+            &String::from_str(env, "url"),
+        ) {
+            Ok(_) => Ok(()),
+            Err(Ok(e)) => Err(e),
+            Err(Err(_)) => panic!("unexpected host error"),
+        }
+    }
+
+    #[test]
+    fn test_strkey_validation() {
+        let env = Env::default();
+        let valid = String::from_str(&env, ALT_ISSUER);
+        assert!(is_valid_account_strkey(&valid));
+
+        // Bad checksum (last char altered).
+        let bad_crc = String::from_str(
+            &env,
+            "GABAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEJXB",
+        );
+        assert!(!is_valid_account_strkey(&bad_crc));
+
+        // Wrong length, lowercase and domain-style issuers are rejected.
+        assert!(!is_valid_account_strkey(&String::from_str(&env, "GABAEAQ")));
+        assert!(!is_valid_account_strkey(&String::from_str(&env, "circle.com")));
+        assert!(!is_valid_account_strkey(&String::from_str(
+            &env,
+            "gabaeaqcaibaeaqcaibaeaqcaibaeaqcaibaeaqcaibaeaqcaibaejxa"
+        )));
+    }
+
+    #[test]
+    fn test_register_invalid_issuer_rejected() {
+        let (env, client, admin) = setup();
+        let result = try_register(
+            &env,
+            &client,
+            &admin,
+            "USDC",
+            "USDC",
+            "circle.com",
+            AssetCategory::Stablecoin,
+        );
+        assert_eq!(result, Err(RegistryError::InvalidIssuer));
+    }
+
+    #[test]
+    fn test_native_asset_skips_issuer_check() {
+        let (env, client, admin) = setup();
+        let result = try_register(&env, &client, &admin, "XLM", "XLM", "", AssetCategory::Native);
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn test_spoofed_symbol_under_other_issuer_rejected() {
+        let (env, client, admin) = setup();
+        register_usdc(&env, &client, &admin);
+
+        // Same symbol, different asset code and issuer: spoof attempt.
+        let result = try_register(
+            &env,
+            &client,
+            &admin,
+            "USDC_FAKE",
+            "USDC",
+            ALT_ISSUER,
+            AssetCategory::Bridged,
+        );
+        assert_eq!(result, Err(RegistryError::DuplicateAssetRegistrationRejected));
+        assert!(client.get_asset(&String::from_str(&env, "USDC_FAKE")).is_none());
+    }
+
+    #[test]
+    fn test_update_metadata_cannot_hijack_symbol() {
+        let (env, client, admin) = setup();
+        register_usdc(&env, &client, &admin);
+        try_register(
+            &env,
+            &client,
+            &admin,
+            "EURC",
+            "EURC",
+            ALT_ISSUER,
+            AssetCategory::Stablecoin,
+        )
+        .unwrap();
+
+        let result = client.try_update_metadata(
+            &admin,
+            &String::from_str(&env, "EURC"),
+            &String::from_str(&env, "Euro Coin"),
+            &String::from_str(&env, "USDC"),
+            &String::from_str(&env, ALT_ISSUER),
+            &String::from_str(&env, "desc"),
+            &String::from_str(&env, "url"),
+            &String::from_str(&env, "rename"),
+        );
+        assert_eq!(
+            result,
+            Err(Ok(RegistryError::DuplicateAssetRegistrationRejected))
+        );
+    }
+
+    #[test]
+    fn test_bridge_cannot_carry_two_assets_with_same_symbol() {
+        let (env, client, admin) = setup();
+        let usdc = register_usdc(&env, &client, &admin);
+        let bridge_id = String::from_str(&env, "CIRCLE_USDC");
+
+        client.link_bridge_contract(
+            &admin,
+            &usdc,
+            &bridge_id,
+            &String::from_str(&env, "0xbridge..."),
+            &String::from_str(&env, "ethereum"),
+            &String::from_str(&env, "stellar"),
+        );
+
+        // Relinking the same asset on the same bridge hits the existing duplicate check.
+        let again = client.try_link_bridge_contract(
+            &admin,
+            &usdc,
+            &bridge_id,
+            &String::from_str(&env, "0xbridge..."),
+            &String::from_str(&env, "ethereum"),
+            &String::from_str(&env, "stellar"),
+        );
+        assert_eq!(again, Err(Ok(RegistryError::DuplicateBridge)));
     }
 }
