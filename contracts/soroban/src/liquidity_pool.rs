@@ -11,6 +11,8 @@
 //! - Volume tracking and fee accumulation analytics
 //! - Aggregated statistics: 24h volume, 7d average depth, 30d performance
 //! - Event emissions for significant liquidity changes
+//! - Cumulative price observations and TWAP with spot/TWAP deviation
+//!   screening to filter flash-loan and sandwich spikes
 //! - Public read access with permissioned write access
 //!
 //! ## Supported Asset Pairs (Phase 1)
@@ -340,8 +342,28 @@ pub fn record_pool_state(
     // --- Update daily bucket ---
     update_daily_bucket(env, &pool_id, &snapshot);
 
+    // --- Update TWAP accumulator and screen the spot price against it ---
+    record_price_observation(env, &pool_id, price, timestamp);
+    let spot_suspect = match calculate_twap(env, pool_id.clone(), TWAP_MIN_WINDOW_SECS) {
+        Some(twap) => {
+            let dev = deviation_bps(price, twap.twap);
+            if dev > MAX_SPOT_TWAP_DEVIATION_BPS as i128 {
+                env.events().publish(
+                    (pool_id.clone(), soroban_sdk::symbol_short!("flash_sus")),
+                    (price, twap.twap, dev, timestamp),
+                );
+                true
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
+
     // --- Detect significant liquidity changes ---
-    if meta.count > 1 {
+    // Skipped when the spot price is a suspected flash-loan / sandwich spike so
+    // single-transaction distortions do not raise false anomaly alerts.
+    if meta.count > 1 && !spot_suspect {
         let prev_idx = if write_idx == 0 {
             meta.capacity - 1
         } else {
