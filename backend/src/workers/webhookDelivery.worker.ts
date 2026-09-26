@@ -57,6 +57,20 @@ export async function initWebhookWorker(): Promise<void> {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
+        // Surface repeated 401/403 auth failures for owner alerting even
+        // before max retries are exhausted (processDelivery already tracks
+        // them; this is a safety net for non-HTTP error shapes).
+        if (/HTTP\s+40[13]/.test(errorMessage)) {
+          try {
+            await webhookService.recordSignatureFailure(job.data.webhookEndpointId, errorMessage.includes("401") ? 401 : 403, errorMessage);
+          } catch (sigError) {
+            logger.error(
+              { jobId: job.id, error: sigError instanceof Error ? sigError.message : String(sigError) },
+              "Failed to record webhook signature failure"
+            );
+          }
+        }
+
         // Estimate next retry delay for observability.
         const delay = retryPolicyService.getDelayMs(job.attemptsMade + 1, {
           operation: "webhook:delivery",

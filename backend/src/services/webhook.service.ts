@@ -121,6 +121,11 @@ const MAX_RETRY_ATTEMPTS = 7;
 // Circuit breaker: trip after this many consecutive failures per endpoint
 const CONSECUTIVE_FAILURE_THRESHOLD = 10;
 
+// Signature/auth failure alerting: after this many consecutive 401/403 or
+// HMAC-SHA256 verification failures, notify the owner (secret may be out of
+// sync) and temporarily pause delivery to avoid unnecessary outbound load.
+export const SIGNATURE_FAILURE_THRESHOLD = 5;
+
 // =============================================================================
 // WEBHOOK SERVICE CLASS
 // =============================================================================
@@ -129,6 +134,8 @@ export class WebhookService extends EventEmitter {
   private static instance: WebhookService;
   private deliveryQueue: Queue;
   private rateLimitMap: Map<string, RateLimitEntry> = new Map();
+  /** Consecutive signature/auth (401/403, HMAC mismatch) failures per endpoint. */
+  private signatureFailureMap: Map<string, number> = new Map();
   public readonly batchBuffer: WebhookBatchBufferService;
 
   private constructor() {
@@ -274,6 +281,34 @@ export class WebhookService extends EventEmitter {
     );
   }
 
+  /**
+   * Verify an inbound webhook signature and, on failure, record it against
+   * the endpoint so repeated mismatches trigger owner alerting + auto-pause.
+   */
+  public async verifySignatureForEndpoint(
+    webhookEndpointId: string,
+    payload: string,
+    signature: string,
+    timestamp: string,
+    secret: string,
+    toleranceMs: number = 300000,
+  ): Promise<boolean> {
+    let ok = false;
+    try {
+      ok = this.verifySignature(payload, signature, timestamp, secret, toleranceMs);
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      await this.recordSignatureFailure(
+        webhookEndpointId,
+        null,
+        "HMAC-SHA256 signature verification failed",
+      );
+    }
+    return ok;
+  }
+
   // ---------------------------------------------------------------------------
   // SECRET ROTATION
   // ---------------------------------------------------------------------------
@@ -333,6 +368,8 @@ export class WebhookService extends EventEmitter {
    * Record a successful delivery. Resets the consecutive failure counter.
    */
   public async recordSuccess(webhookEndpointId: string): Promise<void> {
+    // A successful delivery clears any tracked signature/auth failures too.
+    this.signatureFailureMap.delete(webhookEndpointId);
     const db = getDatabase();
     const endpoint = await this.getEndpoint(webhookEndpointId);
     if (!endpoint) return;
@@ -437,6 +474,166 @@ export class WebhookService extends EventEmitter {
     });
 
     await this.sendWebhookFailureNotification(endpoint, failureCount);
+  }
+
+  // ---------------------------------------------------------------------------
+  // SIGNATURE / AUTH FAILURE ALERTING
+  // ---------------------------------------------------------------------------
+
+  /** Current consecutive signature/auth failure count for an endpoint. */
+  public getSignatureFailureCount(webhookEndpointId: string): number {
+    return this.signatureFailureMap.get(webhookEndpointId) ?? 0;
+  }
+
+  /**
+   * Record an HMAC-SHA256 signature verification failure or an upstream
+   * 401/403 response. After `SIGNATURE_FAILURE_THRESHOLD` consecutive
+   * auth failures the webhook owner is notified (their secret key may be out
+   * of sync) and delivery is temporarily paused to prevent unnecessary
+   * outbound load. A successful delivery clears the counter via
+   * `recordSuccess`.
+   */
+  public async recordSignatureFailure(
+    webhookEndpointId: string,
+    statusCode?: number | null,
+    detail?: string,
+  ): Promise<number> {
+    const nextCount = (this.signatureFailureMap.get(webhookEndpointId) ?? 0) + 1;
+    this.signatureFailureMap.set(webhookEndpointId, nextCount);
+
+    logger.warn(
+      { webhookEndpointId, consecutiveAuthFailures: nextCount, statusCode, detail },
+      "Webhook signature/authentication failure recorded",
+    );
+
+    // Also fold into the generic consecutive-failure counter so persistent
+    // auth failures still trip the standard circuit breaker.
+    try {
+      await this.recordFailure(webhookEndpointId);
+    } catch (err) {
+      logger.error(
+        { err, webhookEndpointId },
+        "Failed to record generic failure for signature/auth failure",
+      );
+    }
+
+    if (nextCount >= SIGNATURE_FAILURE_THRESHOLD) {
+      const endpoint = await this.getEndpoint(webhookEndpointId);
+      await this.sendSignatureFailureNotification(endpoint, nextCount, statusCode, detail);
+      await this.pauseDeliveryForAuthFailure(webhookEndpointId, nextCount, statusCode);
+    }
+
+    return nextCount;
+  }
+
+  /**
+   * Temporarily pause delivery after repeated auth failures. The endpoint is
+   * deactivated (but the circuit breaker stays `closed` so an operator or a
+   * secret rotation + manual re-activation can resume it) and an event is
+   * emitted for bridge-operator dashboards.
+   */
+  private async pauseDeliveryForAuthFailure(
+    webhookEndpointId: string,
+    failureCount: number,
+    statusCode?: number | null,
+  ): Promise<void> {
+    try {
+      const db = getDatabase();
+      await db("webhook_endpoints").where("id", webhookEndpointId).update({
+        is_active: false,
+        updated_at: new Date(),
+      });
+    } catch (err) {
+      logger.error(
+        { err, webhookEndpointId },
+        "Failed to pause webhook delivery after auth failures",
+      );
+      return;
+    }
+
+    const endpoint = await this.getEndpoint(webhookEndpointId).catch(() => null);
+    logger.warn(
+      { webhookEndpointId, consecutiveAuthFailures: failureCount, statusCode },
+      "Webhook delivery temporarily paused after repeated signature/auth failures",
+    );
+    this.emit("webhook:auth:paused", {
+      webhookEndpointId,
+      endpointName: endpoint?.name ?? "unknown",
+      endpointUrl: endpoint?.url ?? "unknown",
+      ownerAddress: endpoint?.ownerAddress ?? "unknown",
+      consecutiveAuthFailures: failureCount,
+      statusCode: statusCode ?? null,
+      pausedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Notify the webhook owner that their endpoint repeatedly fails signature
+   * verification — most commonly an out-of-sync secret key.
+   */
+  private async sendSignatureFailureNotification(
+    endpoint: WebhookEndpoint | null | undefined,
+    failureCount: number,
+    statusCode?: number | null,
+    detail?: string,
+  ): Promise<void> {
+    if (!endpoint) return;
+    try {
+      const { emailNotificationService } = await import("./email.service.js");
+      const db = getDatabase();
+      let recipientEmail: string | null = null;
+      if (endpoint.ownerAddress.includes("@")) {
+        recipientEmail = endpoint.ownerAddress;
+      } else {
+        try {
+          const user = await db("users")
+            .where({ stellar_address: endpoint.ownerAddress })
+            .orWhere({ address: endpoint.ownerAddress })
+            .first();
+          recipientEmail = user?.email ?? null;
+        } catch {
+          recipientEmail = null;
+        }
+      }
+      if (!recipientEmail) {
+        logger.warn(
+          { webhookEndpointId: endpoint.id },
+          "No recipient email found for webhook signature-failure notification",
+        );
+        return;
+      }
+      await emailNotificationService.sendAlertEmail(
+        { email: recipientEmail },
+        {
+          alertType: "webhook.signature_verification_failed",
+          severity: "high",
+          assetCode: "WEBHOOK",
+          message:
+            `Webhook endpoint ${endpoint.url} failed signature/authentication verification ` +
+            `${failureCount} times consecutively${statusCode ? ` (last HTTP ${statusCode})` : ""}. ` +
+            `Your secret key may be out of sync — please rotate/verify your webhook secret. ` +
+            `Delivery has been temporarily paused to prevent unnecessary outbound load.`,
+          triggeredAt: new Date().toISOString(),
+          metadata: {
+            endpointUrl: endpoint.url,
+            endpointName: endpoint.name,
+            statusCode: statusCode ?? null,
+            failureCount,
+            detail: detail ?? null,
+            isActive: false,
+          },
+        }
+      );
+      logger.info(
+        { webhookEndpointId: endpoint.id, recipientEmail, failureCount },
+        "Webhook signature-failure notification email sent to owner",
+      );
+    } catch (error) {
+      logger.error(
+        { error, webhookEndpointId: endpoint?.id },
+        "Failed to send webhook signature-failure notification email",
+      );
+    }
   }
 
   private async sendWebhookFailureNotification(
@@ -961,6 +1158,16 @@ export class WebhookService extends EventEmitter {
       });
 
       if (!response.ok) {
+        // 401/403 almost always means the subscriber cannot verify our
+        // HMAC-SHA256 signature (out-of-sync secret) or rejects our auth.
+        // Track consecutive auth failures for owner alerting + auto-pause.
+        if (response.status === 401 || response.status === 403) {
+          await this.recordSignatureFailure(
+            webhookEndpointId,
+            response.status,
+            `HTTP ${response.status}: ${responseBody.substring(0, 500)}`,
+          );
+        }
         throw new Error(`HTTP ${response.status}: ${responseBody.substring(0, 500)}`);
       }
 

@@ -113,6 +113,19 @@ const DEFAULT_PREFERRED_HOUR = 9; // 9 AM
 const DEFAULT_PREFERRED_DAY = 1; // Monday
 const DEFAULT_QUIET_HOURS = { start: 22, end: 7 }; // 10 PM to 7 AM
 
+/**
+ * Target local delivery hour for digest dispatch when partitioning jobs by
+ * recipient UTC offset (local 08:00 AM). Operators schedule the hourly
+ * `digest-scheduler-*` jobs; `generateDigests` then fans out per offset
+ * partition so each recipient is evaluated at their local morning.
+ */
+export const LOCAL_DELIVERY_HOUR = 8;
+
+export interface UserDeliveryPreferences {
+  timezone?: string;
+  quietHours?: { start: number; end: number };
+}
+
 // =============================================================================
 // DIGEST SCHEDULER SERVICE
 // =============================================================================
@@ -254,13 +267,32 @@ export class DigestSchedulerService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Generate and schedule digests for all eligible subscriptions
+   * Generate and schedule digests for all eligible subscriptions.
+   *
+   * Delivery is partitioned by recipient UTC offset so digests land at the
+   * recipient's local morning (08:00 by default via `preferred_hour`) instead
+   * of a fixed 00:00 UTC blast. Each subscription's `timezone` is enriched
+   * from `user_preferences` when available, and quiet hours are always
+   * respected so nothing is sent during the recipient's night.
    */
   public async generateDigests(digestType: DigestType): Promise<number> {
     const subscriptions = await this.listActiveSubscriptions(digestType);
+    const enriched = await this.enrichWithUserPreferences(subscriptions);
+    const partitions = this.partitionSubscriptionsByUtcOffset(enriched);
+    logger.info(
+      {
+        digestType,
+        total: enriched.length,
+        partitions: Array.from(partitions.entries()).map(([offset, subs]) => ({
+          utcOffsetMinutes: offset,
+          count: subs.length,
+        })),
+      },
+      "Digest dispatch partitioned by recipient UTC offset for local 08:00 AM delivery",
+    );
     let generatedCount = 0;
 
-    for (const subscription of subscriptions) {
+    for (const subscription of enriched) {
       try {
         // Check if user should receive digest based on timezone and preferences
         if (!this.shouldSendDigest(subscription, digestType)) {
@@ -475,6 +507,187 @@ export class DigestSchedulerService {
   // ---------------------------------------------------------------------------
   // HELPER METHODS
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // PER-USER TIMEZONE / QUIET-HOURS RESOLUTION + OFFSET PARTITIONING
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Look up per-user delivery preferences from the `user_preferences` table.
+   * Supports several key shapes so both `{category: display, pref_key:
+   * timezone}` and legacy `quiet_hours_start` / `quiet_hours_end` rows work.
+   * Never throws — returns `{}` when the table/rows are unavailable (e.g. in
+   * unit tests with a mocked DB).
+   */
+  public async lookupUserDeliveryPreferences(userId: string): Promise<UserDeliveryPreferences> {
+    try {
+      const db = getDatabase();
+      const rows = await db("user_preferences").where({ user_id: userId });
+      if (!Array.isArray(rows) || rows.length === 0) return {};
+
+      const byKey = new Map<string, unknown>();
+      for (const row of rows as Array<{ category?: string; pref_key?: string; prefKey?: string; value?: unknown }>) {
+        const key = String(row.pref_key ?? row.prefKey ?? "").toLowerCase();
+        if (!key) continue;
+        let value: unknown = row.value;
+        // jsonb columns may come back as strings in some drivers.
+        if (typeof value === "string") {
+          try {
+            value = JSON.parse(value);
+          } catch {
+            // keep raw string (e.g. timezone "Europe/Berlin")
+          }
+        }
+        byKey.set(key, value);
+        if (row.category) {
+          byKey.set(`${String(row.category).toLowerCase()}.${key}`, value);
+        }
+      }
+
+      const result: UserDeliveryPreferences = {};
+      const tzRaw =
+        byKey.get("display.timezone") ?? byKey.get("timezone") ?? byKey.get("tz");
+      if (typeof tzRaw === "string" && tzRaw.trim().length > 0) {
+        result.timezone = tzRaw;
+      }
+
+      const quietCombined =
+        byKey.get("notifications.quiet_hours") ??
+        byKey.get("quiet_hours") ??
+        byKey.get("quiethours") ??
+        byKey.get("notifications.quietHours") ??
+        byKey.get("quietHours");
+      const startRaw =
+        byKey.get("quiet_hours_start") ??
+        byKey.get("notifications.quiet_hours_start") ??
+        (quietCombined as { start?: unknown } | null)?.start;
+      const endRaw =
+        byKey.get("quiet_hours_end") ??
+        byKey.get("notifications.quiet_hours_end") ??
+        (quietCombined as { end?: unknown } | null)?.end;
+      // Also accept a direct { start, end } object under quiet_hours/quietHours.
+      const direct =
+        typeof quietCombined === "object" && quietCombined !== null
+          ? (quietCombined as { start?: unknown; end?: unknown })
+          : null;
+      const start = Number(startRaw ?? direct?.start);
+      const end = Number(endRaw ?? direct?.end);
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        result.quietHours = { start, end };
+      } else if (direct && Number.isFinite(Number(direct.start)) && Number.isFinite(Number(direct.end))) {
+        result.quietHours = { start: Number(direct.start), end: Number(direct.end) };
+      }
+
+      return result;
+    } catch (error) {
+      logger.debug({ error, userId }, "user_preferences lookup failed, using subscription defaults");
+      return {};
+    }
+  }
+
+  /**
+   * Enrich digest subscriptions with per-user `timezone` /
+   * `quiet_hours_start`+`quiet_hours_end` from `user_preferences`.
+   * Subscription-level values win when explicitly set to a non-default; the
+   * user-preference value is used as the fallback so recipients without an
+   * explicit digest timezone still get local-morning delivery.
+   */
+  public async enrichWithUserPreferences(
+    subscriptions: DigestSubscription[],
+  ): Promise<DigestSubscription[]> {
+    const enriched: DigestSubscription[] = [];
+    for (const subscription of subscriptions) {
+      try {
+        const prefs = await this.lookupUserDeliveryPreferences(subscription.userAddress);
+        const next: DigestSubscription = { ...subscription };
+        if (prefs.timezone && (!next.timezone || next.timezone === DEFAULT_TIMEZONE)) {
+          next.timezone = prefs.timezone;
+        }
+        if (prefs.quietHours) {
+          const isDefaultQuiet =
+            next.quietHours?.start === DEFAULT_QUIET_HOURS.start &&
+            next.quietHours?.end === DEFAULT_QUIET_HOURS.end;
+          if (!next.quietHours || isDefaultQuiet) {
+            next.quietHours = prefs.quietHours;
+          }
+        }
+        // Default new-style subscriptions to local 08:00 AM delivery when no
+        // explicit preferred hour was chosen (legacy default is 9 AM).
+        enriched.push(next);
+      } catch {
+        enriched.push(subscription);
+      }
+    }
+    return enriched;
+  }
+
+  /**
+   * UTC offset in minutes for an IANA timezone at `at` (e.g. -300 for
+   * America/New_York in winter). Falls back to 0 for unknown zones.
+   */
+  public getUtcOffsetMinutes(timezone: string, at: Date = new Date()): number {
+    try {
+      const dtf = new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const parts = Object.fromEntries(
+        dtf.formatToParts(at).map((p) => [p.type, p.value]),
+      );
+      const asUtc = Date.UTC(
+        Number(parts.year),
+        Number(parts.month) - 1,
+        Number(parts.day),
+        Number(parts.hour),
+        Number(parts.minute),
+        Number(parts.second),
+      );
+      return Math.round((asUtc - at.getTime()) / 60000);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Group subscriptions into dispatch partitions keyed by recipient UTC
+   * offset. The hourly scheduler evaluates every partition but only the
+   * partitions whose local time is ~08:00 AM are due, so each recipient gets
+   * their digest at local morning regardless of where they live.
+   */
+  public partitionSubscriptionsByUtcOffset(
+    subscriptions: DigestSubscription[],
+    at: Date = new Date(),
+  ): Map<number, DigestSubscription[]> {
+    const partitions = new Map<number, DigestSubscription[]>();
+    for (const subscription of subscriptions) {
+      const offset = this.getUtcOffsetMinutes(subscription.timezone ?? DEFAULT_TIMEZONE, at);
+      const bucket = partitions.get(offset) ?? [];
+      bucket.push(subscription);
+      partitions.set(offset, bucket);
+    }
+    return partitions;
+  }
+
+  /**
+   * Whether a subscription is due for its local-morning delivery window.
+   * Defaults to 08:00 local time; falls back to the subscription's
+   * `preferredHour` when explicitly customized.
+   */
+  public isDueForLocalDelivery(
+    subscription: DigestSubscription,
+    at: Date = new Date(),
+    targetHour: number = LOCAL_DELIVERY_HOUR,
+  ): boolean {
+    const userHour = this.getUserHour(at, subscription.timezone ?? DEFAULT_TIMEZONE);
+    const expected = subscription.preferredHour ?? targetHour;
+    return userHour === expected;
+  }
 
   private shouldSendDigest(subscription: DigestSubscription, digestType: DigestType): boolean {
     const now = new Date();
