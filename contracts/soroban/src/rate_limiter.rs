@@ -2375,7 +2375,7 @@ mod tests {
                 &String::from_str(&env, code),
                 &String::from_str(&env, code),
                 &String::from_str(&env, code),
-                &String::from_str(&env, "issuer"),
+                &String::from_str(&env, "GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H"),
                 &decimals,
                 &AssetCategory::Stablecoin,
                 &String::from_str(&env, "test asset"),
