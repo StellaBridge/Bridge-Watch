@@ -3,6 +3,9 @@
 //! Records recent data submissions (health scores, prices) into a bounded
 //! replay log. Supports read-only preview of recorded submissions and
 //! admin-gated replay execution for recovery or auditing purposes.
+//!
+//! Implements sliding-window nonce garbage collection to prevent unbounded
+//! storage growth while maintaining replay protection across validity window.
 
 use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Vec};
 
@@ -13,6 +16,15 @@ pub const MAX_REPLAY_LOG: u32 = 500;
 
 /// Maximum entries that can be replayed in a single call.
 pub const MAX_REPLAY_BATCH: u32 = 100;
+
+/// Nonce validity window in seconds (24 hours).
+pub const NONCE_VALIDITY_WINDOW_SECS: u64 = 86_400;
+
+/// Epoch duration in seconds (1 hour).
+pub const NONCE_EPOCH_DURATION_SECS: u64 = 3_600;
+
+/// Maximum number of nonce epochs to retain.
+pub const MAX_NONCE_EPOCHS: u32 = 30;
 
 /// Type of submission recorded in the replay log.
 #[contracttype]
@@ -57,6 +69,18 @@ pub struct ReplaySummary {
     pub executed_at: u64,
 }
 
+/// Nonce epoch bucket for sliding-window garbage collection.
+/// Tracks nonces submitted within a specific time window.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NonceEpoch {
+    pub epoch_id: u32,
+    pub start_timestamp: u64,
+    pub end_timestamp: u64,
+    /// Bitmap of seen nonce IDs (compact representation).
+    pub nonce_bitmap: Vec<u32>,
+}
+
 // ── Storage Keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -66,6 +90,10 @@ pub enum SubmissionReplayKey {
     Log,
     /// Auto-incrementing entry counter.
     Counter,
+    /// Current nonce epoch epochs (Vec<NonceEpoch>).
+    NonceEpochs,
+    /// Latest epoch ID for nonce tracking.
+    LatestNonceEpochId,
 }
 
 // ── Internal Helpers ──────────────────────────────────────────────────────────
@@ -102,7 +130,125 @@ fn next_id(env: &Env) -> u32 {
     ctr
 }
 
+/// Get or create current nonce epoch based on current ledger timestamp.
+fn get_or_create_nonce_epoch(env: &Env) -> NonceEpoch {
+    let now = env.ledger().timestamp();
+    let epoch_id = (now / NONCE_EPOCH_DURATION_SECS) as u32;
+    let epoch_start = (epoch_id as u64) * NONCE_EPOCH_DURATION_SECS;
+    let epoch_end = epoch_start + NONCE_EPOCH_DURATION_SECS;
+
+    let mut epochs = load_nonce_epochs(env);
+
+    // Check if current epoch exists
+    if let Some(existing) = epochs.iter().find(|e| e.epoch_id == epoch_id) {
+        return existing.clone();
+    }
+
+    // Create new epoch
+    let new_epoch = NonceEpoch {
+        epoch_id,
+        start_timestamp: epoch_start,
+        end_timestamp: epoch_end,
+        nonce_bitmap: Vec::new(env),
+    };
+
+    // Prune old epochs beyond validity window
+    let valid_after = now.saturating_sub(NONCE_VALIDITY_WINDOW_SECS);
+    let mut pruned: Vec<NonceEpoch> = Vec::new(env);
+    for epoch in epochs.iter() {
+        if epoch.end_timestamp >= valid_after {
+            pruned.push_back(epoch);
+        }
+    }
+
+    // Add new epoch if within capacity
+    if pruned.len() < MAX_NONCE_EPOCHS as usize {
+        pruned.push_back(new_epoch.clone());
+    }
+
+    save_nonce_epochs(env, &pruned);
+    new_epoch
+}
+
+fn load_nonce_epochs(env: &Env) -> Vec<NonceEpoch> {
+    env.storage()
+        .persistent()
+        .get(&SubmissionReplayKey::NonceEpochs)
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+fn save_nonce_epochs(env: &Env, epochs: &Vec<NonceEpoch>) {
+    env.storage()
+        .persistent()
+        .set(&SubmissionReplayKey::NonceEpochs, epochs);
+    env.storage()
+        .persistent()
+        .extend_ttl(&SubmissionReplayKey::NonceEpochs, 17_280 * 2, 17_280 * 90);
+}
+
 // ── Core Functions ────────────────────────────────────────────────────────────
+
+/// Verify that a nonce is within validity window and hasn't been seen.
+/// Returns true if nonce is valid (not seen), false if already used.
+pub fn verify_nonce(env: &Env, nonce_id: u32) -> bool {
+    let now = env.ledger().timestamp();
+    let valid_after = now.saturating_sub(NONCE_VALIDITY_WINDOW_SECS);
+
+    let epochs = load_nonce_epochs(env);
+
+    for epoch in epochs.iter() {
+        // Skip epochs outside validity window
+        if epoch.end_timestamp < valid_after {
+            continue;
+        }
+
+        // Check if nonce exists in this epoch's bitmap
+        let bitmap_idx = (nonce_id / 32) as usize;
+        if bitmap_idx < epoch.nonce_bitmap.len() as usize {
+            let word = epoch.nonce_bitmap.get(bitmap_idx as u32).unwrap();
+            let bit_pos = nonce_id % 32;
+            if (word & (1u32 << bit_pos)) != 0 {
+                return false; // Nonce already seen
+            }
+        }
+    }
+
+    true // Nonce is valid
+}
+
+/// Record a nonce in the current epoch to prevent replay.
+pub fn record_nonce(env: &Env, nonce_id: u32) {
+    let mut epoch = get_or_create_nonce_epoch(env);
+    let bitmap_idx = (nonce_id / 32) as usize;
+
+    // Extend bitmap if necessary
+    while epoch.nonce_bitmap.len() <= bitmap_idx as u32 {
+        epoch.nonce_bitmap.push_back(0u32);
+    }
+
+    // Set bit in bitmap
+    let word = epoch.nonce_bitmap.get(bitmap_idx as u32).unwrap();
+    let bit_pos = nonce_id % 32;
+    let updated_word = word | (1u32 << bit_pos);
+    epoch.nonce_bitmap.set(bitmap_idx as u32, updated_word);
+
+    // Update epoch in storage
+    let mut epochs = load_nonce_epochs(env);
+    let mut found = false;
+    for (i, e) in epochs.iter().enumerate() {
+        if e.epoch_id == epoch.epoch_id {
+            epochs.set(i as u32, epoch);
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        epochs.push_back(epoch);
+    }
+
+    save_nonce_epochs(env, &epochs);
+}
 
 /// Record a health submission to the replay log.
 ///

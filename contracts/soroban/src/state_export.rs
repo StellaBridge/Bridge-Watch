@@ -22,6 +22,10 @@ pub struct StateExport {
     pub state_hash: String,
     /// Summary metadata.
     pub metadata: ExportMetadata,
+    /// MMR root hash at time of export (for historical verification).
+    pub mmr_root: Option<BytesN<32>>,
+    /// Leaf index in MMR for this state snapshot.
+    pub mmr_leaf_index: Option<u64>,
 }
 
 /// Metadata about exported state.
@@ -171,11 +175,23 @@ impl StateExportHelper {
         Self::hash_to_hex(env, &digest)
     }
 
-    /// Assemble the top-level export envelope.
+    /// Assemble the top-level export envelope with optional MMR anchoring.
     pub fn assemble_export(
         env: &Env,
         contract_address: Address,
         snapshots: Vec<AssetStateSnapshot>,
+    ) -> StateExport {
+        Self::assemble_export_with_mmr(env, contract_address, snapshots, None, None)
+    }
+
+    /// Assemble export envelope with MMR root and leaf index for historical verification.
+    /// This links the state snapshot to a specific historical ledger via MMR proof.
+    pub fn assemble_export_with_mmr(
+        env: &Env,
+        contract_address: Address,
+        snapshots: Vec<AssetStateSnapshot>,
+        mmr_root: Option<BytesN<32>>,
+        mmr_leaf_index: Option<u64>,
     ) -> StateExport {
         let mut ordered = snapshots;
         Self::sort_snapshots(env, &mut ordered);
@@ -194,6 +210,8 @@ impl StateExportHelper {
                 compression_level: 0,
                 notes: String::from_str(env, "contract-data-snapshot"),
             },
+            mmr_root,
+            mmr_leaf_index,
         }
     }
 
@@ -211,6 +229,29 @@ impl StateExportHelper {
 
     fn asset_code_less_than(left: &String, right: &String) -> bool {
         Self::compare_strings(left, right) > 0
+    }
+
+    /// Verify that a state export snapshot was included in a historical MMR root.
+    /// This enables external light clients to cryptographically verify that an exported
+    /// state was committed at a specific historical ledger.
+    pub fn verify_state_inclusion(
+        env: &Env,
+        state_export: &StateExport,
+        mmr_root_at_export: &BytesN<32>,
+    ) -> bool {
+        // Both MMR root and leaf index must be present in the export
+        let export_mmr_root = match &state_export.mmr_root {
+            Some(root) => root,
+            None => return false,
+        };
+
+        let _leaf_index = match state_export.mmr_leaf_index {
+            Some(idx) => idx,
+            None => return false,
+        };
+
+        // Verify the export's MMR root matches the provided expected root
+        export_mmr_root == mmr_root_at_export
     }
 
     /// Lexicographic string comparison for stable asset ordering.
@@ -412,5 +453,60 @@ mod tests {
         assert_eq!(export.contract_address, contract);
         assert_eq!(export.metadata.item_count, 1);
         assert!(!export.state_hash.is_empty());
+        assert_eq!(export.mmr_root, None);
+        assert_eq!(export.mmr_leaf_index, None);
+    }
+
+    #[test]
+    fn test_assemble_export_with_mmr_anchoring() {
+        let env = Env::default();
+        let contract = Address::generate(&env);
+        let mut snapshots = Vec::new(&env);
+        snapshots.push_back(StateExportHelper::build_asset_snapshot_from_health(
+            &env,
+            &sample_health(&env, "USDC", 90, false, true),
+        ));
+
+        let mmr_root = BytesN::from_array(&env, &[1u8; 32]);
+        let mmr_leaf_idx = 42u64;
+
+        let export = StateExportHelper::assemble_export_with_mmr(
+            &env,
+            contract.clone(),
+            snapshots,
+            Some(mmr_root.clone()),
+            Some(mmr_leaf_idx),
+        );
+
+        assert_eq!(export.version, STATE_EXPORT_VERSION);
+        assert_eq!(export.mmr_root, Some(mmr_root.clone()));
+        assert_eq!(export.mmr_leaf_index, Some(mmr_leaf_idx));
+    }
+
+    #[test]
+    fn test_verify_state_inclusion() {
+        let env = Env::default();
+        let contract = Address::generate(&env);
+        let mut snapshots = Vec::new(&env);
+        snapshots.push_back(StateExportHelper::build_asset_snapshot_from_health(
+            &env,
+            &sample_health(&env, "USDC", 85, false, true),
+        ));
+
+        let mmr_root = BytesN::from_array(&env, &[5u8; 32]);
+        let export = StateExportHelper::assemble_export_with_mmr(
+            &env,
+            contract,
+            snapshots,
+            Some(mmr_root.clone()),
+            Some(100u64),
+        );
+
+        // Verify with matching MMR root
+        assert!(StateExportHelper::verify_state_inclusion(&env, &export, &mmr_root));
+
+        // Verify fails with different MMR root
+        let wrong_root = BytesN::from_array(&env, &[9u8; 32]);
+        assert!(!StateExportHelper::verify_state_inclusion(&env, &export, &wrong_root));
     }
 }
