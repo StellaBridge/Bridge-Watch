@@ -251,8 +251,7 @@ pub fn get_preferred_source_for_asset(env: &Env, asset_code: &String) -> Option<
         return None;
     }
 
-    let preferred = active_sources.get(0).unwrap();
-    Some(preferred.source_address)
+    active_sources.get(0).map(|preferred| preferred.source_address)
 }
 
 #[cfg(test)]

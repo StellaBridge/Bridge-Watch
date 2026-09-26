@@ -2,7 +2,7 @@
 //!
 //! Updates metadata in-place without recreating the asset registration entry.
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, String, Vec};
 
 use crate::keys;
 
@@ -13,6 +13,17 @@ pub const MAX_DESCRIPTION_LEN: u32 = 512;
 pub const MAX_URL_LEN: u32 = 256;
 pub const MAX_REASON_LEN: u32 = 256;
 pub const MAX_VERSION_HISTORY: u32 = 50;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum AssetMetadataError {
+    NotInitialized = 1,
+    NotAuthorized = 2,
+    EmptyField = 3,
+    FieldTooLong = 4,
+    AssetNotRegistered = 5,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,31 +57,33 @@ pub struct MetadataChangeRecord {
     pub timestamp: u64,
 }
 
-fn require_admin(env: &Env, caller: &Address) {
+fn require_admin(env: &Env, caller: &Address) -> Result<(), AssetMetadataError> {
     caller.require_auth();
     let admin: Address = env
         .storage()
         .instance()
         .get(&keys::ADMIN)
-        .unwrap_or_else(|| panic!("contract not initialized"));
+        .ok_or(AssetMetadataError::NotInitialized)?;
     if *caller != admin {
-        panic!("only admin can update asset metadata");
+        return Err(AssetMetadataError::NotAuthorized);
     }
+    Ok(())
 }
 
-fn validate_field(label: &str, value: &String, max_len: u32) {
+fn validate_field(value: &String, max_len: u32) -> Result<(), AssetMetadataError> {
     if value.len() == 0 {
-        panic!("{} must not be empty", label);
+        return Err(AssetMetadataError::EmptyField);
     }
     if value.len() > max_len {
-        panic!("{} exceeds maximum length", label);
+        return Err(AssetMetadataError::FieldTooLong);
     }
+    Ok(())
 }
 
 fn asset_is_registered(env: &Env, asset_code: &String) -> bool {
     env.storage()
         .persistent()
-        .has(&crate::DataKey::AssetHealth(asset_code.clone()))
+        .has(&crate::AssetDataKey::Health(asset_code.clone()))
 }
 
 fn load_history(env: &Env, asset_code: &String) -> Vec<MetadataChangeRecord> {
@@ -116,18 +129,18 @@ pub fn update_metadata(
     description: String,
     url: String,
     change_reason: String,
-) -> BridgeAssetMetadata {
-    require_admin(&env, &caller);
+) -> Result<BridgeAssetMetadata, AssetMetadataError> {
+    require_admin(&env, &caller)?;
 
     if !asset_is_registered(&env, &asset_code) {
-        panic!("asset is not registered");
+        return Err(AssetMetadataError::AssetNotRegistered);
     }
 
-    validate_field("name", &name, MAX_NAME_LEN);
-    validate_field("symbol", &symbol, MAX_SYMBOL_LEN);
-    validate_field("description", &description, MAX_DESCRIPTION_LEN);
-    validate_field("url", &url, MAX_URL_LEN);
-    validate_field("change_reason", &change_reason, MAX_REASON_LEN);
+    validate_field(&name, MAX_NAME_LEN)?;
+    validate_field(&symbol, MAX_SYMBOL_LEN)?;
+    validate_field(&description, MAX_DESCRIPTION_LEN)?;
+    validate_field(&url, MAX_URL_LEN)?;
+    validate_field(&change_reason, MAX_REASON_LEN)?;
 
     let now = env.ledger().timestamp();
     let previous: Option<BridgeAssetMetadata> = get_metadata(env.clone(), asset_code.clone());
@@ -163,80 +176,88 @@ pub fn update_metadata(
         (version, now),
     );
 
-    metadata
+    Ok(metadata)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DataKey;
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Ledger;
     use soroban_sdk::Env;
 
-    fn setup() -> (Env, Address, String) {
+    fn setup() -> (Env, Address, String, Address) {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        env.storage().instance().set(&keys::ADMIN, &admin);
+        let contract = Address::generate(&env);
+        env.as_contract(&contract, || {
+            env.storage().instance().set(&keys::ADMIN, &admin);
+        });
         env.ledger().set_timestamp(1_000_000);
 
         let asset_code = String::from_str(&env, "USDC");
-        env.storage().persistent().set(
-            &DataKey::AssetHealth(asset_code.clone()),
-            &crate::AssetHealth {
-                asset_code: asset_code.clone(),
-                health_score: 0,
-                liquidity_score: 0,
-                price_stability_score: 0,
-                bridge_uptime_score: 0,
-                paused: false,
-                active: true,
-                timestamp: 1_000_000,
-            },
-        );
+        env.as_contract(&contract, || {
+            env.storage().persistent().set(
+                &crate::AssetDataKey::Health(asset_code.clone()),
+                &crate::AssetHealth {
+                    asset_code: asset_code.clone(),
+                    health_score: 0,
+                    liquidity_score: 0,
+                    price_stability_score: 0,
+                    bridge_uptime_score: 0,
+                    paused: false,
+                    active: true,
+                    timestamp: 1_000_000,
+                    expires_at: 0,
+                },
+            );
+        });
 
-        (env, admin, asset_code)
+        (env, admin, asset_code, contract)
     }
 
     #[test]
     fn test_update_metadata_creates_version_history() {
-        let (env, admin, asset_code) = setup();
+        let (env, admin, asset_code, contract) = setup();
 
-        let meta = update_metadata(
-            env.clone(),
-            admin.clone(),
-            asset_code.clone(),
-            String::from_str(&env, "USD Coin"),
-            String::from_str(&env, "USDC"),
-            String::from_str(&env, "Stablecoin"),
-            String::from_str(&env, "https://circle.com/usdc"),
-            String::from_str(&env, "Initial metadata"),
-        );
+        let meta = env.as_contract(&contract, || {
+            update_metadata(
+                env.clone(),
+                admin.clone(),
+                asset_code.clone(),
+                String::from_str(&env, "USD Coin"),
+                String::from_str(&env, "USDC"),
+                String::from_str(&env, "Stablecoin"),
+                String::from_str(&env, "https://circle.com/usdc"),
+                String::from_str(&env, "Initial metadata"),
+            )
+        }).unwrap();
         assert_eq!(meta.version, 1);
 
-        let updated = update_metadata(
-            env.clone(),
-            admin,
-            asset_code.clone(),
-            String::from_str(&env, "USD Coin v2"),
-            String::from_str(&env, "USDC"),
-            String::from_str(&env, "Updated stablecoin"),
-            String::from_str(&env, "https://circle.com"),
-            String::from_str(&env, "Refresh copy"),
-        );
+        let updated = env.as_contract(&contract, || {
+            update_metadata(
+                env.clone(),
+                admin,
+                asset_code.clone(),
+                String::from_str(&env, "USD Coin v2"),
+                String::from_str(&env, "USDC"),
+                String::from_str(&env, "Updated stablecoin"),
+                String::from_str(&env, "https://circle.com"),
+                String::from_str(&env, "Refresh copy"),
+            )
+        }).unwrap();
         assert_eq!(updated.version, 2);
 
-        let history = get_metadata_history(env, asset_code);
+        let history = env.as_contract(&contract, || get_metadata_history(env.clone(), asset_code));
         assert_eq!(history.len(), 2);
     }
 
     #[test]
-    #[should_panic(expected = "not registered")]
     fn test_update_metadata_unknown_asset_fails() {
-        let (env, admin, _) = setup();
-        update_metadata(
-            env,
+        let (env, admin, _, contract) = setup();
+        let result = env.as_contract(&contract, || update_metadata(
+            env.clone(),
             admin,
             String::from_str(&env, "FAKE"),
             String::from_str(&env, "Fake"),
@@ -244,6 +265,7 @@ mod tests {
             String::from_str(&env, "desc"),
             String::from_str(&env, "https://example.com"),
             String::from_str(&env, "reason"),
-        );
+        ));
+        assert_eq!(result, Err(AssetMetadataError::AssetNotRegistered));
     }
 }

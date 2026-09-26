@@ -19,6 +19,8 @@ pub mod emergency_fund_recovery;
 pub mod emergency_multisig;
 pub mod escrow_contract;
 #[cfg(test)]
+pub mod fee_distribution;
+#[cfg(test)]
 pub mod governance;
 #[cfg(test)]
 pub mod insurance_pool;
