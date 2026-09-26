@@ -609,6 +609,78 @@ pub fn get_daily_history(
     result
 }
 
+/// Calculate the time-weighted average price over `window_secs`.
+///
+/// The window is clamped up to `TWAP_MIN_WINDOW_SECS`. Returns `None` until
+/// the pool has an observation at least one full window old, so thin history
+/// cannot be used to derive a manipulable average.
+pub fn calculate_twap(env: &Env, pool_id: String, window_secs: u64) -> Option<TwapResult> {
+    let acc: PriceAccumulator = env
+        .storage()
+        .persistent()
+        .get(&LiquidityKey::PriceAccumulator(pool_id.clone()))?;
+    if acc.count == 0 {
+        return None;
+    }
+
+    let window = if window_secs < TWAP_MIN_WINDOW_SECS {
+        TWAP_MIN_WINDOW_SECS
+    } else {
+        window_secs
+    };
+    let now = env.ledger().timestamp();
+    let target = now.checked_sub(window)?;
+
+    // Newest observation at or before the window start.
+    let actual_count = if acc.count > acc.capacity {
+        acc.capacity
+    } else {
+        acc.count
+    };
+    let mut anchor: Option<PriceObservation> = None;
+    for i in 0..actual_count {
+        let idx = (acc.head + acc.capacity - 1 - i) % acc.capacity;
+        let obs: Option<PriceObservation> = env
+            .storage()
+            .persistent()
+            .get(&LiquidityKey::PriceObservation(pool_id.clone(), idx));
+        if let Some(o) = obs {
+            if o.timestamp <= target {
+                anchor = Some(o);
+                break;
+            }
+        }
+    }
+    let anchor = anchor?;
+
+    let cumulative_now = current_cumulative(&acc, now);
+    let elapsed = now - anchor.timestamp;
+    if elapsed == 0 {
+        return None;
+    }
+    let twap = (cumulative_now - anchor.price_cumulative) / elapsed as i128;
+    let deviation_bps = deviation_bps(acc.last_price, twap);
+
+    Some(TwapResult {
+        pool_id,
+        twap,
+        spot_price: acc.last_price,
+        deviation_bps,
+        window_secs: elapsed,
+        manipulation_suspected: deviation_bps > MAX_SPOT_TWAP_DEVIATION_BPS as i128,
+    })
+}
+
+/// Returns true if the latest spot price deviates from the minimum-window TWAP
+/// by more than `MAX_SPOT_TWAP_DEVIATION_BPS`. Pools without enough history
+/// are not flagged.
+pub fn is_price_manipulated(env: &Env, pool_id: String) -> bool {
+    match calculate_twap(env, pool_id, TWAP_MIN_WINDOW_SECS) {
+        Some(r) => r.manipulation_suspected,
+        None => false,
+    }
+}
+
 /// Get all registered pool IDs.
 pub fn get_registered_pools(env: &Env) -> Vec<String> {
     env.storage()
@@ -689,6 +761,63 @@ fn get_snapshots_in_window(env: &Env, pool_id: &String, from: u64, to: u64) -> V
     }
 
     result
+}
+
+/// Cumulative price extrapolated to `now` using the price in effect since the
+/// last observation.
+fn current_cumulative(acc: &PriceAccumulator, now: u64) -> i128 {
+    let dt = now.saturating_sub(acc.last_timestamp) as i128;
+    acc.price_cumulative + acc.last_price * dt
+}
+
+fn deviation_bps(spot: i128, reference: i128) -> i128 {
+    if reference <= 0 {
+        return 0;
+    }
+    ((spot - reference).abs() * 10_000) / reference
+}
+
+/// Advance the cumulative price accumulator and append an observation.
+///
+/// Only the first price recorded in a given ledger timestamp is accepted into
+/// the accumulator: later same-timestamp updates carry zero time weight, so a
+/// sandwich executed within a single ledger cannot move the TWAP.
+fn record_price_observation(env: &Env, pool_id: &String, price: i128, timestamp: u64) {
+    let key = LiquidityKey::PriceAccumulator(pool_id.clone());
+    let existing: Option<PriceAccumulator> = env.storage().persistent().get(&key);
+
+    let mut acc = match existing {
+        Some(a) => {
+            if timestamp <= a.last_timestamp {
+                return;
+            }
+            a
+        }
+        None => PriceAccumulator {
+            head: 0,
+            count: 0,
+            capacity: MAX_PRICE_OBSERVATIONS,
+            last_price: price,
+            last_timestamp: timestamp,
+            price_cumulative: 0,
+        },
+    };
+
+    acc.price_cumulative = current_cumulative(&acc, timestamp);
+    acc.last_price = price;
+    acc.last_timestamp = timestamp;
+
+    let observation = PriceObservation {
+        timestamp,
+        price_cumulative: acc.price_cumulative,
+    };
+    env.storage().persistent().set(
+        &LiquidityKey::PriceObservation(pool_id.clone(), acc.head),
+        &observation,
+    );
+    acc.head = (acc.head + 1) % acc.capacity;
+    acc.count += 1;
+    env.storage().persistent().set(&key, &acc);
 }
 
 /// Update (or create) the daily bucket for the day containing this snapshot.
