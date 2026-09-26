@@ -392,6 +392,10 @@ impl AssetRegistryContract {
     // =======================================================================
 
     /// Register a new asset with initial metadata.
+    ///
+    /// The issuer must be a valid Stellar account strkey (except for `Native`
+    /// assets), and the symbol must not already be registered under another
+    /// issuer or asset code.
     #[allow(clippy::too_many_arguments)]
     pub fn register_asset(
         env: Env,
@@ -429,6 +433,12 @@ impl AssetRegistryContract {
         {
             return Err(RegistryError::AssetAlreadyRegistered);
         }
+
+        // Reject malformed issuers and symbols already owned by another issuer
+        // or asset code (cross-namespace spoofing).
+        Self::validate_issuer(&category, &issuer)?;
+        Self::check_symbol_conflict(&env, &symbol, &issuer, &asset_code)?;
+        Self::set_canonical_symbol(&env, &symbol, &issuer, &asset_code);
 
         let now = env.ledger().timestamp();
         let metadata = AssetMetadata {
@@ -553,6 +563,16 @@ impl AssetRegistryContract {
         if metadata.status == AssetStatus::Deprecated {
             return Err(RegistryError::AssetDeprecated);
         }
+
+        Self::validate_issuer(&metadata.category, &issuer)?;
+        Self::check_symbol_conflict(&env, &symbol, &issuer, &asset_code)?;
+        if metadata.symbol != symbol {
+            // Release the previous symbol so it can be claimed canonically elsewhere.
+            env.storage()
+                .persistent()
+                .remove(&DataKey::CanonicalSymbol(metadata.symbol.clone()));
+        }
+        Self::set_canonical_symbol(&env, &symbol, &issuer, &asset_code);
 
         let now = env.ledger().timestamp();
         metadata.name = name;
@@ -960,6 +980,9 @@ impl AssetRegistryContract {
     // =======================================================================
 
     /// Associate a bridge contract with an asset (admin only).
+    ///
+    /// Rejects the link with `DuplicateAssetRegistrationRejected` if the bridge
+    /// already carries a different asset with the same symbol.
     pub fn link_bridge_contract(
         env: Env,
         admin: Address,
@@ -970,7 +993,21 @@ impl AssetRegistryContract {
         dest_chain: String,
     ) -> Result<(), RegistryError> {
         Self::require_admin(&env, &admin)?;
-        Self::require_asset_exists(&env, &asset_code)?;
+        let metadata = Self::get_asset_or_err(&env, &asset_code)?;
+
+        // Composite uniqueness on (bridge_id, symbol): a bridge may not carry two
+        // different assets presenting the same symbol.
+        let bridge_symbol_key = DataKey::BridgeSymbol(bridge_id.clone(), metadata.symbol.clone());
+        let existing_code: Option<String> = env.storage().persistent().get(&bridge_symbol_key);
+        if let Some(code) = existing_code {
+            if code != asset_code {
+                env.events().publish(
+                    (symbol_short!("ar_dup"), metadata.symbol.clone()),
+                    (asset_code.clone(), code),
+                );
+                return Err(RegistryError::DuplicateAssetRegistrationRejected);
+            }
+        }
 
         let mut bridges: Vec<BridgeAssociation> = env
             .storage()
@@ -998,6 +1035,9 @@ impl AssetRegistryContract {
             created_at: now,
         });
 
+        env.storage()
+            .persistent()
+            .set(&bridge_symbol_key, &asset_code);
         env.storage()
             .persistent()
             .set(&DataKey::BridgeAssocs(asset_code), &bridges);
