@@ -1,0 +1,219 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "stellar-bridge-watch-blockchain",
+    "title": "Bridge Watch - Stellar Blockchain Health",
+    "description": "Soroban RPC latency, ledger close intervals, ingestion lag and contract resource usage. Requires the backend to export the metrics named in each panel description.",
+    "tags": [
+      "bridge-watch",
+      "stellar",
+      "soroban",
+      "blockchain"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "label": "Datasource",
+          "query": "prometheus",
+          "current": {
+            "selected": false,
+            "text": "Prometheus",
+            "value": "Prometheus"
+          }
+        },
+        {
+          "name": "job",
+          "type": "query",
+          "label": "Job",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "query": {
+            "query": "label_values(up, job)",
+            "refId": "PromJob"
+          },
+          "refresh": 2,
+          "sort": 1,
+          "multi": false,
+          "includeAll": false,
+          "current": {
+            "selected": true,
+            "text": "bridge-watch-backend",
+            "value": "bridge-watch-backend"
+          }
+        },
+        {
+          "name": "instance",
+          "type": "query",
+          "label": "Instance",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "query": {
+            "query": "label_values(up{job=\"$job\"}, instance)",
+            "refId": "PromInstance"
+          },
+          "refresh": 2,
+          "sort": 1,
+          "multi": true,
+          "includeAll": true,
+          "allValue": ".*"
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Soroban RPC Response Latency (s)",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "histogram_quantile(0.5, sum by (le) (rate(soroban_rpc_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))",
+            "legendFormat": "p50"
+          },
+          {
+            "refId": "B",
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(soroban_rpc_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))",
+            "legendFormat": "p95"
+          },
+          {
+            "refId": "C",
+            "expr": "histogram_quantile(0.99, sum by (le) (rate(soroban_rpc_request_duration_seconds_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))",
+            "legendFormat": "p99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "decimals": 3
+          }
+        },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "description": "Histogram soroban_rpc_request_duration_seconds{method}"
+      },
+      {
+        "id": 2,
+        "title": "Stellar Ledger Close Time (delta between ledgers, s)",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "max(stellar_ledger_close_interval_seconds{job=\"$job\", instance=~\"$instance\"})",
+            "legendFormat": "close delta"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "decimals": 2
+          }
+        },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "description": "Gauge stellar_ledger_close_interval_seconds: close_time(n) - close_time(n-1) of the latest observed ledger"
+      },
+      {
+        "id": 3,
+        "title": "Ingestion Stream Lag (ledgers)",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "max(stellar_ledger_latest_sequence{job=\"$job\", instance=~\"$instance\"}) - max(stellar_ingestion_last_ledger_sequence{job=\"$job\", instance=~\"$instance\"})",
+            "legendFormat": "lag"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "none",
+            "decimals": 0
+          }
+        },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "description": "Gauges stellar_ledger_latest_sequence (network tip from RPC) and stellar_ingestion_last_ledger_sequence (last ingested)"
+      },
+      {
+        "id": 4,
+        "title": "Contract Invocation Resource Consumption (p95)",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "histogram_quantile(0.95, sum by (le, method) (rate(soroban_contract_cpu_instructions_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))",
+            "legendFormat": "cpu {{method}}"
+          },
+          {
+            "refId": "B",
+            "expr": "histogram_quantile(0.95, sum by (le, method) (rate(soroban_contract_resource_fee_stroops_bucket{job=\"$job\", instance=~\"$instance\"}[5m])))",
+            "legendFormat": "fee {{method}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "decimals": 0
+          }
+        },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "description": "Histograms soroban_contract_cpu_instructions{method} and soroban_contract_resource_fee_stroops{method}, from simulation cost / resource fee"
+      }
+    ]
+  },
+  "overwrite": true
+}

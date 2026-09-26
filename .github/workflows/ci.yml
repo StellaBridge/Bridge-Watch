@@ -344,6 +344,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
 
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -379,6 +380,32 @@ jobs:
           set -o pipefail
           printf 'cargo-test\tcargo test --verbose\tcargo-test.log\n' >> "$COMMAND_LOG_DIR/COMMANDS.tsv"
           cargo test --verbose 2>&1 | tee "$COMMAND_LOG_DIR/cargo-test.log"
+
+      # Soroban rejects contract uploads above 64 KiB (network setting
+      # contract_max_size_bytes = 65536), so gate on raw size; gzip size is
+      # reported for trend tracking.
+      - name: WASM Size Profile
+        run: |
+          set -o pipefail
+          printf 'wasm-size\tcargo build --workspace --target wasm32-unknown-unknown --release\twasm-size.log\n' >> "$COMMAND_LOG_DIR/COMMANDS.tsv"
+          {
+            cargo build --workspace --target wasm32-unknown-unknown --release
+            limit=65536
+            status=0
+            echo "| Contract | Raw (bytes) | Gzip (bytes) | Limit |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+            for wasm in target/wasm32-unknown-unknown/release/*.wasm; do
+              raw=$(stat -c %s "$wasm")
+              gz=$(gzip -9 -c "$wasm" | wc -c)
+              echo "$(basename "$wasm"): raw=${raw} gzip=${gz} limit=${limit}"
+              echo "| $(basename "$wasm") | ${raw} | ${gz} | ${limit} |" >> "$GITHUB_STEP_SUMMARY"
+              if [ "$raw" -gt "$limit" ]; then
+                echo "::error file=$wasm::$(basename "$wasm") is ${raw} bytes, exceeds Soroban limit of ${limit}"
+                status=1
+              fi
+            done
+            exit $status
+          } 2>&1 | tee "$COMMAND_LOG_DIR/wasm-size.log"
 
       - name: Compress command logs
         if: always()

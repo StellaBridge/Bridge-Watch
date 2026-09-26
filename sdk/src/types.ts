@@ -22,6 +22,8 @@ export interface QueryContractParams {
   method: string;
   args?: StellarSdk.xdr.ScVal[];
   sourcePublicKey?: string;
+  /** Override the configured contract, e.g. to target the batch query contract. */
+  contractId?: string;
 }
 
 export interface EventSubscriptionOptions {

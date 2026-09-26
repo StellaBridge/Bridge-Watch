@@ -69,6 +69,23 @@ export interface HealthSource {
   registered_at: number;
 }
 
+/** Mirrors batch_query::AssetData, serialized as JSON by the batch query contract. */
+export interface BatchAssetState {
+  asset_code: string;
+  name: string;
+  symbol: string;
+  issuer: string;
+  status: string;
+}
+
+/** One entry per requested asset code, in request order. */
+export type BatchAssetResult =
+  | { asset_code: string; ok: true; data: BatchAssetState }
+  | { asset_code: string; ok: false; error: string };
+
+/** Mirrors batch_query::MAX_BATCH_SIZE. */
+export const MAX_BATCH_QUERY_SIZE = 50;
+
 export type StatusTier = "ok" | "low" | "medium" | "high";
 
 export interface ContractStatusRollup {
@@ -505,6 +522,21 @@ function parseConfigEntry(val: StellarSdk.xdr.ScVal): ConfigEntry {
   };
 }
 
+function parseBatchAssetResults(
+  assetCodes: string[],
+  val: StellarSdk.xdr.ScVal
+): BatchAssetResult[] {
+  // QueryResult enum variants decode to ["Success" | "Failure", string].
+  const { results } = StellarSdk.scValToNative(val) as {
+    results: [string, string][];
+  };
+  return results.map(([tag, payload], i) =>
+    tag === "Success"
+      ? { asset_code: assetCodes[i], ok: true, data: JSON.parse(payload) }
+      : { asset_code: assetCodes[i], ok: false, error: payload }
+  );
+}
+
 function parseVecOfStrings(val: StellarSdk.xdr.ScVal): string[] {
   const items = val.vec() ?? [];
   return items.map(parseScvString);
@@ -548,6 +580,32 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     const val = extractResultScVal(result);
     if (!val || isScvVoid(val)) return null;
     return parseAssetHealth(val);
+  }
+
+  /**
+   * Query many assets in a single RPC simulation via the batch query contract
+   * (contracts/soroban/src/batch_query.rs) instead of one request per asset.
+   * Pass `batchContractId` when the batch contract is deployed separately.
+   */
+  async getBatchAssetHealth(
+    assetCodes: string[],
+    batchContractId?: string
+  ): Promise<BatchAssetResult[]> {
+    if (assetCodes.length === 0 || assetCodes.length > MAX_BATCH_QUERY_SIZE) {
+      throw new BridgeWatchQueryError(
+        `assetCodes must contain 1-${MAX_BATCH_QUERY_SIZE} entries, got ${assetCodes.length}`
+      );
+    }
+    const result = await this.queryMethod({
+      method: "batch_query_assets",
+      args: [scvVec(assetCodes.map(scvString))],
+      contractId: batchContractId,
+    });
+    const val = extractResultScVal(result);
+    if (!val) {
+      throw new BridgeWatchQueryError("Batch asset query simulation failed", result);
+    }
+    return parseBatchAssetResults(assetCodes, val);
   }
 
   async getHealthScoreResult(

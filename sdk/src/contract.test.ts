@@ -512,4 +512,72 @@ describe("TypedBridgeWatchContractSdk zk/mmr verification helpers", () => {
     queryMethodSpy.mockResolvedValue({} as never);
     expect(await sdk.verifyMmrProof(mmrProof)).toBe(false);
   });
+
+  describe("getBatchAssetHealth", () => {
+    const sym = (v: string) => StellarSdk.xdr.ScVal.scvSymbol(v);
+    const str = (v: string) => StellarSdk.xdr.ScVal.scvString(v);
+    const entry = (k: string, v: StellarSdk.xdr.ScVal) =>
+      new StellarSdk.xdr.ScMapEntry({ key: sym(k), val: v });
+    const usdc = {
+      asset_code: "USDC",
+      name: "USD Coin",
+      symbol: "USDC",
+      issuer: "GISSUER",
+      status: "active",
+    };
+    const response = StellarSdk.xdr.ScVal.scvMap([
+      entry("error_count", StellarSdk.xdr.ScVal.scvU32(1)),
+      entry(
+        "processed_at",
+        StellarSdk.xdr.ScVal.scvU64(StellarSdk.xdr.Uint64.fromString("1"))
+      ),
+      entry(
+        "results",
+        StellarSdk.xdr.ScVal.scvVec([
+          StellarSdk.xdr.ScVal.scvVec([sym("Success"), str(JSON.stringify(usdc))]),
+          StellarSdk.xdr.ScVal.scvVec([sym("Failure"), str("Asset not found")]),
+        ])
+      ),
+      entry("success_count", StellarSdk.xdr.ScVal.scvU32(1)),
+    ]);
+
+    it("makes one batch_query_assets simulation and parses results in order", async () => {
+      queryMethodSpy.mockResolvedValue({
+        result: { retval: response },
+        transactionData: {},
+        minResourceFee: "0",
+        cost: {},
+        events: [],
+        latestLedger: 1,
+        _parsed: true,
+      } as never);
+
+      const results = await sdk.getBatchAssetHealth(["USDC", "NOPE"], "CBATCH");
+
+      expect(queryMethodSpy).toHaveBeenCalledTimes(1);
+      expect(queryMethodSpy).toHaveBeenCalledWith({
+        method: "batch_query_assets",
+        args: [expect.any(Object)],
+        contractId: "CBATCH",
+      });
+      expect(results).toEqual([
+        { asset_code: "USDC", ok: true, data: usdc },
+        { asset_code: "NOPE", ok: false, error: "Asset not found" },
+      ]);
+    });
+
+    it("rejects empty and oversized batches without calling RPC", async () => {
+      await expect(sdk.getBatchAssetHealth([])).rejects.toThrow(/1-50/);
+      await expect(
+        sdk.getBatchAssetHealth(Array.from({ length: 51 }, (_, i) => `A${i}`))
+      ).rejects.toThrow(/got 51/);
+      expect(queryMethodSpy).not.toHaveBeenCalled();
+    });
+
+    it("throws when the simulation returns no result", async () => {
+      await expect(sdk.getBatchAssetHealth(["USDC"])).rejects.toThrow(
+        /simulation failed/
+      );
+    });
+  });
 });

@@ -2,6 +2,10 @@ name: Security Scanning
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/security.yml'
 
 jobs:
   dependency-audit:
@@ -22,6 +26,6 @@ jobs:
       # Rust audit using rustsec/audit-check
       - name: Rust Audit
         uses: rustsec/audit-check@v2.0.0
-        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: contracts

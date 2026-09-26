@@ -157,7 +157,9 @@ export class BridgeWatchContractSdk {
       const sourcePublicKey =
         params.sourcePublicKey ?? StellarSdk.Keypair.random().publicKey();
       const sourceAccount = new StellarSdk.Account(sourcePublicKey, "0");
-      const contract = new StellarSdk.Contract(this.config.contractId);
+      const contract = new StellarSdk.Contract(
+        params.contractId ?? this.config.contractId
+      );
 
       const tx = new StellarSdk.TransactionBuilder(sourceAccount, {
         fee: "100",
