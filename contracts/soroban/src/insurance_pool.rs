@@ -1216,4 +1216,94 @@ mod test {
         let pool = client.get_pool(&pool_id).unwrap();
         assert_eq!(pool.rejected_claims, 1);
     }
+
+    fn approved_large_claim(
+        env: &Env,
+        client: &InsurancePoolContractClient<'static>,
+        admin: &Address,
+        approver_1: &Address,
+        staker: &Address,
+        pool_id: &String,
+    ) -> u64 {
+        let buyer = Address::generate(env);
+        client.stake_liquidity(staker, pool_id, &10_000);
+        let quoted = client.quote_premium(pool_id, &8_000, &CoverageTier::Aggressive);
+        client.purchase_coverage(&buyer, pool_id, &8_000, &CoverageTier::Aggressive, &quoted);
+        let claim_id = client.submit_claim(
+            &buyer,
+            pool_id,
+            &8_000,
+            &String::from_str(env, "QmCatastrophicExploit"),
+        );
+        client.verify_claim(admin, &claim_id, &true, &0u32);
+        client.approve_claim(admin, &claim_id);
+        client.approve_claim(approver_1, &claim_id);
+        claim_id
+    }
+
+    #[test]
+    fn test_single_claim_capped_at_max_fraction() {
+        let (env, client, admin, approver_1, _a2, staker, pool_id) = setup();
+        let claim_id = approved_large_claim(&env, &client, &admin, &approver_1, &staker, &pool_id);
+
+        // 30% of 10_000 available liquidity.
+        let paid = client.execute_payout(&admin, &claim_id);
+        assert_eq!(paid, 3_000);
+
+        let claim = client.get_claim(&claim_id).unwrap();
+        assert_eq!(claim.status, ClaimStatus::PartiallyPaid);
+        assert_eq!(claim.paid_amount, 3_000);
+
+        let pool = client.get_pool(&pool_id).unwrap();
+        assert_eq!(pool.total_liquidity, 7_000);
+        assert_eq!(pool.paid_claims, 0);
+
+        let queue = client.get_payout_queue(&pool_id);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.get(0).unwrap(), claim_id);
+    }
+
+    #[test]
+    fn test_epoch_drain_cap_defers_remainder_to_next_epoch() {
+        let (env, client, admin, approver_1, _a2, staker, pool_id) = setup();
+        let claim_id = approved_large_claim(&env, &client, &admin, &approver_1, &staker, &pool_id);
+
+        assert_eq!(client.execute_payout(&admin, &claim_id), 3_000);
+        // Epoch budget is 50% of 10_000; only 2_000 left this epoch.
+        assert_eq!(client.execute_payout(&admin, &claim_id), 2_000);
+        // Epoch exhausted: nothing more is paid.
+        assert_eq!(client.execute_payout(&admin, &claim_id), 0);
+
+        let epoch = client.get_payout_epoch(&pool_id).unwrap();
+        assert_eq!(epoch.paid_in_epoch, 5_000);
+        assert_eq!(epoch.opening_liquidity, 10_000);
+
+        // Next epoch: 30% of the remaining 5_000 liquidity.
+        env.ledger().set_timestamp(1_000_000 + PAYOUT_EPOCH_SECS);
+        assert_eq!(client.process_payout_queue(&admin, &pool_id), 1_500);
+
+        let claim = client.get_claim(&claim_id).unwrap();
+        assert_eq!(claim.paid_amount, 6_500);
+        assert_eq!(claim.status, ClaimStatus::PartiallyPaid);
+    }
+
+    #[test]
+    fn test_claim_settles_and_leaves_queue() {
+        let (env, client, admin, approver_1, _a2, staker, pool_id) = setup();
+        client.configure_payout_caps(&admin, &10_000u32, &10_000u32, &PAYOUT_EPOCH_SECS);
+        let claim_id = approved_large_claim(&env, &client, &admin, &approver_1, &staker, &pool_id);
+
+        assert_eq!(client.execute_payout(&admin, &claim_id), 8_000);
+        let claim = client.get_claim(&claim_id).unwrap();
+        assert_eq!(claim.status, ClaimStatus::Paid);
+        assert_eq!(client.get_payout_queue(&pool_id).len(), 0);
+        assert_eq!(client.get_pool(&pool_id).unwrap().paid_claims, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_payout_caps_rejected() {
+        let (_env, client, admin, _a1, _a2, _staker, _pool_id) = setup();
+        client.configure_payout_caps(&admin, &6_000u32, &5_000u32, &PAYOUT_EPOCH_SECS);
+    }
 }
