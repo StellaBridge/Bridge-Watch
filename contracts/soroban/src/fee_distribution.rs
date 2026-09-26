@@ -56,6 +56,11 @@ const PRECISION: i128 = 1_000_000_000_000i128;
 /// Denominator for basis-point calculations (10 000 = 100 %).
 const BPS_DENOM: u32 = 10_000;
 
+/// Default minimum amount (1 XLM = 10 000 000 stroops) that must accrue before
+/// a balance transfer is made. Smaller amounts stay in a pending buffer so
+/// micro-transactions do not burn CPU instructions or grow storage with dust.
+pub const MIN_DISBURSEMENT_THRESHOLD: i128 = 10_000_000;
+
 // ─── Data Structures ──────────────────────────────────────────────────────────
 
 /// Compound key used to address per-(staker, token) storage slots.
@@ -176,6 +181,10 @@ pub enum FeeDistDataKey {
     DistributionInterval,
     /// Ledger timestamp of the last automatic distribution.
     LastAutoDistribution,
+    /// Minimum amount required before a fee disbursement transfer is made.
+    MinDisbursement,
+    /// Per-token treasury allocation buffered until it clears the threshold.
+    TreasuryBuffer(Address),
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -222,6 +231,7 @@ impl FeeDistributionContract {
         env.storage().instance().set(&FeeDistDataKey::Emergency, &false);
         env.storage().instance().set(&FeeDistDataKey::DistributionInterval, &0u64);
         env.storage().instance().set(&FeeDistDataKey::LastAutoDistribution, &0u64);
+        env.storage().instance().set(&FeeDistDataKey::MinDisbursement, &MIN_DISBURSEMENT_THRESHOLD);
 
         let empty_addrs: Vec<Address> = Vec::new(&env);
         env.storage().instance().set(&FeeDistDataKey::Collectors, &empty_addrs.clone());
@@ -303,6 +313,17 @@ impl FeeDistributionContract {
     pub fn set_distribution_interval(env: Env, interval_secs: u64) {
         Self::require_admin(&env);
         env.storage().instance().set(&FeeDistDataKey::DistributionInterval, &interval_secs);
+    }
+
+    /// Set the minimum disbursement threshold.  Pending fees, treasury
+    /// allocations and staker claims below this amount are buffered instead of
+    /// transferred.  Pass `0` to disable buffering.  Admin only.
+    pub fn set_min_disbursement_threshold(env: Env, threshold: i128) {
+        Self::require_admin(&env);
+        if threshold < 0 {
+            panic!("threshold must be non-negative");
+        }
+        env.storage().instance().set(&FeeDistDataKey::MinDisbursement, &threshold);
     }
 
     /// Update the treasury address.  Admin only.
@@ -851,11 +872,31 @@ impl FeeDistributionContract {
     }
 
     /// Return the treasury address.
+    pub fn get_min_disbursement_threshold(env: Env) -> i128 {
+        Self::min_disbursement(&env)
+    }
+
+    /// Treasury allocation for `token` buffered below the disbursement threshold.
+    pub fn get_treasury_buffer(env: Env, token: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&FeeDistDataKey::TreasuryBuffer(token))
+            .unwrap_or(0)
+    }
+
     pub fn get_treasury(env: Env) -> Address {
         env.storage().instance().get(&FeeDistDataKey::Treasury).unwrap()
     }
 
     // ── Internal helpers ───────────────────────────────────────────────────────
+
+    /// Active minimum disbursement threshold (defaults for pre-upgrade state).
+    fn min_disbursement(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&FeeDistDataKey::MinDisbursement)
+            .unwrap_or(MIN_DISBURSEMENT_THRESHOLD)
+    }
 
     /// Require the caller to be the admin; panics otherwise.
     fn require_admin(env: &Env) {
