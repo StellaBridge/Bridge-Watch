@@ -1206,6 +1206,8 @@ mod tests {
         };
         client.initialize(&admin, &treasury, &staking_token, &ratios);
         client.add_fee_token(&fee_token);
+        // Legacy tests use small amounts; dust buffering is exercised separately.
+        client.set_min_disbursement_threshold(&0);
 
         TestEnv { env, contract, admin, treasury, staking_token, fee_token }
     }
@@ -2021,5 +2023,125 @@ mod tests {
         let t = setup();
         let nobody = Address::generate(&t.env);
         assert_eq!(client(&t).get_pending_rewards(&nobody, &t.fee_token), 0);
+    }
+
+    // ── Minimum disbursement threshold ────────────────────────────────────────
+
+    #[test]
+    fn test_default_threshold_set_on_initialize() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let staking_token = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let contract = env.register_contract(None, FeeDistributionContract);
+        let c = FeeDistributionContractClient::new(&env, &contract);
+        c.initialize(
+            &admin,
+            &Address::generate(&env),
+            &staking_token,
+            &DistributionRatios { stakers_bps: 5_000, governance_bps: 3_000, treasury_bps: 2_000 },
+        );
+        assert_eq!(c.get_min_disbursement_threshold(), MIN_DISBURSEMENT_THRESHOLD);
+    }
+
+    #[test]
+    fn test_dust_fees_stay_pending_below_threshold() {
+        let t = setup();
+        let c = client(&t);
+        c.set_min_disbursement_threshold(&MIN_DISBURSEMENT_THRESHOLD);
+
+        mint_fee(&t, &t.admin, 99);
+        c.collect_fees(&t.admin, &t.fee_token, &99);
+        c.distribute_fees(&Vec::new(&t.env));
+
+        let pool = c.get_fee_pool(&t.fee_token).unwrap();
+        assert_eq!(pool.pending, 99);
+        assert_eq!(pool.total_distributed, 0);
+        assert_eq!(c.get_distribution_count(), 0);
+        assert_eq!(TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury), 0);
+    }
+
+    #[test]
+    fn test_buffered_fees_distribute_once_threshold_reached() {
+        let t = setup();
+        let c = client(&t);
+        c.set_min_disbursement_threshold(&MIN_DISBURSEMENT_THRESHOLD);
+
+        mint_fee(&t, &t.admin, MIN_DISBURSEMENT_THRESHOLD);
+        c.collect_fees(&t.admin, &t.fee_token, &(MIN_DISBURSEMENT_THRESHOLD / 2));
+        c.distribute_fees(&Vec::new(&t.env));
+        assert_eq!(c.get_distribution_count(), 0);
+
+        c.collect_fees(&t.admin, &t.fee_token, &(MIN_DISBURSEMENT_THRESHOLD / 2));
+        c.distribute_fees(&Vec::new(&t.env));
+
+        let pool = c.get_fee_pool(&t.fee_token).unwrap();
+        assert_eq!(pool.pending, 0);
+        assert_eq!(pool.total_distributed, MIN_DISBURSEMENT_THRESHOLD);
+        assert_eq!(c.get_distribution_count(), 1);
+    }
+
+    #[test]
+    fn test_treasury_dust_buffered_until_threshold() {
+        let t = setup();
+        let c = client(&t);
+        // Pool threshold met but 20% treasury slice (2 XLM of 10) stays below 3 XLM.
+        c.set_min_disbursement_threshold(&30_000_000);
+
+        mint_fee(&t, &t.admin, 200_000_000);
+        c.collect_fees(&t.admin, &t.fee_token, &100_000_000);
+        c.distribute_fees(&Vec::new(&t.env));
+        assert_eq!(c.get_treasury_buffer(&t.fee_token), 20_000_000);
+        assert_eq!(TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury), 0);
+
+        c.collect_fees(&t.admin, &t.fee_token, &100_000_000);
+        c.distribute_fees(&Vec::new(&t.env));
+        assert_eq!(c.get_treasury_buffer(&t.fee_token), 0);
+        assert_eq!(
+            TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury),
+            40_000_000
+        );
+    }
+
+    #[test]
+    fn test_flush_treasury_buffer() {
+        let t = setup();
+        let c = client(&t);
+        c.set_min_disbursement_threshold(&30_000_000);
+
+        mint_fee(&t, &t.admin, 100_000_000);
+        c.collect_fees(&t.admin, &t.fee_token, &100_000_000);
+        c.distribute_fees(&Vec::new(&t.env));
+
+        assert_eq!(c.flush_treasury_buffer(&t.fee_token), 20_000_000);
+        assert_eq!(c.get_treasury_buffer(&t.fee_token), 0);
+        assert_eq!(
+            TokenClient::new(&t.env, &t.fee_token).balance(&t.treasury),
+            20_000_000
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "below minimum disbursement threshold")]
+    fn test_claim_below_threshold_deferred() {
+        let t = setup();
+        let c = client(&t);
+        let staker = Address::generate(&t.env);
+        mint_stake(&t, &staker, 1_000);
+        c.stake_for_fees(&staker, &1_000, &false);
+
+        mint_fee(&t, &t.admin, 1_000);
+        c.collect_fees(&t.admin, &t.fee_token, &1_000);
+        c.distribute_fees(&Vec::new(&t.env));
+
+        c.set_min_disbursement_threshold(&MIN_DISBURSEMENT_THRESHOLD);
+        c.claim_fees(&staker, &t.fee_token);
+    }
+
+    #[test]
+    #[should_panic(expected = "threshold must be non-negative")]
+    fn test_negative_threshold_rejected() {
+        let t = setup();
+        client(&t).set_min_disbursement_threshold(&-1);
     }
 }
