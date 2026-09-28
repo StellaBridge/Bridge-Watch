@@ -1,0 +1,1862 @@
+openapi: 3.0.3
+info:
+  contact:
+    name: Bridge-Watch Team
+    url: https://github.com/StellaBridge/Bridge-Watch
+  description: |-
+    Real-time Stellar bridge monitoring API. Provides bridge statuses, asset health, liquidity, price feeds, alert management, analytics, and administrative controls.
+
+    ## Authentication
+    Protected endpoints require an API key in the `x-api-key` header.
+
+    ## Rate Limiting
+    All endpoints are rate-limited per IP using a sliding-window algorithm backed by Redis. Exceeding the limit returns **429 Too Many Requests** with a `Retry-After` header.
+
+    ## Versioning
+    All REST endpoints are prefixed with `/api/v1/`. Breaking changes increment the version segment.
+
+    ## Error Format
+    ```json
+    { "error": "Short label", "message": "Human-readable description" }
+    ```
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  title: Bridge-Watch API
+  version: 1.0.0
+servers:
+- description: Local development
+  url: http://localhost:3000
+- description: Production
+  url: https://api.bridge-watch.io
+tags:
+- description: Service health check
+  name: Health
+- description: "Asset prices, liquidity, and health scores"
+  name: Assets
+- description: Stellar bridge status and statistics
+  name: Bridges
+- description: Alert rule management and history (requires API key)
+  name: Alerts
+- description: Protocol-wide and per-asset analytics
+  name: Analytics
+- description: "Time-series aggregation of prices, health, and volume"
+  name: Aggregation
+- description: "Asset metadata — logos, descriptions, social links"
+  name: Metadata
+- description: User watchlists
+  name: Watchlists
+- description: User preference storage
+  name: Preferences
+- description: Background job queue monitoring and control
+  name: Jobs
+- description: Runtime configuration and feature flags
+  name: Config
+- description: Redis cache inspection and invalidation
+  name: Cache
+- description: Automated circuit-breaker pause controls
+  name: Circuit Breaker
+paths:
+  /health:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              example:
+                status: ok
+                timestamp: 2026-03-28T12:00:00.000Z
+              schema:
+                $ref: '#/components/schemas/_health_get_200_response'
+          description: Service is healthy
+      summary: Service health check
+      tags:
+      - Health
+  /api/v1/assets:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/_api_v1_assets_get_200_response'
+          description: List of assets
+      summary: List all monitored assets
+      tags:
+      - Assets
+  /api/v1/assets/{symbol}:
+    get:
+      parameters:
+      - example: USDC
+        explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Asset details
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Asset not found
+      summary: Get asset details
+      tags:
+      - Assets
+  /api/v1/assets/{symbol}/health:
+    get:
+      parameters:
+      - example: USDC
+        explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthScore'
+          description: Health score
+      summary: Get current health score
+      tags:
+      - Assets
+  /api/v1/assets/{symbol}/health/history:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: period
+        required: false
+        schema:
+          default: 7d
+          enum:
+          - 24h
+          - 7d
+          - 30d
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Health score history
+        "400":
+          description: Bad request
+      summary: Get health score history
+      tags:
+      - Assets
+  /api/v1/assets/{symbol}/liquidity:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Liquidity data
+      summary: Get aggregated liquidity data
+      tags:
+      - Assets
+  /api/v1/assets/{symbol}/price:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Aggregated price
+      summary: Get aggregated price from all sources
+      tags:
+      - Assets
+  /api/v1/bridges:
+    get:
+      responses:
+        "200":
+          description: Bridge status list
+      summary: List all bridge statuses
+      tags:
+      - Bridges
+  /api/v1/bridges/{bridge}/stats:
+    get:
+      parameters:
+      - example: allbridge
+        explode: false
+        in: path
+        name: bridge
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Bridge statistics
+        "404":
+          description: Bridge not found
+      summary: Get bridge statistics
+      tags:
+      - Bridges
+  /api/v1/alerts/rules:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: owner
+        required: true
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Alert rules
+        "400":
+          description: Missing owner param
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: List alert rules for an owner
+      tags:
+      - Alerts
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_alerts_rules_post_request'
+        required: true
+      responses:
+        "201":
+          description: Rule created
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Create an alert rule
+      tags:
+      - Alerts
+  /api/v1/alerts/rules/{ruleId}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_alerts_rules__ruleId__delete_request'
+        required: true
+      responses:
+        "204":
+          description: Rule deleted
+        "401":
+          description: Unauthorized
+        "404":
+          description: Rule not found
+      security:
+      - ApiKeyAuth: []
+      summary: Delete an alert rule
+      tags:
+      - Alerts
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Alert rule
+        "401":
+          description: Unauthorized
+        "404":
+          description: Rule not found
+      security:
+      - ApiKeyAuth: []
+      summary: Get a single alert rule
+      tags:
+      - Alerts
+    patch:
+      parameters:
+      - explode: false
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Updated rule
+        "401":
+          description: Unauthorized
+        "404":
+          description: Rule not found
+      security:
+      - ApiKeyAuth: []
+      summary: Update an alert rule
+      tags:
+      - Alerts
+  /api/v1/alerts/rules/{ruleId}/active:
+    patch:
+      parameters:
+      - explode: false
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_alerts_rules__ruleId__active_patch_request'
+        required: true
+      responses:
+        "200":
+          description: Success
+        "401":
+          description: Unauthorized
+        "404":
+          description: Rule not found
+      security:
+      - ApiKeyAuth: []
+      summary: Pause or resume an alert rule
+      tags:
+      - Alerts
+  /api/v1/alerts/rules/{ruleId}/events:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          type: integer
+        style: form
+      responses:
+        "200":
+          description: Rule events
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Get events fired by a specific rule
+      tags:
+      - Alerts
+  /api/v1/alerts/rules/bulk:
+    delete:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Rules deleted
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Bulk delete alert rules
+      tags:
+      - Alerts
+    patch:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Rules updated
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Bulk update alert rules
+      tags:
+      - Alerts
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "201":
+          description: Rules created
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Bulk create alert rules
+      tags:
+      - Alerts
+  /api/v1/alerts/history:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: page
+        required: false
+        schema:
+          default: 1
+          type: integer
+        style: form
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 20
+          type: integer
+        style: form
+      responses:
+        "200":
+          description: Paginated alert history
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Get paginated alert history
+      tags:
+      - Alerts
+  /api/v1/alerts/history/{assetCode}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: assetCode
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          type: integer
+        style: form
+      responses:
+        "200":
+          description: Asset alert history
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Get alert history for an asset
+      tags:
+      - Alerts
+  /api/v1/alerts/stats:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: owner
+        required: true
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Alert stats
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Get alert statistics for an owner
+      tags:
+      - Alerts
+  /api/v1/alerts/recent:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 100
+          type: integer
+        style: form
+      responses:
+        "200":
+          description: Recent events
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Get most recent alert events
+      tags:
+      - Alerts
+  /api/v1/alerts/test:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_alerts_test_post_request'
+        required: true
+      responses:
+        "200":
+          description: Dry-run result
+        "401":
+          description: Unauthorized
+      security:
+      - ApiKeyAuth: []
+      summary: Dry-run an alert rule against current metrics
+      tags:
+      - Alerts
+  /api/v1/analytics/protocol:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: forceRefresh
+        required: false
+        schema:
+          enum:
+          - "true"
+          - "false"
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Protocol stats
+      summary: Get protocol-wide statistics
+      tags:
+      - Analytics
+  /api/v1/analytics/bridges/comparison:
+    get:
+      responses:
+        "200":
+          description: Bridge comparisons
+      summary: Get bridge comparison metrics
+      tags:
+      - Analytics
+  /api/v1/analytics/assets/rankings:
+    get:
+      responses:
+        "200":
+          description: Asset rankings
+      summary: Get asset rankings
+      tags:
+      - Analytics
+  /api/v1/analytics/volume:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: period
+        required: false
+        schema:
+          default: daily
+          enum:
+          - hourly
+          - daily
+          - weekly
+          - monthly
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: symbol
+        required: false
+        schema:
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: bridgeName
+        required: false
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Volume aggregations
+        "400":
+          description: Invalid period
+      summary: Get volume aggregations
+      tags:
+      - Analytics
+  /api/v1/analytics/trends/{metric}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: metric
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Trend data
+      summary: Calculate trend for a metric
+      tags:
+      - Analytics
+  /api/v1/analytics/top-performers:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: type
+        required: false
+        schema:
+          default: assets
+          enum:
+          - assets
+          - bridges
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: metric
+        required: false
+        schema:
+          default: health
+          enum:
+          - volume
+          - tvl
+          - health
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 10
+          type: integer
+        style: form
+      responses:
+        "200":
+          description: Top performers
+      summary: Get top performing assets or bridges
+      tags:
+      - Analytics
+  /api/v1/analytics/historical/{metric}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: metric
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: symbol
+        required: false
+        schema:
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: days
+        required: false
+        schema:
+          default: 30
+          type: integer
+        style: form
+      responses:
+        "200":
+          description: Historical data
+      summary: Get historical comparison data
+      tags:
+      - Analytics
+  /api/v1/analytics/summary:
+    get:
+      responses:
+        "200":
+          description: Analytics summary
+      summary: Get comprehensive analytics summary
+      tags:
+      - Analytics
+  /api/v1/analytics/custom-metrics:
+    get:
+      responses:
+        "200":
+          description: Custom metrics list
+      summary: List all custom metrics
+      tags:
+      - Analytics
+  /api/v1/analytics/custom-metrics/{metricId}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: metricId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Metric result
+        "404":
+          description: Metric not found
+      summary: Execute a custom metric query
+      tags:
+      - Analytics
+  /api/v1/analytics/cache/invalidate:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_analytics_cache_invalidate_post_request'
+      responses:
+        "200":
+          description: Cache invalidated
+      summary: Invalidate analytics cache
+      tags:
+      - Analytics
+  /api/v1/aggregation/{symbol}/prices:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: interval
+        required: true
+        schema:
+          enum:
+          - 1m
+          - 5m
+          - 15m
+          - 1h
+          - 4h
+          - 1d
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: startTime
+        required: true
+        schema:
+          format: date-time
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: endTime
+        required: true
+        schema:
+          format: date-time
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Price aggregations
+      summary: Aggregate price data
+      tags:
+      - Aggregation
+  /api/v1/aggregation/{symbol}/health:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: interval
+        required: true
+        schema:
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: startTime
+        required: true
+        schema:
+          format: date-time
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: endTime
+        required: true
+        schema:
+          format: date-time
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Health aggregations
+      summary: Aggregate health scores
+      tags:
+      - Aggregation
+  /api/v1/aggregation/{symbol}/volume:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: true
+        in: query
+        name: interval
+        required: true
+        schema:
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: startTime
+        required: true
+        schema:
+          format: date-time
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: endTime
+        required: true
+        schema:
+          format: date-time
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Volume aggregations
+      summary: Aggregate volume data
+      tags:
+      - Aggregation
+  /api/v1/aggregation/stats:
+    get:
+      responses:
+        "200":
+          description: Stats
+      summary: Get aggregation statistics
+      tags:
+      - Aggregation
+  /api/v1/metadata:
+    get:
+      responses:
+        "200":
+          description: Metadata list
+      summary: List all asset metadata
+      tags:
+      - Metadata
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "201":
+          description: Created/updated
+        "400":
+          description: Validation error
+      summary: Create or update asset metadata
+      tags:
+      - Metadata
+  /api/v1/metadata/search:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: q
+        required: true
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Search results
+      summary: Search asset metadata
+      tags:
+      - Metadata
+  /api/v1/metadata/symbol/{symbol}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: symbol
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Metadata
+        "404":
+          description: Not found
+      summary: Get metadata by symbol
+      tags:
+      - Metadata
+  /api/v1/metadata/category/{category}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: category
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Metadata
+      summary: Get metadata by category
+      tags:
+      - Metadata
+  /api/v1/metadata/{assetId}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: assetId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Deleted
+      summary: Delete asset metadata
+      tags:
+      - Metadata
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: assetId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Metadata
+        "404":
+          description: Not found
+      summary: Get metadata by asset ID
+      tags:
+      - Metadata
+  /api/v1/metadata/{assetId}/logo:
+    patch:
+      parameters:
+      - explode: false
+        in: path
+        name: assetId
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_metadata__assetId__logo_patch_request'
+        required: true
+      responses:
+        "200":
+          description: Logo updated
+      summary: Update asset logo
+      tags:
+      - Metadata
+  /api/v1/metadata/{assetId}/history:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: assetId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Version history
+      summary: Get metadata version history
+      tags:
+      - Metadata
+  /api/v1/watchlists/{userId}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Watchlists
+      summary: Get all watchlists for a user
+      tags:
+      - Watchlists
+    post:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_watchlists__userId__post_request'
+        required: true
+      responses:
+        "200":
+          description: Created watchlist
+        "400":
+          description: Validation error
+      summary: Create a watchlist
+      tags:
+      - Watchlists
+  /api/v1/watchlists/{userId}/{id}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Deleted
+      summary: Delete a watchlist
+      tags:
+      - Watchlists
+    patch:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: id
+        required: true
+        schema:
+          format: uuid
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Updated
+        "400":
+          description: Error
+      summary: Update a watchlist
+      tags:
+      - Watchlists
+  /api/v1/preferences/{userId}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Preferences
+      summary: Get all preferences for a user
+      tags:
+      - Preferences
+  /api/v1/preferences/{userId}/{category}/{key}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: category
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: key
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Reset preferences
+      summary: Reset (delete) a preference key
+      tags:
+      - Preferences
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: category
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: key
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Preference value
+        "400":
+          description: Invalid category
+        "404":
+          description: Key not found
+      summary: Get a single preference value
+      tags:
+      - Preferences
+    put:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: category
+        required: true
+        schema:
+          type: string
+        style: simple
+      - explode: false
+        in: path
+        name: key
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_preferences__userId___category___key__put_request'
+        required: true
+      responses:
+        "200":
+          description: Updated preferences
+      summary: Set a preference value
+      tags:
+      - Preferences
+  /api/v1/preferences/{userId}/bulk:
+    patch:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Updated preferences
+        "409":
+          description: Version conflict
+      summary: Bulk update preferences
+      tags:
+      - Preferences
+  /api/v1/preferences/{userId}/export:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Exported preferences
+      summary: Export user preferences
+      tags:
+      - Preferences
+  /api/v1/preferences/{userId}/import:
+    post:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "200":
+          description: Imported preferences
+      summary: Import user preferences
+      tags:
+      - Preferences
+  /api/v1/preferences/{userId}/stream:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          content:
+            text/event-stream: {}
+          description: SSE stream
+      summary: Stream preference change events (SSE)
+      tags:
+      - Preferences
+  /api/v1/jobs/monitor:
+    get:
+      responses:
+        "200":
+          description: Queue status and failed jobs
+      summary: Get job queue status
+      tags:
+      - Jobs
+  /api/v1/jobs/{jobName}/trigger:
+    post:
+      parameters:
+      - example: bridge-health-check
+        explode: false
+        in: path
+        name: jobName
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Job queued
+        "500":
+          description: Failed to queue
+      summary: Manually trigger a job
+      tags:
+      - Jobs
+  /api/v1/config:
+    get:
+      responses:
+        "200":
+          description: Config list
+      summary: List all configuration entries
+      tags:
+      - Config
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "201":
+          description: Config set
+      summary: Set a configuration value
+      tags:
+      - Config
+  /api/v1/config/{key}:
+    delete:
+      parameters:
+      - explode: false
+        in: path
+        name: key
+        required: true
+        schema:
+          type: string
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_config__key__delete_request'
+        required: true
+      responses:
+        "200":
+          description: Deleted
+      summary: Delete a configuration entry
+      tags:
+      - Config
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: key
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Config value
+        "404":
+          description: Not found
+      summary: Get a configuration value
+      tags:
+      - Config
+  /api/v1/config/features/{name}:
+    get:
+      parameters:
+      - explode: false
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+        style: simple
+      responses:
+        "200":
+          description: Feature flag status
+      summary: Check a feature flag
+      tags:
+      - Config
+  /api/v1/config/features:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "201":
+          description: Feature flag set
+      summary: Set a feature flag
+      tags:
+      - Config
+  /api/v1/config/export:
+    get:
+      responses:
+        "200":
+          description: Config export
+      summary: Export configuration
+      tags:
+      - Config
+  /api/v1/config/import:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "201":
+          description: Imported
+      summary: Import configuration
+      tags:
+      - Config
+  /api/v1/config/audit:
+    get:
+      responses:
+        "200":
+          description: Audit trail
+      summary: Get configuration audit trail
+      tags:
+      - Config
+  /api/v1/config/cache/clear:
+    post:
+      responses:
+        "200":
+          description: Cache cleared
+      summary: Clear configuration cache
+      tags:
+      - Config
+  /api/v1/cache/stats:
+    get:
+      responses:
+        "200":
+          description: Cache stats
+      summary: Get Redis cache statistics
+      tags:
+      - Cache
+  /api/v1/cache/invalidate:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/_api_v1_cache_invalidate_post_request'
+        required: true
+      responses:
+        "200":
+          description: Invalidated
+        "400":
+          description: Missing tag or key
+      summary: Invalidate cache entries
+      tags:
+      - Cache
+  /api/v1/circuit-breaker/status:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: scope
+        required: true
+        schema:
+          enum:
+          - global
+          - bridge
+          - asset
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: identifier
+        required: false
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Pause status
+        "400":
+          description: Invalid scope
+      summary: Check circuit-breaker pause status
+      tags:
+      - Circuit Breaker
+  /api/v1/circuit-breaker/whitelist:
+    get:
+      parameters:
+      - explode: true
+        in: query
+        name: type
+        required: true
+        schema:
+          enum:
+          - address
+          - asset
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: address
+        required: false
+        schema:
+          type: string
+        style: form
+      - explode: true
+        in: query
+        name: asset
+        required: false
+        schema:
+          type: string
+        style: form
+      responses:
+        "200":
+          description: Whitelist status
+      summary: Check whitelist status
+      tags:
+      - Circuit Breaker
+  /api/v1/circuit-breaker/pause:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "501":
+          description: Not implemented
+      security:
+      - ApiKeyAuth: []
+      summary: Pause a scope (not yet implemented — requires guardian auth)
+      tags:
+      - Circuit Breaker
+  /api/v1/circuit-breaker/recovery:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        "501":
+          description: Not implemented
+      security:
+      - ApiKeyAuth: []
+      summary: Recover from a pause (not yet implemented — requires guardian auth)
+      tags:
+      - Circuit Breaker
+  /api/v1/metrics/rate-limits:
+    get:
+      responses:
+        "200":
+          description: Rate-limit metrics
+      security:
+      - ApiKeyAuth: []
+      summary: Rate-limit sliding-window metrics
+      tags:
+      - Cache
+components:
+  schemas:
+    Error:
+      example:
+        error: Not Found
+        message: The requested resource was not found
+      properties:
+        error:
+          example: Not Found
+          type: string
+        message:
+          example: The requested resource was not found
+          type: string
+      type: object
+    HealthScore:
+      example:
+        symbol: USDC
+        score: 87.5
+        status: healthy
+        updatedAt: 2000-01-23T04:56:07.000+00:00
+      properties:
+        symbol:
+          example: USDC
+          type: string
+        score:
+          example: 87.5
+          format: float
+          maximum: 100
+          minimum: 0
+          type: number
+        status:
+          enum:
+          - healthy
+          - warning
+          - critical
+          example: healthy
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      type: object
+    AlertRule:
+      properties:
+        id:
+          format: uuid
+          type: string
+        ownerAddress:
+          type: string
+        name:
+          type: string
+        assetCode:
+          type: string
+        conditions:
+          items:
+            type: object
+          type: array
+        conditionOp:
+          enum:
+          - AND
+          - OR
+          type: string
+        priority:
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+          type: string
+        cooldownSeconds:
+          type: integer
+        webhookUrl:
+          format: uri
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          format: date-time
+          type: string
+      type: object
+    Watchlist:
+      properties:
+        id:
+          format: uuid
+          type: string
+        userId:
+          type: string
+        name:
+          type: string
+        isDefault:
+          type: boolean
+        assets:
+          items:
+            type: string
+          type: array
+        createdAt:
+          format: date-time
+          type: string
+      type: object
+    _health_get_200_response:
+      example:
+        status: ok
+        timestamp: 2000-01-23T04:56:07.000+00:00
+      properties:
+        status:
+          example: ok
+          type: string
+        timestamp:
+          format: date-time
+          type: string
+      type: object
+    _api_v1_assets_get_200_response:
+      example:
+        total: 0
+        assets:
+        - "{}"
+        - "{}"
+      properties:
+        assets:
+          items:
+            type: object
+          type: array
+        total:
+          example: 0
+          type: integer
+      type: object
+    _api_v1_alerts_rules_post_request:
+      properties:
+        ownerAddress:
+          type: string
+        name:
+          example: USDC health drop
+          type: string
+        assetCode:
+          example: USDC
+          type: string
+        conditions:
+          items:
+            type: object
+          type: array
+        conditionOp:
+          default: AND
+          enum:
+          - AND
+          - OR
+          type: string
+        priority:
+          default: medium
+          enum:
+          - low
+          - medium
+          - high
+          - critical
+          type: string
+        cooldownSeconds:
+          default: 300
+          type: integer
+        webhookUrl:
+          format: uri
+          type: string
+      required:
+      - assetCode
+      - conditions
+      - name
+      - ownerAddress
+      type: object
+    _api_v1_alerts_rules__ruleId__delete_request:
+      properties:
+        ownerAddress:
+          type: string
+      required:
+      - ownerAddress
+      type: object
+    _api_v1_alerts_rules__ruleId__active_patch_request:
+      properties:
+        ownerAddress:
+          type: string
+        isActive:
+          type: boolean
+      required:
+      - isActive
+      - ownerAddress
+      type: object
+    _api_v1_alerts_test_post_request:
+      properties:
+        rule:
+          type: object
+        metrics:
+          type: object
+      required:
+      - metrics
+      - rule
+      type: object
+    _api_v1_analytics_cache_invalidate_post_request:
+      properties:
+        pattern:
+          type: string
+      type: object
+    _api_v1_metadata__assetId__logo_patch_request:
+      properties:
+        logoUrl:
+          format: uri
+          type: string
+        updatedBy:
+          type: string
+      required:
+      - logoUrl
+      - updatedBy
+      type: object
+    _api_v1_watchlists__userId__post_request:
+      properties:
+        name:
+          type: string
+        isDefault:
+          type: boolean
+      required:
+      - name
+      type: object
+    _api_v1_preferences__userId___category___key__put_request:
+      properties:
+        value: {}
+      required:
+      - value
+      type: object
+    _api_v1_config__key__delete_request:
+      properties:
+        deletedBy:
+          type: string
+      required:
+      - deletedBy
+      type: object
+    _api_v1_cache_invalidate_post_request:
+      properties:
+        tag:
+          type: string
+        key:
+          type: string
+      type: object
+  securitySchemes:
+    ApiKeyAuth:
+      description: API key for protected endpoints
+      in: header
+      name: x-api-key
+      type: apiKey
