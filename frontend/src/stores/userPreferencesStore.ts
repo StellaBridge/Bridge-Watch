@@ -21,6 +21,7 @@ export interface UserPreferences {
     supplyMismatch: number;
     healthScoreDrop: number;
   };
+  dashboardWidgets?: Array<{ id: string; visible: boolean; order: number }>;
 }
 
 const defaultPreferences: UserPreferences = {
@@ -40,6 +41,7 @@ const defaultPreferences: UserPreferences = {
     supplyMismatch: 0.1,
     healthScoreDrop: 10,
   },
+  dashboardWidgets: undefined,
 };
 
 interface UserPreferencesState extends UserPreferences {
@@ -58,6 +60,7 @@ interface UserPreferencesState extends UserPreferences {
     type: keyof UserPreferences["alertThresholds"],
     value: number
   ) => void;
+  setDashboardWidgets: (widgets: Array<{ id: string; visible: boolean; order: number }>) => void;
 }
 
 export const useUserPreferencesStore = create<UserPreferencesState>()(
@@ -141,6 +144,10 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
             false,
             `setAlertThreshold/${type}`
           );
+        },
+
+        setDashboardWidgets: (widgets) => {
+          set({ dashboardWidgets: widgets }, false, "setDashboardWidgets");
         },
       }),
       {

@@ -746,4 +746,90 @@ export class AnalyticsService {
       { bypassCache, tags: ["analytics", "historical"], ttl: CacheTTL.ANALYTICS }
     );
   }
+
+  /**
+   * Get hourly volume rollup for a bridge using TimescaleDB continuous aggregate
+   */
+  async getBridgeHourlyVolumeRollup(
+    bridgeId: string,
+    startDate: Date,
+    endDate: Date = new Date(),
+    bypassCache: boolean = false
+  ): Promise<Array<{
+    bucket: string;
+    bridgeId: string;
+    totalVolume: string;
+    transactionCount: number;
+    avgAmount: string;
+    minAmount: string;
+    maxAmount: string;
+  }>> {
+    const cacheKey = CacheService.generateKey(
+      "analytics",
+      `bridge_rollup:${bridgeId}:${startDate.toISOString()}:${endDate.toISOString()}`
+    );
+
+    return CacheService.getOrSet(
+      cacheKey,
+      async () => {
+        try {
+          const results = await knex("bridge_hourly_volume_rollup")
+            .select(
+              "bucket",
+              "bridge_id as bridgeId",
+              "total_volume as totalVolume",
+              "transaction_count as transactionCount",
+              "avg_amount as avgAmount",
+              "min_amount as minAmount",
+              "max_amount as maxAmount"
+            )
+            .where("bridge_id", bridgeId)
+            .where("bucket", ">=", startDate)
+            .where("bucket", "<=", endDate)
+            .orderBy("bucket", "asc");
+
+          if (results && results.length > 0) {
+            return results.map((row: any) => ({
+              bucket: row.bucket,
+              bridgeId: row.bridgeId,
+              totalVolume: row.totalVolume?.toString() || "0",
+              transactionCount: Number(row.transactionCount || 0),
+              avgAmount: row.avgAmount?.toString() || "0",
+              minAmount: row.minAmount?.toString() || "0",
+              maxAmount: row.maxAmount?.toString() || "0",
+            }));
+          }
+        } catch {
+          // Fallback to raw bridge_transactions aggregation if continuous aggregate is not present
+        }
+
+        const rawResults = await knex("bridge_transactions")
+          .select(
+            knex.raw("DATE_TRUNC('hour', created_at) as bucket"),
+            "bridge_name as bridgeId",
+            knex.raw("SUM(amount) as total_volume"),
+            knex.raw("COUNT(*) as transaction_count"),
+            knex.raw("AVG(amount) as avg_amount"),
+            knex.raw("MIN(amount) as min_amount"),
+            knex.raw("MAX(amount) as max_amount")
+          )
+          .where("bridge_name", bridgeId)
+          .where("created_at", ">=", startDate)
+          .where("created_at", "<=", endDate)
+          .groupBy("bucket", "bridge_name")
+          .orderBy("bucket", "asc");
+
+        return rawResults.map((row: any) => ({
+          bucket: row.bucket,
+          bridgeId: row.bridgeId,
+          totalVolume: row.total_volume?.toString() || "0",
+          transactionCount: Number(row.transaction_count || 0),
+          avgAmount: row.avg_amount?.toString() || "0",
+          minAmount: row.min_amount?.toString() || "0",
+          maxAmount: row.max_amount?.toString() || "0",
+        }));
+      },
+      { bypassCache, tags: ["analytics", "bridge_rollup"], ttl: CacheTTL.ANALYTICS }
+    );
+  }
 }

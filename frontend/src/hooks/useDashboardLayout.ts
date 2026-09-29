@@ -1,7 +1,20 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useLocalStorageState } from "./useLocalStorageState";
+import { useUserPreferencesStore } from "../stores/userPreferencesStore";
 
-export type DashboardWidgetId = "quick-stats" | "asset-health" | "bridge-status";
+export type DashboardWidgetId =
+  | "kpi-banner"
+  | "status-cards"
+  | "overview-stats"
+  | "quick-stats"
+  | "sparkline-grid"
+  | "asset-discovery"
+  | "asset-health"
+  | "watchlist"
+  | "external-dependencies"
+  | "activity-timeline"
+  | "bridge-status";
+
 export type DashboardWidgetSize = "small" | "medium" | "large";
 
 export interface DashboardWidgetDefinition {
@@ -13,7 +26,17 @@ export interface DashboardWidgetDefinition {
 export interface DashboardWidgetConfig {
   id: DashboardWidgetId;
   enabled: boolean;
+  visible?: boolean;
   size: DashboardWidgetSize;
+  order?: number;
+}
+
+export interface WidgetLayoutItem {
+  id: DashboardWidgetId;
+  visible: boolean;
+  enabled: boolean;
+  size: DashboardWidgetSize;
+  order: number;
 }
 
 interface DashboardLayout {
@@ -22,29 +45,69 @@ interface DashboardLayout {
 
 const STORAGE_KEY = "bridge-watch:dashboard-layout:v1";
 
-const widgetDefinitions: DashboardWidgetDefinition[] = [
+export const widgetDefinitions: DashboardWidgetDefinition[] = [
   {
-    id: "quick-stats",
-    title: "Quick Stats",
-    description: "Portfolio-level KPIs and health distribution snapshots.",
+    id: "kpi-banner",
+    title: "KPI Metrics",
+    description: "Live summary of TVL, monitored assets, active bridges, and health score.",
   },
   {
-    id: "asset-health",
-    title: "Asset Health",
-    description: "Live scorecards for monitored bridged assets.",
+    id: "status-cards",
+    title: "Status at a Glance",
+    description: "Inline alerts for assets and bridges requiring immediate attention.",
+  },
+  {
+    id: "overview-stats",
+    title: "Overview Summary",
+    description: "High-level summary cards for TVL, asset count, active bridges, and health.",
+  },
+  {
+    id: "sparkline-grid",
+    title: "Comparative Sparklines",
+    description: "Multi-asset price and volume mini-charts.",
+  },
+  {
+    id: "asset-discovery",
+    title: "Asset Discovery & Health",
+    description: "Live scorecards and discovery tables for monitored bridged assets.",
+  },
+  {
+    id: "watchlist",
+    title: "Watchlist",
+    description: "Custom user-curated watchlists and alerts.",
+  },
+  {
+    id: "external-dependencies",
+    title: "External Dependencies",
+    description: "Status of external oracles, RPC providers, and indexers.",
+  },
+  {
+    id: "activity-timeline",
+    title: "Recent Activity Timeline",
+    description: "Chronological transaction, bridge event, and governance timeline.",
   },
   {
     id: "bridge-status",
     title: "Bridge Status",
-    description: "Current bridge availability and anomaly visibility.",
+    description: "Current bridge availability, mismatch percentage, and operational status.",
   },
 ];
 
-const defaultLayout: DashboardLayout = {
+export const WIDGET_TITLES: Record<string, string> = Object.fromEntries(
+  widgetDefinitions.map((w) => [w.id, w.title])
+);
+
+export const defaultLayout: DashboardLayout = {
   widgets: [
-    { id: "quick-stats", enabled: true, size: "medium" },
-    { id: "asset-health", enabled: true, size: "large" },
-    { id: "bridge-status", enabled: true, size: "medium" },
+    { id: "kpi-banner", enabled: true, visible: true, size: "large", order: 0 },
+    { id: "status-cards", enabled: true, visible: true, size: "large", order: 1 },
+    { id: "overview-stats", enabled: true, visible: true, size: "large", order: 2 },
+    { id: "sparkline-grid", enabled: true, visible: true, size: "medium", order: 3 },
+    { id: "asset-discovery", enabled: true, visible: true, size: "large", order: 4 },
+    { id: "watchlist", enabled: true, visible: true, size: "medium", order: 5 },
+    { id: "external-dependencies", enabled: true, visible: true, size: "medium", order: 6 },
+    { id: "activity-timeline", enabled: true, visible: true, size: "large", order: 7 },
+    { id: "bridge-status", enabled: true, visible: true, size: "large", order: 8 },
   ],
 };
 
@@ -52,38 +115,45 @@ const presets: Record<string, DashboardLayout> = {
   default: defaultLayout,
   compact: {
     widgets: [
-      { id: "quick-stats", enabled: true, size: "small" },
-      { id: "asset-health", enabled: true, size: "medium" },
-      { id: "bridge-status", enabled: false, size: "small" },
+      { id: "kpi-banner", enabled: true, visible: true, size: "small", order: 0 },
+      { id: "overview-stats", enabled: true, visible: true, size: "small", order: 1 },
+      { id: "asset-discovery", enabled: true, visible: true, size: "medium", order: 2 },
+      { id: "bridge-status", enabled: false, visible: false, size: "small", order: 3 },
     ],
   },
   operations: {
     widgets: [
-      { id: "bridge-status", enabled: true, size: "large" },
-      { id: "asset-health", enabled: true, size: "medium" },
-      { id: "quick-stats", enabled: true, size: "small" },
+      { id: "bridge-status", enabled: true, visible: true, size: "large", order: 0 },
+      { id: "status-cards", enabled: true, visible: true, size: "medium", order: 1 },
+      { id: "kpi-banner", enabled: true, visible: true, size: "small", order: 2 },
+      { id: "external-dependencies", enabled: true, visible: true, size: "medium", order: 3 },
     ],
   },
   analyst: {
     widgets: [
-      { id: "asset-health", enabled: true, size: "large" },
-      { id: "quick-stats", enabled: true, size: "medium" },
-      { id: "bridge-status", enabled: true, size: "medium" },
+      { id: "asset-discovery", enabled: true, visible: true, size: "large", order: 0 },
+      { id: "sparkline-grid", enabled: true, visible: true, size: "large", order: 1 },
+      { id: "kpi-banner", enabled: true, visible: true, size: "medium", order: 2 },
+      { id: "activity-timeline", enabled: true, visible: true, size: "medium", order: 3 },
     ],
   },
 };
 
 function sanitizeLayout(layout: DashboardLayout): DashboardLayout {
-  const seen = new Set<DashboardWidgetId>();
+  const seen = new Set<string>();
   const normalized: DashboardWidgetConfig[] = [];
+  let orderIndex = 0;
 
-  for (const widget of layout.widgets) {
+  for (const widget of layout.widgets ?? []) {
     if (seen.has(widget.id)) continue;
     seen.add(widget.id);
+    const isEnabled = widget.enabled !== undefined ? Boolean(widget.enabled) : (widget.visible !== undefined ? Boolean(widget.visible) : true);
     normalized.push({
       id: widget.id,
-      enabled: Boolean(widget.enabled),
-      size: widget.size,
+      enabled: isEnabled,
+      visible: isEnabled,
+      size: widget.size ?? "medium",
+      order: widget.order ?? orderIndex++,
     });
   }
 
@@ -92,16 +162,20 @@ function sanitizeLayout(layout: DashboardLayout): DashboardLayout {
       normalized.push({
         id: definition.id,
         enabled: true,
+        visible: true,
         size: "medium",
+        order: orderIndex++,
       });
     }
   }
 
-  return { widgets: normalized };
+  return { widgets: normalized.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) };
 }
 
 export function useDashboardLayout() {
   const [layout, setLayout] = useLocalStorageState<DashboardLayout>(STORAGE_KEY, defaultLayout);
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const setStoreWidgets = useUserPreferencesStore((s) => s.setDashboardWidgets);
 
   const normalizedLayout = useMemo(() => sanitizeLayout(layout), [layout]);
 
@@ -110,50 +184,122 @@ export function useDashboardLayout() {
     [normalizedLayout],
   );
 
-  function setWidgetEnabled(id: DashboardWidgetId, enabled: boolean): void {
-    setLayout((prev) => ({
-      widgets: sanitizeLayout(prev).widgets.map((widget) =>
-        widget.id === id ? { ...widget, enabled } : widget,
-      ),
+  const flatLayoutList = useMemo<WidgetLayoutItem[]>(() => {
+    return normalizedLayout.widgets.map((widget, idx) => ({
+      id: widget.id,
+      visible: widget.enabled,
+      enabled: widget.enabled,
+      size: widget.size,
+      order: widget.order ?? idx,
     }));
+  }, [normalizedLayout]);
+
+  const saveLayout = useCallback(
+    (newWidgets: DashboardWidgetConfig[]) => {
+      const sanitized = sanitizeLayout({ widgets: newWidgets });
+      setLayout(sanitized);
+      if (setStoreWidgets) {
+        setStoreWidgets(
+          sanitized.widgets.map((w, idx) => ({
+            id: w.id,
+            visible: w.enabled,
+            order: w.order ?? idx,
+          }))
+        );
+      }
+    },
+    [setLayout, setStoreWidgets]
+  );
+
+  function setWidgetEnabled(id: DashboardWidgetId, enabled: boolean): void {
+    saveLayout(
+      normalizedLayout.widgets.map((widget) =>
+        widget.id === id ? { ...widget, enabled, visible: enabled } : widget
+      )
+    );
   }
+
+  const toggleWidgetVisibility = useCallback(
+    (id: string) => {
+      const widget = normalizedLayout.widgets.find((w) => w.id === id);
+      if (widget) {
+        setWidgetEnabled(widget.id as DashboardWidgetId, !widget.enabled);
+      }
+    },
+    [normalizedLayout]
+  );
 
   function setWidgetSize(id: DashboardWidgetId, size: DashboardWidgetSize): void {
-    setLayout((prev) => ({
-      widgets: sanitizeLayout(prev).widgets.map((widget) =>
-        widget.id === id ? { ...widget, size } : widget,
-      ),
-    }));
+    saveLayout(
+      normalizedLayout.widgets.map((widget) =>
+        widget.id === id ? { ...widget, size } : widget
+      )
+    );
   }
 
+  const moveWidget = useCallback(
+    (id: string, direction: "up" | "down") => {
+      const current = [...normalizedLayout.widgets];
+      const index = current.findIndex((w) => w.id === id);
+      if (index === -1) return;
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) return;
+
+      const itemA = current[index];
+      const itemB = current[targetIndex];
+      current[index] = itemB;
+      current[targetIndex] = itemA;
+
+      const reindexed = current.map((item, idx) => ({ ...item, order: idx }));
+      saveLayout(reindexed);
+    },
+    [normalizedLayout, saveLayout]
+  );
+
   function reorderWidgets(idsInOrder: DashboardWidgetId[]): void {
-    setLayout((prev) => {
-      const current = sanitizeLayout(prev).widgets;
-      const byId = new Map(current.map((widget) => [widget.id, widget]));
-      const reordered = idsInOrder
-        .map((id) => byId.get(id))
-        .filter((widget): widget is DashboardWidgetConfig => Boolean(widget));
+    const current = normalizedLayout.widgets;
+    const byId = new Map(current.map((widget) => [widget.id, widget]));
+    const reordered: DashboardWidgetConfig[] = [];
+    let order = 0;
 
-      for (const widget of current) {
-        if (!idsInOrder.includes(widget.id)) {
-          reordered.push(widget);
-        }
+    for (const id of idsInOrder) {
+      const item = byId.get(id);
+      if (item) {
+        reordered.push({ ...item, order: order++ });
       }
+    }
 
-      return { widgets: reordered };
-    });
+    for (const widget of current) {
+      if (!idsInOrder.includes(widget.id)) {
+        reordered.push({ ...widget, order: order++ });
+      }
+    }
+
+    saveLayout(reordered);
   }
 
   function applyPreset(name: keyof typeof presets): void {
-    setLayout(presets[name]);
+    saveLayout(presets[name]?.widgets ?? defaultLayout.widgets);
   }
 
   function resetToDefault(): void {
-    setLayout(defaultLayout);
+    saveLayout(defaultLayout.widgets);
   }
 
+  const resetLayout = useCallback(() => {
+    resetToDefault();
+  }, []);
+
+  const isWidgetVisible = useCallback(
+    (id: string) => {
+      const widget = normalizedLayout.widgets.find((w) => w.id === id);
+      return widget ? widget.enabled : true;
+    },
+    [normalizedLayout]
+  );
+
   function exportLayout(): string {
-    return JSON.stringify(sanitizeLayout(normalizedLayout), null, 2);
+    return JSON.stringify(normalizedLayout, null, 2);
   }
 
   function importLayout(payload: string): { ok: boolean; message: string } {
@@ -162,7 +308,7 @@ export function useDashboardLayout() {
       if (!parsed || !Array.isArray(parsed.widgets)) {
         return { ok: false, message: "Invalid layout payload" };
       }
-      setLayout(sanitizeLayout(parsed));
+      saveLayout(parsed.widgets);
       return { ok: true, message: "Layout imported successfully" };
     } catch {
       return { ok: false, message: "Unable to parse layout JSON" };
@@ -170,14 +316,21 @@ export function useDashboardLayout() {
   }
 
   return {
-    layout: normalizedLayout,
+    layout: flatLayoutList,
+    rawLayout: normalizedLayout,
     widgetDefinitions,
     enabledWidgets,
+    isCustomizing,
+    setIsCustomizing,
+    toggleWidgetVisibility,
+    moveWidget,
     setWidgetEnabled,
     setWidgetSize,
     reorderWidgets,
     applyPreset,
     resetToDefault,
+    resetLayout,
+    isWidgetVisible,
     exportLayout,
     importLayout,
   };

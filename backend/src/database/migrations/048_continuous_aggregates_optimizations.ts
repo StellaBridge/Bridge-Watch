@@ -189,6 +189,32 @@ export async function up(knex: Knex): Promise<void> {
       );
     `);
 
+    // 1-hour bridge volume continuous aggregate
+    await knex.raw(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS bridge_hourly_volume_rollup
+      WITH (timescaledb.continuous) AS
+      SELECT
+        time_bucket('1 hour', created_at) AS bucket,
+        bridge_name AS bridge_id,
+        SUM(amount) AS total_volume,
+        COUNT(*) AS transaction_count,
+        AVG(amount) AS avg_amount,
+        MIN(amount) AS min_amount,
+        MAX(amount) AS max_amount
+      FROM bridge_transactions
+      GROUP BY bucket, bridge_id
+      WITH NO DATA;
+    `);
+
+    await knex.raw(`
+      SELECT add_continuous_aggregate_policy('bridge_hourly_volume_rollup',
+        start_offset => INTERVAL '7 days',
+        end_offset => INTERVAL '1 hour',
+        schedule_interval => INTERVAL '30 minutes',
+        if_not_exists => TRUE
+      );
+    `);
+
     // Create performance indexes on materialized views
     await knex.raw(`CREATE INDEX IF NOT EXISTS prices_hourly_symbol_bucket_idx ON prices_hourly (symbol, bucket DESC);`);
     await knex.raw(`CREATE INDEX IF NOT EXISTS prices_daily_symbol_bucket_idx ON prices_daily (symbol, bucket DESC);`);
@@ -196,6 +222,7 @@ export async function up(knex: Knex): Promise<void> {
     await knex.raw(`CREATE INDEX IF NOT EXISTS health_scores_daily_symbol_bucket_idx ON health_scores_daily (symbol, bucket DESC);`);
     await knex.raw(`CREATE INDEX IF NOT EXISTS liquidity_hourly_symbol_bucket_idx ON liquidity_hourly (symbol, bucket DESC);`);
     await knex.raw(`CREATE INDEX IF NOT EXISTS liquidity_daily_symbol_bucket_idx ON liquidity_daily (symbol, bucket DESC);`);
+    await knex.raw(`CREATE INDEX IF NOT EXISTS bridge_hourly_volume_rollup_idx ON bridge_hourly_volume_rollup (bridge_id, bucket DESC);`);
   } catch {
     // Continuous aggregates require TimescaleDB 2.x extension.
     // In environments without TimescaleDB, migration proceeds gracefully without failing.
@@ -203,6 +230,7 @@ export async function up(knex: Knex): Promise<void> {
 }
 
 export async function down(knex: Knex): Promise<void> {
+  await knex.raw(`DROP MATERIALIZED VIEW IF EXISTS bridge_hourly_volume_rollup CASCADE;`);
   await knex.raw(`DROP MATERIALIZED VIEW IF EXISTS liquidity_daily CASCADE;`);
   await knex.raw(`DROP MATERIALIZED VIEW IF EXISTS liquidity_hourly CASCADE;`);
   await knex.raw(`DROP MATERIALIZED VIEW IF EXISTS health_scores_daily CASCADE;`);
