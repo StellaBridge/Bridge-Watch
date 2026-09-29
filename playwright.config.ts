@@ -48,9 +48,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run build:frontend && npm --workspace=frontend run preview -- --host 127.0.0.1 --port 4173",
+    command: "cd frontend && npx vite build --mode production && npx vite preview --host 127.0.0.1 --port 4173",
     url: baseURL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });
