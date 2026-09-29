@@ -10,8 +10,8 @@
 
 import { test, expect, Page } from '@playwright/test';
 
-// Test configuration
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+// Test configuration - use baseURL from playwright config
+const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
 const TEST_USER = {
   email: 'test@example.com',
   password: 'SecurePassword123!',
