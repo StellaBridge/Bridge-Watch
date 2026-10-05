@@ -8,6 +8,8 @@ import {
   type DashboardFilters,
 } from "../hooks/useDashboardFilters";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
+import { useDashboardLayout } from "../hooks/useDashboardLayout";
+import DashboardLayoutCustomizer from "../components/dashboard/DashboardLayoutCustomizer";
 import BridgeStatusCard from "../components/BridgeStatusCard";
 import WatchlistWidget from "../components/watchlist/WatchlistWidget";
 import ExternalDependencyPanel from "../components/dashboard/ExternalDependencyPanel";
@@ -228,6 +230,15 @@ export default function Dashboard() {
     deletePreset,
   } = useDashboardFilters();
   const tour = useDashboardTour({ stepCount: dashboardTourSteps.length });
+  const {
+    layout,
+    isCustomizing,
+    setIsCustomizing,
+    toggleWidgetVisibility,
+    moveWidget,
+    resetLayout,
+    isWidgetVisible,
+  } = useDashboardLayout();
   const pullToRefresh = usePullToRefresh({
     enabled: true,
     onRefresh: async () => {
@@ -535,6 +546,210 @@ export default function Dashboard() {
       ? `https://bridge-watch.local${location.pathname}${location.search}`
       : window.location.href;
 
+  const renderWidget = (id: string) => {
+    if (!isWidgetVisible(id)) return null;
+
+    switch (id) {
+      case "kpi-banner":
+        return (
+          <div
+            key="kpi-banner"
+            data-tour="kpis"
+            data-widget-id="kpi-banner"
+            tabIndex={0}
+            className="focus:ring-2 focus:ring-stellar-blue outline-none"
+          >
+            <KpiBanner
+              items={kpiItems}
+              loading={assetsLoading || bridgesLoading}
+              layout={dashboard.state.view === "overview" ? "expanded" : "compact"}
+              onDrilldown={(item) => setDrilldown(item.id)}
+              onInspectMetric={(item) => setInspectedMetricId(item.id)}
+            />
+          </div>
+        );
+
+      case "status-cards":
+        return (
+          <div key="status-cards" data-tour="status-cards">
+            <InlineStatusCards
+              assets={filteredAssets}
+              bridges={filteredBridges}
+              loading={assetsLoading || bridgesLoading}
+            />
+          </div>
+        );
+
+      case "overview-stats":
+        return (
+          <section key="overview-stats" aria-labelledby="overview-stats">
+            <h2 id="overview-stats" className="text-xl font-semibold text-white mb-4">
+              Overview
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <SummaryCard
+                title="Total Value Locked"
+                value={
+                  bridgesLoading
+                    ? "--"
+                    : `$${(bridgesData?.bridges ?? [])
+                        .reduce((sum, b) => sum + b.totalValueLocked, 0)
+                        .toLocaleString() || "0"}`
+                }
+                loading={bridgesLoading}
+                icon="💰"
+                href="/bridges"
+              />
+              <SummaryCard
+                title="Monitored Assets"
+                value={assetsLoading ? "--" : assetsWithHealth?.length || 0}
+                loading={assetsLoading}
+                icon="📊"
+                href="/assets"
+              />
+              <SummaryCard
+                title="Active Bridges"
+                value={
+                  bridgesLoading
+                    ? "--"
+                    : bridgesData?.bridges.filter((b: { status: string }) => b.status !== "down").length || 0
+                }
+                loading={bridgesLoading}
+                icon="🌉"
+                href="/bridges"
+              />
+              <SummaryCard
+                title="System Health"
+                value={assetsLoading ? "--" : "85%"}
+                trend={{ value: "Improving", direction: "up" }}
+                loading={assetsLoading}
+                icon="❤️"
+                href="/analytics"
+              />
+            </div>
+          </section>
+        );
+
+      case "sparkline-grid":
+        return showAssets ? (
+          <div key="sparkline-grid">
+            <ComparativeSparklineGrid items={sparklineItems} />
+          </div>
+        ) : null;
+
+      case "asset-discovery":
+        return showAssets ? (
+          <section key="asset-discovery" ref={gridRef}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-white">Asset Health</h2>
+            </div>
+            {showFilteredAssetEmpty ? (
+              <div
+                data-widget-id="asset-empty"
+                tabIndex={0}
+                className="rounded-lg border border-stellar-border bg-stellar-card p-8 text-center focus:ring-2 focus:ring-stellar-blue outline-none"
+              >
+                <p className="text-stellar-text-secondary">No assets match the selected filters.</p>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="mt-3 text-sm text-stellar-blue hover:underline"
+                >
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <div
+                data-widget-id="asset-discovery"
+                tabIndex={0}
+                className="focus:ring-2 focus:ring-stellar-blue outline-none"
+              >
+                <AssetDiscoverySection assets={filteredAssets} isLoading={assetsLoading} />
+              </div>
+            )}
+          </section>
+        ) : null;
+
+      case "watchlist":
+        return showAssets ? (
+          <div key="watchlist">
+            <WatchlistWidget />
+          </div>
+        ) : null;
+
+      case "external-dependencies":
+        return showAssets ? (
+          <div key="external-dependencies">
+            <ExternalDependencyPanel />
+          </div>
+        ) : null;
+
+      case "activity-timeline":
+        return (
+          <section key="activity-timeline">
+            <RecentActivityTimeline
+              maxEvents={50}
+              defaultMode="compact"
+              showFilters={true}
+              showHeader={true}
+              sourceOptions={activitySourceOptions}
+            />
+          </section>
+        );
+
+      case "bridge-status":
+        return showBridges ? (
+          <section key="bridge-status">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white">Bridge Status</h2>
+              <Link to="/bridges" className="text-sm text-stellar-blue hover:underline">
+                View all
+              </Link>
+            </div>
+            {bridgesLoading ? (
+              <p className="text-stellar-text-secondary">Loading bridges...</p>
+            ) : filteredBridges.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredBridges.map((bridge) => (
+                  <div key={bridge.name} className="space-y-2">
+                    <BridgeStatusCard
+                      {...bridge}
+                      topRight={
+                        <FavoriteTagChip
+                          compact
+                          label={bridge.name}
+                          active={favoriteBridges.includes(bridge.name)}
+                          onToggle={() => toggleFavoriteBridge(bridge.name)}
+                        />
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDrilldown("bridges")}
+                      className="w-full rounded-md border border-stellar-border px-3 py-2 text-xs font-medium text-stellar-text-secondary transition-colors hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+                    >
+                      Inspect bridge details
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
+                <p className="text-stellar-text-secondary">
+                  {bridgeFiltersActive
+                    ? "No bridges match the selected filters."
+                    : "No bridge data available yet."}
+                </p>
+              </div>
+            )}
+          </section>
+        ) : null;
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="space-y-8">
       <PullToRefresh
@@ -608,6 +823,13 @@ export default function Dashboard() {
             </button>
             <button
               type="button"
+              onClick={() => setIsCustomizing(true)}
+              className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
+            >
+              Customize layout
+            </button>
+            <button
+              type="button"
               onClick={() => setExportPickerOpen(true)}
               className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
             >
@@ -664,159 +886,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Overview Stats */}
-      <div data-tour="kpis" data-widget-id="kpi-banner" tabIndex={0} className="focus:ring-2 focus:ring-stellar-blue outline-none">
-        <KpiBanner
-          items={kpiItems}
-          loading={assetsLoading || bridgesLoading}
-          layout={dashboard.state.view === "overview" ? "expanded" : "compact"}
-          onDrilldown={(item) => setDrilldown(item.id)}
-          onInspectMetric={(item) => setInspectedMetricId(item.id)}
-        />
-      </div>
-
-      <div data-tour="status-cards">
-        <InlineStatusCards
-          assets={filteredAssets}
-          bridges={filteredBridges}
-          loading={assetsLoading || bridgesLoading}
-        />
-      </div>
-
-      <section aria-labelledby="overview-stats">
-        <h2 id="overview-stats" className="text-xl font-semibold text-white mb-4">
-          Overview
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <SummaryCard
-            title="Total Value Locked"
-            value={
-              bridgesLoading
-                ? "--"
-                : `$${(bridgesData?.bridges ?? [])
-                    .reduce((sum, b) => sum + b.totalValueLocked, 0)
-                    .toLocaleString() || "0"}`
-            }
-            loading={bridgesLoading}
-            icon="💰"
-            href="/bridges"
-          />
-          <SummaryCard
-            title="Monitored Assets"
-            value={assetsLoading ? "--" : assetsWithHealth?.length || 0}
-            loading={assetsLoading}
-            icon="📊"
-            href="/assets"
-          />
-          <SummaryCard
-            title="Active Bridges"
-            value={
-              bridgesLoading
-                ? "--"
-                : (bridgesData?.bridges ?? []).filter((b: { status: string }) => b.status !== "down").length || 0
-            }
-            loading={bridgesLoading}
-            icon="🌉"
-            href="/bridges"
-          />
-          <SummaryCard
-            title="System Health"
-            value={assetsLoading ? "--" : "85%"}
-            trend={{ value: "Improving", direction: "up" }}
-            loading={assetsLoading}
-            icon="❤️"
-            href="/analytics"
-          />
-        </div>
-      </section>
-
-      {showAssets ? <ComparativeSparklineGrid items={sparklineItems} /> : null}
-
-      {showAssets ? (
-        <section ref={gridRef}>
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-white">Asset Health</h2>
-          </div>
-          {showFilteredAssetEmpty ? (
-            <div data-widget-id="asset-empty" tabIndex={0} className="rounded-lg border border-stellar-border bg-stellar-card p-8 text-center focus:ring-2 focus:ring-stellar-blue outline-none">
-              <p className="text-stellar-text-secondary">No assets match the selected filters.</p>
-              <button
-                type="button"
-                onClick={clearAll}
-                className="mt-3 text-sm text-stellar-blue hover:underline"
-              >
-                Clear filters
-              </button>
-            </div>
-          ) : (
-            <div data-widget-id="asset-discovery" tabIndex={0} className="focus:ring-2 focus:ring-stellar-blue outline-none">
-              <AssetDiscoverySection assets={filteredAssets} isLoading={assetsLoading} />
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      {showAssets ? <WatchlistWidget /> : null}
-
-      {showAssets ? <ExternalDependencyPanel /> : null}
-
-      {/* Recent Activity Timeline */}
-      <section>
-        <RecentActivityTimeline
-          maxEvents={50}
-          defaultMode="compact"
-          showFilters={true}
-          showHeader={true}
-          sourceOptions={activitySourceOptions}
-        />
-      </section>
-
-      {showBridges ? (
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-white">Bridge Status</h2>
-            <Link to="/bridges" className="text-sm text-stellar-blue hover:underline">
-              View all
-            </Link>
-          </div>
-          {bridgesLoading ? (
-            <p className="text-stellar-text-secondary">Loading bridges...</p>
-          ) : filteredBridges.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredBridges.map((bridge) => (
-                <div key={bridge.name} className="space-y-2">
-                  <BridgeStatusCard
-                    {...bridge}
-                    topRight={
-                      <FavoriteTagChip
-                        compact
-                        label={bridge.name}
-                        active={favoriteBridges.includes(bridge.name)}
-                        onToggle={() => toggleFavoriteBridge(bridge.name)}
-                      />
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setDrilldown("bridges")}
-                    className="w-full rounded-md border border-stellar-border px-3 py-2 text-xs font-medium text-stellar-text-secondary transition-colors hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
-                  >
-                    Inspect bridge details
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
-              <p className="text-stellar-text-secondary">
-                {bridgeFiltersActive
-                  ? "No bridges match the selected filters."
-                  : "No bridge data available yet."}
-              </p>
-            </div>
-          )}
-        </section>
-      ) : null}
+      {layout.map((item) => renderWidget(item.id))}
         </main>
       </div>
       <ExportPickerDialog
@@ -829,6 +899,14 @@ export default function Dashboard() {
         open={sharingOpen}
         currentUrl={currentShareUrl}
         onClose={() => setSharingOpen(false)}
+      />
+      <DashboardLayoutCustomizer
+        open={isCustomizing}
+        onClose={() => setIsCustomizing(false)}
+        layout={layout}
+        onToggleVisibility={toggleWidgetVisibility}
+        onMoveWidget={moveWidget}
+        onResetLayout={resetLayout}
       />
       <DrilldownDrawer
         open={Boolean(activeDrilldown)}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssetWithHealth, Bridge, ExportFormat, ExportDataType, ExportRecord } from "../types";
 import { requestExport, getExportStatus, generateExportDownloadLink } from "../services/api";
 import { useLocalStorageState } from "../hooks/useLocalStorageState";
@@ -82,6 +82,21 @@ export default function ExportPickerDialog({
   const [recentExports, setRecentExports] = useState<ExportRecord[]>([]);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
+  const [streamProgress, setStreamProgress] = useState<{
+    bytesDownloaded: number;
+    totalBytes: number | null;
+    rowsCounted: number;
+    isStreaming: boolean;
+    error: string | null;
+  }>({
+    bytesDownloaded: 0,
+    totalBytes: null,
+    rowsCounted: 0,
+    isStreaming: false,
+    error: null,
+  });
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const selectedAssetLabels = useMemo(() => {
     const assets = new Set(preferences.assetCodes);
     return availableAssets.filter((asset) => assets.has(asset.symbol));
@@ -108,7 +123,7 @@ export default function ExportPickerDialog({
       const updated = await getExportStatus(exportId);
       setRecentExports((previous) => [updated, ...previous.filter((item) => item.id !== updated.id)]);
       return updated;
-    } catch (error) {
+    } catch {
       return null;
     }
   }, []);
@@ -120,6 +135,113 @@ export default function ExportPickerDialog({
       return url;
     } catch {
       return null;
+    }
+  }, []);
+
+  const handleStreamDownload = useCallback(async (url: string, filename: string) => {
+    if (streamProgress.isStreaming) return;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setStreamProgress({
+      bytesDownloaded: 0,
+      totalBytes: null,
+      rowsCounted: 0,
+      isStreaming: true,
+      error: null,
+    });
+
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+      }
+
+      const contentLengthHeader = response.headers.get("content-length");
+      const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Streaming not supported in this browser.");
+      }
+
+      const chunks: Uint8Array[] = [];
+      let bytesDownloaded = 0;
+      let rowsCounted = 0;
+      const decoder = new TextDecoder("utf-8", { fatal: false });
+      let leftover = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        if (value) {
+          chunks.push(value);
+          bytesDownloaded += value.length;
+
+          const textChunk = decoder.decode(value, { stream: true });
+          const combined = leftover + textChunk;
+          const lines = combined.split("\n");
+          leftover = lines.pop() ?? "";
+          rowsCounted += lines.length;
+
+          setStreamProgress((prev) => ({
+            ...prev,
+            bytesDownloaded,
+            totalBytes,
+            rowsCounted,
+            isStreaming: true,
+          }));
+        }
+      }
+
+      if (leftover.trim().length > 0) {
+        rowsCounted += 1;
+      }
+
+      setStreamProgress((prev) => ({
+        ...prev,
+        bytesDownloaded,
+        totalBytes,
+        rowsCounted,
+        isStreaming: false,
+      }));
+
+      const blob = new Blob(chunks, {
+        type: preferences.format === "json" ? "application/json" : "text/csv",
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
+        setStreamProgress((prev) => ({
+          ...prev,
+          isStreaming: false,
+          error: "Download cancelled.",
+        }));
+      } else {
+        const msg = err instanceof Error ? err.message : "Streaming export failed.";
+        setStreamProgress((prev) => ({
+          ...prev,
+          isStreaming: false,
+          error: msg,
+        }));
+      }
+    } finally {
+      abortControllerRef.current = null;
+    }
+  }, [preferences.format, streamProgress.isStreaming]);
+
+  const handleCancelDownload = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
     }
   }, []);
 
@@ -388,12 +510,76 @@ export default function ExportPickerDialog({
                       <p className="rounded-2xl bg-rose-900/40 p-3 text-sm text-rose-200">{activeExport.error_message}</p>
                     ) : null}
                     {downloadUrl && activeExport.status === "completed" ? (
-                      <a
-                        href={downloadUrl}
-                        className="inline-flex items-center justify-center rounded-xl bg-stellar-blue px-4 py-3 text-sm font-semibold text-white transition hover:bg-stellar-blue/90"
-                      >
-                        Download export
-                      </a>
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleStreamDownload(
+                                downloadUrl,
+                                `export-${activeExport.data_type}-${activeExport.id.slice(0, 8)}.${preferences.format}`
+                              )
+                            }
+                            disabled={streamProgress.isStreaming}
+                            className="inline-flex items-center justify-center rounded-xl bg-stellar-blue px-4 py-3 text-sm font-semibold text-white transition hover:bg-stellar-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {streamProgress.isStreaming ? "Streaming…" : "Stream download"}
+                          </button>
+                          <a
+                            href={downloadUrl}
+                            download={`export-${activeExport.data_type}-${activeExport.id.slice(0, 8)}.${preferences.format}`}
+                            className="inline-flex items-center justify-center rounded-xl border border-stellar-border bg-stellar-dark/80 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stellar-border"
+                          >
+                            Direct download
+                          </a>
+                        </div>
+                        {streamProgress.isStreaming || streamProgress.bytesDownloaded > 0 ? (
+                          <div className="space-y-2 rounded-2xl border border-stellar-border bg-stellar-dark/80 p-3">
+                            <div className="flex items-center justify-between text-xs text-stellar-text-secondary">
+                              <span>
+                                {streamProgress.totalBytes
+                                  ? `${(streamProgress.bytesDownloaded / (1024 * 1024)).toFixed(2)} MB / ${(streamProgress.totalBytes / (1024 * 1024)).toFixed(2)} MB`
+                                  : `${(streamProgress.bytesDownloaded / (1024 * 1024)).toFixed(2)} MB downloaded`}
+                              </span>
+                              <span>{streamProgress.rowsCounted.toLocaleString()} rows</span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-stellar-dark">
+                              <div
+                                role="progressbar"
+                                aria-valuenow={
+                                  streamProgress.totalBytes
+                                    ? Math.round((streamProgress.bytesDownloaded / streamProgress.totalBytes) * 100)
+                                    : undefined
+                                }
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                className={`h-full bg-stellar-blue transition-all duration-300 ${
+                                  streamProgress.isStreaming && !streamProgress.totalBytes ? "animate-pulse" : ""
+                                }`}
+                                style={{
+                                  width: streamProgress.totalBytes
+                                    ? `${Math.min(100, Math.round((streamProgress.bytesDownloaded / streamProgress.totalBytes) * 100))}%`
+                                    : "100%",
+                                }}
+                              />
+                            </div>
+                            {streamProgress.isStreaming ? (
+                              <button
+                                type="button"
+                                onClick={handleCancelDownload}
+                                className="text-xs text-rose-400 hover:text-rose-300 hover:underline"
+                              >
+                                Cancel download
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {streamProgress.error ? (
+                          <p className="rounded-xl bg-rose-900/40 p-2 text-xs text-rose-200">
+                            {streamProgress.error}
+                          </p>
+                        ) : null}
+                      </div>
                     ) : (
                       <p className="text-sm text-stellar-text-secondary">
                         {activeExport.status === "completed"
