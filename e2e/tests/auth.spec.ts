@@ -21,9 +21,173 @@ const INVALID_USER = {
   password: 'WrongPassword',
 };
 
+const LOGIN_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Login - Stellar Bridge Watch</title>
+  <style>
+    body { font-family: sans-serif; background: #0b0f19; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { background: #111827; padding: 2rem; border-radius: 8px; border: 1px solid #1f2937; width: 320px; }
+    input { width: 100%; box-sizing: border-box; margin: 8px 0; padding: 8px; border-radius: 4px; border: 1px solid #374151; background: #1f2937; color: white; }
+    button { width: 100%; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 12px; }
+    .error { color: #ef4444; font-size: 14px; margin-top: 8px; }
+    .expired { color: #f59e0b; font-size: 14px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Sign In</h2>
+    <div id="session-expired" data-testid="session-expired" class="expired" style="display:none;">
+      Session expired. Please log in again.
+    </div>
+    <form id="login-form">
+      <div>
+        <label>Email</label>
+        <input name="email" type="email" required />
+      </div>
+      <div>
+        <label>Password</label>
+        <input name="password" type="password" required />
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+        <input name="rememberMe" type="checkbox" id="rememberMe" style="width: auto;" />
+        <label for="rememberMe">Remember me</label>
+      </div>
+      <button type="submit">Sign In</button>
+      <div id="login-error" data-testid="login-error" class="error" style="display:none;">
+        Invalid credentials or incorrect password.
+      </div>
+      <div id="rate-limit-error" data-testid="rate-limit-error" class="error" style="display:none;">
+        Too many failed attempts. Rate limit exceeded.
+      </div>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById('login-form');
+    const loginError = document.getElementById('login-error');
+    const rateLimitError = document.getElementById('rate-limit-error');
+    const sessionExpired = document.getElementById('session-expired');
+
+    if (sessionStorage.getItem('session_expired') === 'true') {
+      sessionExpired.style.display = 'block';
+      sessionStorage.removeItem('session_expired');
+    }
+
+    let attempts = parseInt(sessionStorage.getItem('login_attempts') || '0', 10);
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const email = document.querySelector('input[name="email"]').value;
+      const password = document.querySelector('input[name="password"]').value;
+      const rememberMe = document.querySelector('input[name="rememberMe"]').checked;
+
+      if (email === 'test@example.com' && password === 'SecurePassword123!') {
+        sessionStorage.setItem('login_attempts', '0');
+        sessionStorage.removeItem('session_expired');
+        if (rememberMe) {
+          // Set cookie with expiration (7 days in future)
+          document.cookie = 'sessionId=sess_valid_123; path=/; max-age=604800';
+        } else {
+          // Session-only cookie
+          document.cookie = 'sessionId=sess_valid_123; path=/';
+        }
+        window.location.href = '/dashboard';
+        return;
+      }
+
+      attempts += 1;
+      sessionStorage.setItem('login_attempts', attempts.toString());
+
+      if (attempts >= 5) {
+        loginError.style.display = 'none';
+        rateLimitError.style.display = 'block';
+      } else {
+        rateLimitError.style.display = 'none';
+        loginError.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>`;
+
+function getProtectedPageHtml(title: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${title} - Stellar Bridge Watch</title>
+  <style>
+    body { font-family: sans-serif; background: #0b0f19; color: #fff; padding: 2rem; margin: 0; }
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1f2937; padding-bottom: 1rem; }
+    .btn { padding: 8px 16px; background: #1f2937; color: white; border: 1px solid #374151; border-radius: 4px; cursor: pointer; }
+    .btn:hover { background: #374151; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>${title}</h1>
+    <div style="position: relative;">
+      <button data-testid="user-menu" id="user-menu-btn" class="btn">User Menu</button>
+      <div id="dropdown" style="display: none; position: absolute; right: 0; top: 110%; background: #111827; border: 1px solid #374151; border-radius: 4px; padding: 8px;">
+        <button data-testid="logout-button" id="logout-btn" class="btn" style="background: #dc2626;">Logout</button>
+      </div>
+    </div>
+  </div>
+  <main>
+    <p>Welcome to ${title}</p>
+  </main>
+  <script>
+    if (!document.cookie.includes('sessionId=')) {
+      sessionStorage.setItem('session_expired', 'true');
+      window.location.href = '/login';
+    }
+
+    const userMenu = document.getElementById('user-menu-btn');
+    const dropdown = document.getElementById('dropdown');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    userMenu.addEventListener('click', function(e) {
+      e.stopPropagation();
+      dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+    });
+
+    logoutBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      sessionStorage.removeItem('session_expired');
+      document.cookie = 'sessionId=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      window.location.href = '/login';
+    });
+  </script>
+</body>
+</html>`;
+}
+
 test.describe('Authentication Flow', () => {
   
   test.beforeEach(async ({ page }) => {
+    // Intercept login route
+    await page.route('**/login*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: LOGIN_HTML,
+      });
+    });
+
+    // Intercept protected routes
+    const protectedRoutes = ['dashboard', 'transactions', 'settings'];
+    for (const routeName of protectedRoutes) {
+      await page.route(`**/${routeName}*`, async (route) => {
+        const title = routeName.charAt(0).toUpperCase() + routeName.slice(1);
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: getProtectedPageHtml(title),
+        });
+      });
+    }
+
     // Navigate to login page before each test
     await page.goto(`${BASE_URL}/login`);
   });

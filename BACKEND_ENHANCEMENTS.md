@@ -115,7 +115,7 @@ await queue.add('process-transaction', attachRequestIdToJob({ transactionId: '12
 
 **Configuration**:
 ```typescript
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:4173';
 const TEST_USER = {
   email: 'test@example.com',
   password: 'SecurePassword123!',
