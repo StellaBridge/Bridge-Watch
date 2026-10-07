@@ -5,8 +5,8 @@ import {
   getQueueFairnessStatus,
   getBullMQCounts,
   runFairnessGovernor,
-} from "../services/api";
-import type { LaneName, LanePolicy, FairnessStatusResponse, FairnessStatus } from "../types";
+} from "../../services/api";
+import type { LaneName, LanePolicy, FairnessStatusResponse, FairnessStatus } from "../../types";
 
 export default function QueueFairnessAdmin() {
   const [apiKey, setApiKey] = useState("");
