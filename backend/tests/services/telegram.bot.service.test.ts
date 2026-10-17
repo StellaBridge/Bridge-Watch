@@ -561,4 +561,134 @@ describe("Message Formatter Utilities", () => {
       });
     });
   });
+
+  describe("deliverAlert", () => {
+    it("should deliver alert to all subscribers", async () => {
+      const service = new TelegramBotService({
+        botToken: "test-token",
+        redisUrl: "redis://localhost:6379",
+        enabled: true,
+      });
+
+      const alert: AlertEvent = {
+        id: "alert-1",
+        ruleId: "rule-1",
+        assetCode: "BTC",
+        alertType: "price_deviation",
+        priority: "high",
+        triggeredValue: 50000,
+        threshold: 48000,
+        metric: "price",
+        time: new Date(),
+      };
+
+      // Mock getSubscribersForAlert
+      vi.spyOn(service as any, "getSubscribersForAlert").mockResolvedValue([
+        { chatId: "123456", active: true },
+      ]);
+
+      // Mock sendMessageWithRateLimit
+      const sendSpy = vi
+        .spyOn(service as any, "sendMessageWithRateLimit")
+        .mockResolvedValue(true);
+
+      await service.deliverAlert(alert);
+
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("should skip delivery when no subscribers", async () => {
+      const service = new TelegramBotService({
+        botToken: "test-token",
+        redisUrl: "redis://localhost:6379",
+        enabled: true,
+      });
+
+      const alert: AlertEvent = {
+        id: "alert-1",
+        ruleId: "rule-1",
+        assetCode: "BTC",
+        alertType: "price_deviation",
+        priority: "high",
+        triggeredValue: 50000,
+        threshold: 48000,
+        metric: "price",
+        time: new Date(),
+      };
+
+      vi.spyOn(service as any, "getSubscribersForAlert").mockResolvedValue([]);
+
+      const sendSpy = vi.spyOn(service as any, "sendMessageWithRateLimit");
+
+      await service.deliverAlert(alert);
+
+      expect(sendSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("updateSubscription", () => {
+    it("should update subscription filters", async () => {
+      const service = new TelegramBotService({
+        botToken: "test-token",
+        redisUrl: "redis://localhost:6379",
+        enabled: true,
+      });
+
+      const updateSpy = vi.fn().mockResolvedValue(true);
+      (service as any).redis = { set: updateSpy };
+
+      await service.updateSubscription("123456", {
+        assets: ["BTC", "ETH"],
+        priorities: ["high", "critical"],
+      });
+
+      expect(updateSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("getSystemStatus", () => {
+    it("should return system status string", async () => {
+      const service = new TelegramBotService({
+        botToken: "test-token",
+        redisUrl: "redis://localhost:6379",
+        enabled: true,
+      });
+
+      vi.spyOn(service as any, "getRecentAlerts").mockResolvedValue([]);
+
+      const status = await (service as any).getSystemStatus();
+      expect(typeof status).toBe("string");
+    });
+  });
+
+  describe("getRecentAlerts", () => {
+    it("should return recent alerts with limit", async () => {
+      const service = new TelegramBotService({
+        botToken: "test-token",
+        redisUrl: "redis://localhost:6379",
+        enabled: true,
+      });
+
+      const mockAlerts = [
+        {
+          id: "alert-1",
+          ruleId: "rule-1",
+          assetCode: "BTC",
+          alertType: "price_deviation",
+          priority: "high",
+          triggeredValue: 50000,
+          threshold: 48000,
+          metric: "price",
+          time: new Date(),
+        },
+      ];
+
+      (service as any).redis = {
+        lrange: vi.fn().mockResolvedValue(mockAlerts.map((a) => JSON.stringify(a))),
+      };
+
+      const alerts = await (service as any).getRecentAlerts(5);
+      expect(alerts).toHaveLength(1);
+    });
+  });
 });

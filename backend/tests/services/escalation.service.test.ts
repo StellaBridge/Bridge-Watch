@@ -586,4 +586,143 @@ describe("EscalationService", () => {
       expect(db("escalation_rules").where).not.toHaveBeenCalled();
     });
   });
+
+  describe("acknowledgeIncident", () => {
+    it("should acknowledge an active incident", async () => {
+      const incident = {
+        id: "incident-1",
+        status: "active",
+        acknowledged_at: null,
+        acknowledged_by: null,
+      };
+
+      db("incidents").first.mockResolvedValueOnce(incident);
+      db("incidents").update.mockResolvedValueOnce(1);
+
+      await service.acknowledgeIncident("incident-1", "user-1");
+
+      expect(db("incidents").update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          acknowledged_at: expect.any(String),
+          acknowledged_by: "user-1",
+        }),
+      );
+    });
+
+    it("should throw when incident not found", async () => {
+      db("incidents").first.mockResolvedValueOnce(null);
+
+      await expect(
+        service.acknowledgeIncident("nonexistent", "user-1"),
+      ).rejects.toThrow();
+    });
+
+    it("should throw when incident already resolved", async () => {
+      const incident = {
+        id: "incident-1",
+        status: "resolved",
+      };
+
+      db("incidents").first.mockResolvedValueOnce(incident);
+
+      await expect(
+        service.acknowledgeIncident("incident-1", "user-1"),
+      ).rejects.toThrow();
+    });
+
+    it("should throw when incident already acknowledged", async () => {
+      const incident = {
+        id: "incident-1",
+        status: "active",
+        acknowledged_at: "2024-01-01T00:00:00Z",
+      };
+
+      db("incidents").first.mockResolvedValueOnce(incident);
+
+      await expect(
+        service.acknowledgeIncident("incident-1", "user-1"),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("resolveIncident", () => {
+    it("should resolve an active incident", async () => {
+      const incident = {
+        id: "incident-1",
+        status: "active",
+      };
+
+      db("incidents").first.mockResolvedValueOnce(incident);
+      db("incidents").update.mockResolvedValueOnce(1);
+
+      await service.resolveIncident("incident-1", "user-1");
+
+      expect(db("incidents").update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "resolved",
+          resolved_at: expect.any(String),
+          resolved_by: "user-1",
+        }),
+      );
+    });
+
+    it("should throw when incident not found", async () => {
+      db("incidents").first.mockResolvedValueOnce(null);
+
+      await expect(
+        service.resolveIncident("nonexistent", "user-1"),
+      ).rejects.toThrow();
+    });
+
+    it("should throw when incident already resolved", async () => {
+      const incident = {
+        id: "incident-1",
+        status: "resolved",
+      };
+
+      db("incidents").first.mockResolvedValueOnce(incident);
+
+      await expect(
+        service.resolveIncident("incident-1", "user-1"),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("createIncident", () => {
+    it("should create a new incident", async () => {
+      const incidentData = {
+        title: "Test Incident",
+        description: "Test description",
+        severity: "high",
+        source: "monitor",
+        asset: "BTC",
+      };
+
+      db("incidents").insert.mockResolvedValueOnce([incidentData]);
+
+      const result = await service.createIncident(incidentData);
+      expect(result).toBeDefined();
+      expect(db("incidents").insert).toHaveBeenCalled();
+    });
+
+    it("should set initial status to active", async () => {
+      const incidentData = {
+        title: "Test Incident",
+        description: "Test description",
+        severity: "high",
+        source: "monitor",
+        asset: "BTC",
+      };
+
+      db("incidents").insert.mockResolvedValueOnce([incidentData]);
+
+      await service.createIncident(incidentData);
+
+      expect(db("incidents").insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "active",
+        }),
+      );
+    });
+  });
 });

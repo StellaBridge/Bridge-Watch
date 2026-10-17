@@ -433,4 +433,151 @@ describe("OwnershipMatrixService", () => {
       expect(result.meta.total).toBe(1);
     });
   });
+
+  describe("getOwner", () => {
+    it("should return owner for valid alertId", async () => {
+      const mockOwner = {
+        alert_id: "alert-1",
+        owner_type: "user",
+        owner_id: "owner-1",
+        created_by: "actor-1",
+        created_at: new Date(),
+      };
+
+      mockDb.first.mockResolvedValue(mockOwner);
+
+      const result = await service.getOwner("alert-1");
+      expect(result).not.toBeNull();
+      expect(result?.alertId).toBe("alert-1");
+    });
+
+    it("should return null when no owner found", async () => {
+      mockDb.first.mockResolvedValue(null);
+
+      const result = await service.getOwner("nonexistent");
+      expect(result).toBeNull();
+    });
+
+    it("should handle database errors gracefully", async () => {
+      mockDb.first.mockRejectedValue(new Error("db error"));
+
+      const result = await service.getOwner("alert-1");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("getOwnershipMatrix", () => {
+    it("should return paginated ownership records", async () => {
+      const mockRows = [
+        {
+          alert_id: "alert-1",
+          alert_name: "Test Alert",
+          owner_type: "user",
+          owner_id: "owner-1",
+          created_by: "actor-1",
+          created_at: new Date(),
+        },
+      ];
+
+      mockDb.select.mockReturnThis();
+      mockDb.join.mockReturnThis();
+      mockDb.where.mockReturnThis();
+      mockDb.orderBy.mockReturnThis();
+      mockDb.limit.mockReturnThis();
+      mockDb.offset.mockResolvedValue(mockRows);
+      mockDb.count.mockReturnThis();
+      mockDb.first.mockResolvedValue({ count: 1 });
+
+      const result = await service.getOwnershipMatrix({ page: 1, limit: 10 });
+      expect(result.data).toHaveLength(1);
+      expect(result.meta.total).toBe(1);
+    });
+
+    it("should handle empty results", async () => {
+      mockDb.select.mockReturnThis();
+      mockDb.join.mockReturnThis();
+      mockDb.where.mockReturnThis();
+      mockDb.orderBy.mockReturnThis();
+      mockDb.limit.mockReturnThis();
+      mockDb.offset.mockResolvedValue([]);
+      mockDb.count.mockReturnThis();
+      mockDb.first.mockResolvedValue({ count: 0 });
+
+      const result = await service.getOwnershipMatrix({ page: 1, limit: 10 });
+      expect(result.data).toHaveLength(0);
+      expect(result.meta.total).toBe(0);
+    });
+  });
+
+  describe("removeEscalationContact", () => {
+    it("should remove contact successfully", async () => {
+      mockDb.where.mockReturnThis();
+      mockDb.delete.mockResolvedValue(1);
+
+      const result = await service.removeEscalationContact("alert-1", "contact-1");
+      expect(result).toBe(true);
+    });
+
+    it("should return false when contact not found", async () => {
+      mockDb.where.mockReturnThis();
+      mockDb.delete.mockResolvedValue(0);
+
+      const result = await service.removeEscalationContact("alert-1", "nonexistent");
+      expect(result).toBe(false);
+    });
+
+    it("should handle database errors gracefully", async () => {
+      mockDb.where.mockReturnThis();
+      mockDb.delete.mockRejectedValue(new Error("db error"));
+
+      await expect(
+        service.removeEscalationContact("alert-1", "contact-1"),
+      ).rejects.toThrow("db error");
+    });
+  });
+
+  describe("getAuditHistory", () => {
+    it("should return audit history in reverse chronological order", async () => {
+      const mockRows = [
+        {
+          id: "audit-2",
+          alert_id: "alert-1",
+          action: "transfer",
+          actor: "actor-2",
+          created_at: new Date("2024-01-02"),
+        },
+        {
+          id: "audit-1",
+          alert_id: "alert-1",
+          action: "assign",
+          actor: "actor-1",
+          created_at: new Date("2024-01-01"),
+        },
+      ];
+
+      mockDb.where.mockReturnThis();
+      mockDb.orderBy.mockReturnThis();
+      mockDb.limit.mockReturnThis();
+      mockDb.offset.mockResolvedValue(mockRows);
+      mockDb.count.mockReturnThis();
+      mockDb.first.mockResolvedValue({ count: 2 });
+
+      const result = await service.getAuditHistory("alert-1", { page: 1, limit: 10 });
+      expect(result.data).toHaveLength(2);
+      expect(result.data[0].id).toBe("audit-2");
+      expect(result.meta.total).toBe(2);
+    });
+
+    it("should handle empty audit history", async () => {
+      mockDb.where.mockReturnThis();
+      mockDb.orderBy.mockReturnThis();
+      mockDb.limit.mockReturnThis();
+      mockDb.offset.mockResolvedValue([]);
+      mockDb.count.mockReturnThis();
+      mockDb.first.mockResolvedValue({ count: 0 });
+
+      const result = await service.getAuditHistory("alert-1", { page: 1, limit: 10 });
+      expect(result.data).toHaveLength(0);
+    });
+  });
 });
