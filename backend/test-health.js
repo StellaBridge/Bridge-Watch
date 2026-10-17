@@ -1,5 +1,5 @@
 // Simple test to verify health check implementation
-import { HealthCheckService } from "./src/services/healthCheck.service.js";
+import { HealthCheckService } from "./src/services/health.service.js";
 
 async function testHealthChecks() {
   console.log("Testing Health Check Service...");

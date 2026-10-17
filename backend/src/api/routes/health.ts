@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { getOutboxSystem } from "../../outbox/index.js";
-import { HealthCheckService } from "../../services/healthCheck.service.js";
+import { HealthCheckService } from "../../services/health.service.js";
 
 const healthService = new HealthCheckService();
 
