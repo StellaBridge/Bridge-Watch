@@ -583,11 +583,11 @@ export default function Dashboard() {
 
       case "overview-stats":
         return (
-          <section key="overview-stats" aria-labelledby="overview-stats">
+          <section key="overview-stats" aria-labelledby="overview-stats" className="w-full min-w-0">
             <h2 id="overview-stats" className="text-xl font-semibold text-white mb-4">
               Overview
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
               <SummaryCard
                 title="Total Value Locked"
                 value={
@@ -633,7 +633,7 @@ export default function Dashboard() {
 
       case "sparkline-grid":
         return showAssets ? (
-          <div key="sparkline-grid">
+          <div key="sparkline-grid" className="w-full min-w-0 overflow-hidden">
             <ComparativeSparklineGrid items={sparklineItems} />
           </div>
         ) : null;
@@ -709,7 +709,7 @@ export default function Dashboard() {
             </div>
             {bridgesLoading ? (
               <div
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
                 role="status"
                 aria-label="Loading bridges"
               >
@@ -724,7 +724,7 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : filteredBridges.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {filteredBridges.map((bridge) => (
                   <div key={bridge.name} className="space-y-2">
                     <BridgeStatusCard
@@ -741,7 +741,7 @@ export default function Dashboard() {
                     <button
                       type="button"
                       onClick={() => setDrilldown("bridges")}
-                      className="w-full rounded-md border border-stellar-border px-3 py-2 text-xs font-medium text-stellar-text-secondary transition-colors hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+                      className="w-full min-h-[44px] rounded-md border border-stellar-border px-3 py-2.5 text-xs font-medium text-stellar-text-secondary transition-colors hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue flex items-center justify-center"
                     >
                       Inspect bridge details
                     </button>
@@ -823,7 +823,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={tour.start}
-              className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
+              className="min-h-[44px] inline-flex items-center justify-center rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border focus:outline-none focus:ring-2 focus:ring-stellar-blue"
             >
               {tour.completed ? "Replay tour" : "Take a tour"}
             </button>
@@ -832,28 +832,28 @@ export default function Dashboard() {
               onClick={() => {
                 void pullToRefresh.refresh();
               }}
-              className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
+              className="min-h-[44px] inline-flex items-center justify-center rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border focus:outline-none focus:ring-2 focus:ring-stellar-blue"
             >
               Refresh data
             </button>
             <button
               type="button"
               onClick={() => setIsCustomizing(true)}
-              className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
+              className="min-h-[44px] inline-flex items-center justify-center rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border focus:outline-none focus:ring-2 focus:ring-stellar-blue"
             >
               Customize layout
             </button>
             <button
               type="button"
               onClick={() => setExportPickerOpen(true)}
-              className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
+              className="min-h-[44px] inline-flex items-center justify-center rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border focus:outline-none focus:ring-2 focus:ring-stellar-blue"
             >
               Export data
             </button>
             <button
               type="button"
               onClick={() => setSharingOpen(true)}
-              className="rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border"
+              className="min-h-[44px] inline-flex items-center justify-center rounded-full border border-stellar-border px-4 py-2 text-sm text-white transition-colors hover:bg-stellar-border focus:outline-none focus:ring-2 focus:ring-stellar-blue"
             >
               Share view
             </button>
@@ -866,7 +866,7 @@ export default function Dashboard() {
                 className="flex flex-wrap items-center gap-2"
               >
                 {dashboardViews.map((view) => (
-                  <Tab key={view.id} id={view.id}>
+                  <Tab key={view.id} id={view.id} className="min-h-[44px] inline-flex items-center">
                     {view.label}
                   </Tab>
                 ))}
@@ -889,7 +889,7 @@ export default function Dashboard() {
           <select
             value={dashboard.state.bridgeStatus}
             onChange={(e) => dashboard.setBridgeStatus(e.target.value as BridgeStatusFilter)}
-            className="min-w-44 rounded-md border border-stellar-border bg-stellar-card px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+            className="min-h-[44px] min-w-44 rounded-md border border-stellar-border bg-stellar-card px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
             aria-label="Filter bridges by status"
           >
             {bridgeStatusOptions.map((option) => (

@@ -50,3 +50,27 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </Suspense>
   </React.StrictMode>
 );
+
+// Register service worker for offline bridge monitoring and asset caching
+if (typeof window !== "undefined" && "serviceWorker" in navigator && process.env.NODE_ENV !== "test") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => {
+        registration.addEventListener("updatefound", () => {
+          const installingWorker = registration.installing;
+          if (installingWorker) {
+            installingWorker.addEventListener("statechange", () => {
+              if (installingWorker.state === "installed" && navigator.serviceWorker.controller) {
+                console.info("Bridge Watch PWA content updated. Reload to view latest version.");
+              }
+            });
+          }
+        });
+      })
+      .catch((error) => {
+        console.warn("ServiceWorker registration failed:", error);
+      });
+  });
+}
+

@@ -6,6 +6,7 @@ import { ComponentErrorBoundary } from "./ErrorBoundary";
 import ShortcutHelp from "./ShortcutHelp";
 import CommandPalette from "./CommandPalette";
 import MaintenanceBanner from "./MaintenanceBanner";
+import OfflineIndicator from "./OfflineIndicator";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { MetricsSidebar } from "./MetricsSidebar";
 import { useMetricsSidebarStore } from "../stores/metricsSidebarStore";
@@ -39,6 +40,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-stellar-dark">
       <Navbar />
+      <OfflineIndicator />
       <MaintenanceBanner />
       <main
         id="main-content"

@@ -128,16 +128,16 @@ export default function Bridges() {
           onFocus={() => setIsSearchFocused(true)}
           onKeyDown={handleSearchKeyDown}
           placeholder="Search bridges by name or asset..."
-          className="w-full rounded-md border border-stellar-border bg-stellar-card px-4 py-2 text-stellar-text-primary placeholder:text-stellar-text-secondary focus:border-stellar-blue focus:outline-none focus:ring-1 focus:ring-stellar-blue"
+          className="w-full min-h-[44px] rounded-md border border-stellar-border bg-stellar-card px-4 py-2 text-stellar-text-primary placeholder:text-stellar-text-secondary focus:border-stellar-blue focus:outline-none focus:ring-1 focus:ring-stellar-blue"
         />
         {isSearchFocused && query.length > 0 && suggestions.length > 0 && (
-          <div className="absolute left-0 mt-1 w-full rounded-md border border-stellar-border bg-stellar-card shadow-lg">
+          <div className="absolute left-0 mt-1 w-full rounded-md border border-stellar-border bg-stellar-card shadow-lg z-20">
             <ul className="max-h-60 overflow-auto py-1">
               {suggestions.map((result, i) => (
                 <li
                   key={result.id}
                   onClick={() => handleSuggestionSelect(result)}
-                  className={`cursor-pointer px-4 py-2 text-sm flex flex-col ${
+                  className={`cursor-pointer px-4 py-2.5 min-h-[44px] text-sm flex flex-col justify-center ${
                     activeIndex === i ? "bg-stellar-blue/20 text-stellar-text-primary" : "text-stellar-text-secondary hover:bg-stellar-border"
                   }`}
                 >
@@ -168,10 +168,10 @@ export default function Bridges() {
       />
 
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <div className="inline-flex rounded-full border border-stellar-border p-0.5">
+        <div className="inline-flex rounded-full border border-stellar-border p-1 gap-1">
           <button
             type="button"
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            className={`min-h-[44px] rounded-full px-4 py-2 text-xs font-medium transition-colors inline-flex items-center justify-center ${
               favoritesFilterMode === "all"
                 ? "bg-stellar-blue text-white"
                 : "text-stellar-text-secondary hover:text-white"
@@ -183,7 +183,7 @@ export default function Bridges() {
           </button>
           <button
             type="button"
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            className={`min-h-[44px] rounded-full px-4 py-2 text-xs font-medium transition-colors inline-flex items-center justify-center ${
               favoritesFilterMode === "favorites"
                 ? "bg-stellar-blue text-white"
                 : "text-stellar-text-secondary hover:text-white"
@@ -199,7 +199,7 @@ export default function Bridges() {
           onClick={() => {
             void pullToRefresh.refresh();
           }}
-          className="rounded-md border border-stellar-border px-4 py-2 text-sm text-white hover:bg-stellar-border"
+          className="min-h-[44px] inline-flex items-center justify-center rounded-md border border-stellar-border px-4 py-2 text-sm text-white hover:bg-stellar-border focus:outline-none focus:ring-2 focus:ring-stellar-blue"
         >
           Refresh now
         </button>
@@ -208,7 +208,7 @@ export default function Bridges() {
       <ErrorBoundary onRetry={() => window.location.reload()}>
         <Suspense
           fallback={
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {[1, 2, 3].map((i) => (
                 <SkeletonCard key={i} rows={6} ariaLabel={`Loading bridge card ${i}`} />
               ))}
@@ -216,14 +216,14 @@ export default function Bridges() {
           }
         >
           {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {[1, 2, 3].map((i) => (
                 <SkeletonCard key={i} rows={6} ariaLabel={`Loading bridge card ${i}`} />
               ))}
             </div>
           ) : data && data.bridges && data.bridges.length > 0 ? (
             filteredBridges.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {filteredBridges.map((bridge) => (
                   <BridgeStatusCard
                     key={bridge.name}
@@ -256,10 +256,10 @@ export default function Bridges() {
         </Suspense>
       </ErrorBoundary>
 
-      <div className="bg-stellar-card border border-stellar-border rounded-lg p-6">
+      <div className="bg-stellar-card border border-stellar-border rounded-lg p-4 sm:p-6">
         <h2 className="text-xl font-semibold text-white mb-4">Bridge Performance</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="min-w-[640px] w-full text-sm">
             <caption className="sr-only">Bridge performance metrics table</caption>
             <thead>
               <tr className="text-left text-stellar-text-secondary border-b border-stellar-border">

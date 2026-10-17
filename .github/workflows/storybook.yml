@@ -1,0 +1,70 @@
+name: Storybook Visual Regression Tests
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/storybook.yml"
+  push:
+    branches: [main, develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/storybook.yml"
+
+jobs:
+  storybook-tests:
+    name: Storybook Tests & Visual Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-browsers-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browsers and dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright OS dependencies if cache hit
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Build Storybook
+        working-directory: frontend
+        run: npm run build-storybook
+
+      - name: Run Storybook visual regression tests
+        working-directory: frontend
+        run: npm run test:visual -- tests/visual/storybook.spec.ts
+        env:
+          CI: "true"
+          VISUAL_DIFF_THRESHOLD: "0.01"
+
+      - name: Upload visual test failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storybook-visual-diffs
+          path: |
+            frontend/visual-results.json
+            frontend/tests/visual/__screenshots__/
+            playwright-report/
+          retention-days: 7

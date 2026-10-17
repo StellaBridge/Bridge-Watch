@@ -10,6 +10,14 @@ else
 end
 `;
 
+const EXTEND_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+else
+  return 0
+end
+`;
+
 export class DistributedLockService {
   async acquire(key: string, ttlMs: number): Promise<string | null> {
     const token = randomUUID();
@@ -23,6 +31,20 @@ export class DistributedLockService {
     } catch (err) {
       logger.warn({ err, key }, "Failed to release distributed lock");
     }
+  }
+
+  async extend(key: string, token: string, ttlMs: number): Promise<boolean> {
+    try {
+      const result = await redis.eval(EXTEND_SCRIPT, 1, `lock:${key}`, token, ttlMs.toString());
+      return result === 1 || result === "1" || result === "OK";
+    } catch (err) {
+      logger.warn({ err, key }, "Failed to extend distributed lock");
+      return false;
+    }
+  }
+
+  async renew(key: string, token: string, ttlMs: number): Promise<boolean> {
+    return this.extend(key, token, ttlMs);
   }
 
   async withLock<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T | null> {

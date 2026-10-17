@@ -1,0 +1,19 @@
+{
+  "short_name": "BridgeWatch",
+  "name": "Stellar Bridge Watch",
+  "description": "Real-time monitoring and analytics for cross-chain bridges on the Stellar network",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0B0E14",
+  "theme_color": "#0B0E14",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["finance", "utilities", "productivity"]
+}

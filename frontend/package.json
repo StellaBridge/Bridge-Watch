@@ -20,7 +20,9 @@
     "bundle:size:update": "node ../scripts/check-bundle-size.mjs --update-baseline",
     "test:a11y": "vitest run src/test/a11y.test.tsx",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build -o storybook-static"
+    "build-storybook": "storybook build -o storybook-static",
+    "test:storybook": "playwright test tests/visual/storybook.spec.ts --config=playwright.config.ts",
+    "test:mobile": "playwright test tests/visual/mobile.spec.ts --config=playwright.config.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

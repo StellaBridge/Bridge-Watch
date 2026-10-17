@@ -222,7 +222,7 @@ export function DataTable<TData extends RowData>({
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="flex items-center gap-2">
             <input
-              className="w-full sm:w-80 bg-stellar-card border border-stellar-border rounded px-3 py-2 text-sm text-stellar-text-primary"
+              className="w-full sm:w-80 min-h-[44px] bg-stellar-card border border-stellar-border rounded px-3 py-2 text-sm text-stellar-text-primary focus:outline-none focus:ring-1 focus:ring-stellar-blue"
               placeholder="Search…"
               value={table.getState().globalFilter ?? ""}
               onChange={(e) => table.setGlobalFilter(e.target.value)}
@@ -278,7 +278,7 @@ export function DataTable<TData extends RowData>({
               <button
                 type="button"
                 onClick={clearSorting}
-                className="rounded-md border border-stellar-border px-3 py-1.5 text-xs font-medium text-stellar-text-primary transition-colors hover:border-stellar-blue hover:text-stellar-blue"
+                className="min-h-[44px] inline-flex items-center rounded-md border border-stellar-border px-3 py-1.5 text-xs font-medium text-stellar-text-primary transition-colors hover:border-stellar-blue hover:text-stellar-blue"
               >
                 Clear sort
               </button>
@@ -286,8 +286,8 @@ export function DataTable<TData extends RowData>({
           ) : null}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="w-full overflow-x-auto -mx-2 sm:mx-0 px-2 sm:px-0">
+          <table className="min-w-[640px] w-full text-sm">
             <TableHeader
               table={table}
               columns={columnsWithSelection}
@@ -297,7 +297,7 @@ export function DataTable<TData extends RowData>({
           </table>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="w-full overflow-x-auto -mx-2 sm:mx-0 px-2 sm:px-0">
           <TableBody
             table={table}
             isLoading={isLoading}

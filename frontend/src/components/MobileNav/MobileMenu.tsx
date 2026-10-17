@@ -178,7 +178,7 @@ export default function MobileMenu({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-stellar-border px-3 py-2 text-sm text-stellar-text-secondary transition hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+            className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full border border-stellar-border px-4 py-2 text-sm text-stellar-text-secondary transition hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
           >
             Close
           </button>
@@ -206,7 +206,7 @@ export default function MobileMenu({
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.id)}
-                    className="flex w-full items-center justify-between rounded-xl px-2 py-2 text-left focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+                    className="flex w-full min-h-[44px] items-center justify-between rounded-xl px-3 py-2.5 text-left focus:outline-none focus:ring-2 focus:ring-stellar-blue"
                   >
                     <span>
                       <span className="block text-xs uppercase tracking-[0.2em] text-stellar-text-secondary">
