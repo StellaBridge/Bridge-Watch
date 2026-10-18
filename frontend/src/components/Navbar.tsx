@@ -85,9 +85,7 @@ export default function Navbar() {
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden lg:block">
-                <GlobalSearch />
-              </div>
+              <GlobalSearch />
               <div className="hidden md:block">
                 <EntitySwitcher />
               </div>
