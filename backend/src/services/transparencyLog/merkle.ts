@@ -248,7 +248,8 @@ export function verifyConsistencyProof(
     if (m === 0) return path.length === 0;
     if (path.length === 0) return false;
 
-    let [inner, border] = decompose(m - 1, n);
+    const [decomposedInner, border] = decompose(m - 1, n);
+    let inner = decomposedInner;
     const shift = trailingZeros(m);
     inner -= shift;
 

@@ -148,7 +148,7 @@ export class SensitiveFieldAccessService {
       throw new Error("title, timeRangeStart, and timeRangeEnd are required");
     }
 
-    let logsQuery = this.db()("sensitive_field_access_logs")
+    const logsQuery = this.db()("sensitive_field_access_logs")
       .where("timestamp", ">=", data.timeRangeStart)
       .where("timestamp", "<=", data.timeRangeEnd);
 
