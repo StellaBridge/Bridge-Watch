@@ -18,6 +18,47 @@ import type { ApiCapabilities, ApiContract, ApiContractSummary, ApiVersion } fro
 import { compatibilityHeaders } from "./compatibility";
 import { injectTraceHeaders, type TraceContextOptions } from "./tracecontext";
 
+/**
+ * Configuration options for HTTP request retry behavior and exponential backoff.
+ * Applied to compatibility API requests made by the client.
+ *
+ * Retries are performed exclusively on HTTP 429 (Too Many Requests) and 5xx server error responses.
+ * Other 4xx client errors (e.g. 400, 401, 403, 404) and non-HTTP errors are not retried.
+ */
+export interface ClientRetryConfig {
+  /**
+   * Maximum number of retries after the first attempt.
+   * Default: 3 (allows up to 4 total attempts).
+   */
+  maxRetries?: number;
+  /**
+   * Base delay between retries in milliseconds.
+   * Default: 1000.
+   */
+  baseDelayMs?: number;
+  /**
+   * Maximum delay cap between retries in milliseconds.
+   * Default: 10000.
+   */
+  maxDelayMs?: number;
+}
+
+/**
+ * Main SDK client for interacting with the BridgeWatch Soroban smart contract and
+ * backend compatibility services.
+ *
+ * @example
+ * ```ts
+ * import { BridgeWatchContractSdk } from "@bridge-watch/contract-sdk";
+ * import * as StellarSdk from "@stellar/stellar-sdk";
+ *
+ * const client = new BridgeWatchContractSdk({
+ *   rpcUrl: "https://soroban-testnet.stellar.org",
+ *   contractId: "CA3D5KRYMCMCZKPOQ36BWWBI7VXX7N4Q67Z6V2HIKLNYOCYTX7235L2B",
+ *   networkPassphrase: StellarSdk.Networks.TESTNET,
+ * });
+ * ```
+ */
 export class BridgeWatchContractSdk {
   /**
    * `tracing` is deliberately left optional rather than `Required<>`-ed:
@@ -26,10 +67,42 @@ export class BridgeWatchContractSdk {
    */
   private readonly config: Required<Omit<BridgeWatchSdkConfig, "tracing">> &
     Pick<BridgeWatchSdkConfig, "tracing">;
+  private readonly retryConfig: Required<ClientRetryConfig>;
   private readonly server: StellarSdk.rpc.Server;
   private connected = false;
 
-  constructor(config: BridgeWatchSdkConfig) {
+  /**
+   * Creates an instance of BridgeWatchContractSdk.
+   *
+   * @param config - SDK configuration options including RPC URL, contract ID, and network passphrase.
+   * @param retryConfig - Optional retry and backoff configuration for HTTP requests. If omitted or partially
+   *                      specified, defaults are merged (maxRetries: 3, baseDelayMs: 1000ms, maxDelayMs: 10000ms).
+   *                      Retries occur only on HTTP 429 and 5xx responses with exponential backoff and jitter.
+   *
+   * @example
+   * ```ts
+   * import { BridgeWatchContractSdk } from "@bridge-watch/contract-sdk";
+   * import * as StellarSdk from "@stellar/stellar-sdk";
+   *
+   * // Initializing with custom retryConfig:
+   * const client = new BridgeWatchContractSdk(
+   *   {
+   *     rpcUrl: "https://soroban-testnet.stellar.org",
+   *     contractId: "CA3D5KRYMCMCZKPOQ36BWWBI7VXX7N4Q67Z6V2HIKLNYOCYTX7235L2B",
+   *     networkPassphrase: StellarSdk.Networks.TESTNET,
+   *     retryConfig: {
+   *       maxRetries: 5,
+   *       baseDelayMs: 500,
+   *       maxDelayMs: 8000,
+   *     },
+   *   }
+   * );
+   * ```
+   */
+  constructor(
+    config: BridgeWatchSdkConfig & { retryConfig?: ClientRetryConfig },
+    retryConfig?: ClientRetryConfig
+  ) {
     this.config = {
       allowHttp: false,
       defaultFee: "100000",
@@ -38,24 +111,71 @@ export class BridgeWatchContractSdk {
       apiUrl: config.apiUrl ?? config.rpcUrl,
     };
 
+    const mergedRetry = retryConfig ?? config.retryConfig;
+    this.retryConfig = {
+      // maxRetries represents the maximum number of retries after the first attempt.
+      maxRetries: mergedRetry?.maxRetries ?? 3,
+      baseDelayMs: mergedRetry?.baseDelayMs ?? 1000,
+      maxDelayMs: mergedRetry?.maxDelayMs ?? 10000,
+    };
+
     this.server = new StellarSdk.rpc.Server(this.config.rpcUrl, {
       allowHttp: this.config.allowHttp,
     });
   }
 
+  /**
+   * Fetches the API contract specification for a given version.
+   *
+   * @param version - Optional API version string (e.g. "v1").
+   * @returns Promise resolving to the API contract definition.
+   * @throws {BridgeWatchConnectionError} If the HTTP request fails or returns an unrecoverable/final error status.
+   *
+   * @example
+   * ```ts
+   * const contract = await client.getApiContract("v1");
+   * console.log(contract.version);
+   * ```
+   */
   async getApiContract(version?: ApiVersion): Promise<ApiContract> {
     return this.fetchCompatibility<ApiContract>(`/contract${version ? `?version=${version}` : ""}`, version);
   }
 
+  /**
+   * Fetches the supported API capabilities from the compatibility service.
+   *
+   * @param version - Optional API version string.
+   * @returns Promise resolving to the API capabilities object.
+   * @throws {BridgeWatchConnectionError} If the HTTP request fails or returns an unrecoverable/final error status.
+   *
+   * @example
+   * ```ts
+   * const capabilities = await client.getApiCapabilities();
+   * console.log(capabilities.supportedFeatures);
+   * ```
+   */
   async getApiCapabilities(version?: ApiVersion): Promise<ApiCapabilities> {
     return this.fetchCompatibility<ApiCapabilities>("/capabilities", version);
   }
 
+  /**
+   * Fetches the list of supported API versions and current version metadata.
+   *
+   * @returns Promise resolving to the current version and list of available version summaries.
+   * @throws {BridgeWatchConnectionError} If the HTTP request fails or returns an unrecoverable/final error status.
+   *
+   * @example
+   * ```ts
+   * const { current, versions } = await client.getApiVersions();
+   * console.log("Current version:", current);
+   * ```
+   */
   async getApiVersions(): Promise<{ current: ApiVersion; versions: ApiContractSummary[] }> {
     return this.fetchCompatibility<{ current: ApiVersion; versions: ApiContractSummary[] }>("/versions");
   }
 
   private async fetchCompatibility<T>(path: string, version?: ApiVersion): Promise<T> {
+    const url = `${this.config.apiUrl.replace(/\/$/, "")}/api/v1/compatibility${path}`;
     // Propagate W3C trace context so the backend can correlate this request
     // with the caller's trace. An explicit per-call context wins over config.
     const headers = injectTraceHeaders(
@@ -63,13 +183,43 @@ export class BridgeWatchContractSdk {
       this.config.tracing as TraceContextOptions | undefined
     );
 
-    const response = await fetch(`${this.config.apiUrl.replace(/\/$/, "")}/api/v1/compatibility${path}`, {
-      headers,
-    });
-    if (!response.ok) throw new BridgeWatchConnectionError(`Compatibility request failed: ${response.status}`);
-    return response.json() as Promise<T>;
+    // maxRetries represents the maximum number of retries after the first attempt.
+    const maxRetries = this.retryConfig.maxRetries;
+    let attempt = 0;
+
+    while (true) {
+      const response = await fetch(url, { headers });
+
+      if (response.ok) {
+        return response.json() as Promise<T>;
+      }
+
+      // Retry only on HTTP 429 and 5xx responses. Do not retry other 4xx responses.
+      const isRetryable =
+        response.status === 429 || (response.status >= 500 && response.status <= 599);
+
+      if (!isRetryable || attempt >= maxRetries) {
+        throw new BridgeWatchConnectionError(`Compatibility request failed: ${response.status}`);
+      }
+
+      attempt++;
+
+      // Exponential backoff with jitter between retries.
+      const exponentialDelay = this.retryConfig.baseDelayMs * Math.pow(2, attempt - 1);
+      const cappedDelay = Math.min(exponentialDelay, this.retryConfig.maxDelayMs);
+      const jitter = Math.random() * (cappedDelay * 0.1);
+      const delay = Math.min(cappedDelay + jitter, this.retryConfig.maxDelayMs);
+
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 
+  /**
+   * Establishes a connection to the Soroban RPC server by checking its health.
+   *
+   * @returns Promise resolving to the SDK health status including connectivity and latest ledger.
+   * @throws {BridgeWatchConnectionError} If unable to connect to the Soroban RPC server.
+   */
   async connect(): Promise<SdkHealth> {
     try {
       const latestLedger = await this.getLatestLedger();
@@ -85,15 +235,28 @@ export class BridgeWatchContractSdk {
     }
   }
 
+  /**
+   * Disconnects the SDK client by resetting the internal connection flag.
+   */
   disconnect() {
     this.connected = false;
   }
 
+  /**
+   * Queries the latest ledger sequence number from the Soroban RPC server.
+   *
+   * @returns Promise resolving to the latest ledger sequence number, or undefined if unavailable.
+   */
   async getLatestLedger(): Promise<number | undefined> {
     const health = await this.server.getHealth();
     return health.latestLedger;
   }
 
+  /**
+   * Retrieves the current connection state and health metrics of the SDK client.
+   *
+   * @returns Promise resolving to SdkHealth containing connection status, RPC URL, and latest ledger.
+   */
   async getHealth(): Promise<SdkHealth> {
     const latestLedger = await this.getLatestLedger();
 
@@ -104,6 +267,13 @@ export class BridgeWatchContractSdk {
     };
   }
 
+  /**
+   * Constructs an unsigned Soroban contract invocation transaction.
+   *
+   * @param params - Parameters for the invocation including source account, method name, args, fee, and timeout.
+   * @returns Promise resolving to the built Stellar transaction.
+   * @throws {BridgeWatchTransactionError} If building the transaction fails.
+   */
   async buildInvokeTransaction(params: InvokeContractParams) {
     try {
       const account = await this.server.getAccount(params.sourcePublicKey);
@@ -126,6 +296,13 @@ export class BridgeWatchContractSdk {
     }
   }
 
+  /**
+   * Simulates a transaction on the Soroban RPC server without submitting it to the ledger.
+   *
+   * @param transaction - Built Stellar transaction to simulate.
+   * @returns Promise resolving to the simulation response.
+   * @throws {BridgeWatchTransactionError} If the simulation returns an error.
+   */
   async simulateTransaction(
     transaction: ReturnType<StellarSdk.TransactionBuilder["build"]>
   ): Promise<StellarSdk.rpc.Api.SimulateTransactionResponse> {
@@ -138,6 +315,13 @@ export class BridgeWatchContractSdk {
     return simulation;
   }
 
+  /**
+   * Submits a signed transaction to the Soroban network via RPC.
+   *
+   * @param signedTransaction - Fully signed Stellar transaction.
+   * @returns Promise resolving to the transaction submission response.
+   * @throws {BridgeWatchTransactionError} If the submission fails or results in an error status.
+   */
   async sendTransaction(
     signedTransaction: ReturnType<StellarSdk.TransactionBuilder["build"]>
   ): Promise<StellarSdk.rpc.Api.SendTransactionResponse> {
@@ -150,6 +334,14 @@ export class BridgeWatchContractSdk {
     return result;
   }
 
+  /**
+   * Helper method that builds, simulates, signs, and sends a contract invocation transaction in one step.
+   *
+   * @param params - Contract invocation parameters.
+   * @param signerSecret - Secret key of the account used to sign the transaction.
+   * @returns Promise resolving to the transaction submission response.
+   * @throws {BridgeWatchTransactionError} If building, simulating, or sending the transaction fails.
+   */
   async invokeAndSend(params: InvokeContractParams, signerSecret: string) {
     const transaction = await this.buildInvokeTransaction(params);
     const simulation = await this.simulateTransaction(transaction);
@@ -164,6 +356,13 @@ export class BridgeWatchContractSdk {
     return this.sendTransaction(assembled);
   }
 
+  /**
+   * Executes a read-only smart contract method call via simulation.
+   *
+   * @param params - Query parameters including method name, arguments, and optional invoker key.
+   * @returns Promise resolving to the simulation result from the Soroban RPC server.
+   * @throws {BridgeWatchQueryError} If executing or simulating the query fails.
+   */
   async queryMethod(
     params: QueryContractParams
   ): Promise<StellarSdk.rpc.Api.SimulateTransactionResponse> {
@@ -194,6 +393,12 @@ export class BridgeWatchContractSdk {
     }
   }
 
+  /**
+   * Subscribes to Soroban contract events with automatic polling, jitter, and exponential backoff on failure.
+   *
+   * @param options - Configuration for the subscription, including start ledger, filter, poll interval, callbacks, and max backoff.
+   * @returns EventSubscription object with an unsubscribe method to cancel polling.
+   */
   subscribeToEvents(options: EventSubscriptionOptions): EventSubscription {
     let active = true;
     let cursor = options.startLedger;

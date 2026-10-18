@@ -586,7 +586,16 @@ function extractResultScVal(
 // TypedBridgeWatchContractSdk
 // ============================================================
 
+/**
+ * Strongly typed SDK client providing high-level helper methods for querying and invoking
+ * BridgeWatch Soroban smart contract functions.
+ */
 export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
+  /**
+   * Initializes the typed contract client with the provided SDK configuration.
+   *
+   * @param config - SDK configuration options.
+   */
   constructor(config: BridgeWatchSdkConfig) {
     super(config);
   }
@@ -595,6 +604,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
   // Health query methods
   // ---------------------------------------------------------
 
+  /**
+   * Queries the health record for a specific asset code.
+   *
+   * @param assetCode - The asset identifier (e.g. "USDC").
+   * @returns Promise resolving to the AssetHealth record, or null if not found.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getContractHealth(assetCode: string): Promise<AssetHealth | null> {
     const result = await this.queryMethod({
       method: "get_health",
@@ -631,6 +647,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseBatchAssetResults(assetCodes, val);
   }
 
+  /**
+   * Queries the detailed health score calculation result for an asset.
+   *
+   * @param assetCode - The asset identifier.
+   * @returns Promise resolving to the HealthScoreResult, or null if not found.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getHealthScoreResult(
     assetCode: string
   ): Promise<HealthScoreResult | null> {
@@ -643,6 +666,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseHealthScoreResult(val);
   }
 
+  /**
+   * Queries aggregated health across all trusted sources for an asset.
+   *
+   * @param assetCode - The asset identifier.
+   * @returns Promise resolving to the AggregatedHealth record, or null if not found.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getAggregatedHealth(
     assetCode: string
   ): Promise<AggregatedHealth | null> {
@@ -655,6 +685,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseAggregatedHealth(val);
   }
 
+  /**
+   * Retrieves the configured weights used for composite health score calculations.
+   *
+   * @returns Promise resolving to the current HealthWeights configuration.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async getHealthWeights(): Promise<HealthWeights> {
     const result = await this.queryMethod({
       method: "get_health_weights",
@@ -664,6 +700,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseHealthWeights(val);
   }
 
+  /**
+   * Retrieves the list of registered health data sources and their weights.
+   *
+   * @returns Promise resolving to an array of HealthSource objects.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getHealthSources(): Promise<HealthSource[]> {
     const result = await this.queryMethod({
       method: "get_health_sources",
@@ -674,6 +716,15 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return items.map((item) => parseHealthSource(item));
   }
 
+  /**
+   * Calculates a health score on-contract given specific score components.
+   *
+   * @param liquidityScore - Liquidity component score (0-100).
+   * @param priceStabilityScore - Price stability component score (0-100).
+   * @param bridgeUptimeScore - Bridge uptime component score (0-100).
+   * @returns Promise resolving to the computed HealthScoreResult.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async calculateHealthScore(
     liquidityScore: number,
     priceStabilityScore: number,
@@ -697,6 +748,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
   // Price query methods
   // ---------------------------------------------------------
 
+  /**
+   * Queries the latest price record recorded on-chain for an asset.
+   *
+   * @param assetCode - The asset code to query.
+   * @returns Promise resolving to the PriceRecord, or null if not found.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getPrice(assetCode: string): Promise<PriceRecord | null> {
     const result = await this.queryMethod({
       method: "get_price",
@@ -711,6 +769,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
   // Replay query methods
   // ---------------------------------------------------------
 
+  /**
+   * Retrieves the schema version number used by contract event replay logs.
+   *
+   * @returns Promise resolving to the schema version number.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async getReplaySchemaVersion(): Promise<number> {
     const result = await this.queryMethod({
       method: "get_replay_schema_version",
@@ -721,6 +785,14 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseScvU32(val);
   }
 
+  /**
+   * Fetches a paginated page of contract replay events starting from an ordering key.
+   *
+   * @param fromOrderingKey - The starting sequence ordering key.
+   * @param limit - Maximum number of events to return.
+   * @returns Promise resolving to the EventReplayPage.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async getReplayEvents(
     fromOrderingKey: number,
     limit: number
@@ -735,6 +807,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseEventReplayPage(val);
   }
 
+  /**
+   * Queries the total count of replay log entries stored in contract memory.
+   *
+   * @returns Promise resolving to total log size count.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async getReplayLogSize(): Promise<number> {
     const result = await this.queryMethod({
       method: "get_replay_log_size",
@@ -749,6 +827,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
   // Status & pause query methods
   // ---------------------------------------------------------
 
+  /**
+   * Retrieves a high-level status rollup across all monitored assets and bridges.
+   *
+   * @returns Promise resolving to the ContractStatusRollup, or null if unavailable.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getContractStatus(): Promise<ContractStatusRollup | null> {
     const result = await this.queryMethod({
       method: "get_contract_status",
@@ -758,6 +842,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseContractStatusRollup(val);
   }
 
+  /**
+   * Retrieves a status rollup for a specific asset code.
+   *
+   * @param assetCode - The asset identifier.
+   * @returns Promise resolving to AssetStatusRollup, or null if unavailable.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getAssetStatusRollup(
     assetCode: string
   ): Promise<AssetStatusRollup | null> {
@@ -770,6 +861,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseAssetStatusRollup(val);
   }
 
+  /**
+   * Retrieves a status rollup for a specific bridge ID.
+   *
+   * @param bridgeId - The bridge identifier.
+   * @returns Promise resolving to BridgeStatusRollup, or null if unavailable.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getBridgeStatusRollup(
     bridgeId: string
   ): Promise<BridgeStatusRollup | null> {
@@ -782,6 +880,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseBridgeStatusRollup(val);
   }
 
+  /**
+   * Checks whether contract operations are globally paused.
+   *
+   * @returns Promise resolving to true if paused, false otherwise.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async isPaused(): Promise<boolean> {
     const result = await this.queryMethod({
       method: "is_paused",
@@ -791,6 +895,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseScvBool(val);
   }
 
+  /**
+   * Checks whether operations for a specific asset are paused.
+   *
+   * @param assetCode - The asset identifier.
+   * @returns Promise resolving to true if paused, false otherwise.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async isAssetPaused(assetCode: string): Promise<boolean> {
     const result = await this.queryMethod({
       method: "is_asset_paused",
@@ -802,6 +913,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseScvBool(val);
   }
 
+  /**
+   * Retrieves the current global pause status details including pause reason and timestamps.
+   *
+   * @returns Promise resolving to GlobalPauseState.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async getPauseStatus(): Promise<GlobalPauseState> {
     const result = await this.queryMethod({
       method: "get_pause_status",
@@ -812,6 +929,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseGlobalPauseState(val);
   }
 
+  /**
+   * Retrieves the historical list of contract pause and unpause records.
+   *
+   * @returns Promise resolving to an array of PauseRecord objects.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getPauseHistory(): Promise<PauseRecord[]> {
     const result = await this.queryMethod({
       method: "get_pause_history",
@@ -821,6 +944,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseVecOfPauseRecords(val);
   }
 
+  /**
+   * Retrieves the list of asset codes currently monitored by the contract.
+   *
+   * @returns Promise resolving to an array of asset code strings.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getMonitoredAssets(): Promise<string[]> {
     const result = await this.queryMethod({
       method: "get_monitored_assets",
@@ -830,6 +959,14 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parseVecOfStrings(val);
   }
 
+  /**
+   * Queries a specific configuration entry by its category and key name.
+   *
+   * @param category - The configuration category ("Threshold", "Timeouts", or "Limits").
+   * @param name - The configuration key name.
+   * @returns Promise resolving to the ConfigEntry, or null if not found.
+   * @throws {BridgeWatchQueryError} If the contract query simulation fails.
+   */
   async getConfig(
     category: ConfigCategory,
     name: string
@@ -847,6 +984,12 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
   // Signature methods
   // ---------------------------------------------------------
 
+  /**
+   * Retrieves the multi-signature threshold count configured on-contract.
+   *
+   * @returns Promise resolving to the signature threshold number.
+   * @throws {BridgeWatchQueryError} If the query fails or returns an empty result.
+   */
   async getSignatureThreshold(): Promise<number> {
     const result = await this.queryMethod({
       method: "get_signature_threshold",
@@ -861,6 +1004,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
   // Invoke (write) methods
   // ---------------------------------------------------------
 
+  /**
+   * Submits an individual asset health record transaction to the contract.
+   *
+   * @param params - Submission parameters including caller, asset code, and health scores.
+   * @returns Promise resolving to the transaction submission response.
+   * @throws {BridgeWatchTransactionError} If building, simulating, or submitting the transaction fails.
+   */
   async submitHealth(
     params: SubmitHealthParams
   ): ReturnType<BridgeWatchContractSdk["invokeAndSend"]> {
@@ -881,6 +1031,14 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     );
   }
 
+  /**
+   * Submits a batch of asset health records to the contract in a single transaction.
+   *
+   * @param caller - Stellar account address submitting and signing the batch.
+   * @param records - Array of health score batch items to submit.
+   * @returns Promise resolving to the transaction submission response.
+   * @throws {BridgeWatchTransactionError} If building, simulating, or submitting the transaction fails.
+   */
   async submitHealthBatch(
     caller: string,
     records: HealthScoreBatch[]
@@ -904,6 +1062,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     );
   }
 
+  /**
+   * Submits a price record update transaction to the contract.
+   *
+   * @param params - Price submission parameters including caller, asset code, price, and source.
+   * @returns Promise resolving to the transaction submission response.
+   * @throws {BridgeWatchTransactionError} If building, simulating, or submitting the transaction fails.
+   */
   async submitPrice(
     params: SubmitPriceParams
   ): ReturnType<BridgeWatchContractSdk["invokeAndSend"]> {
@@ -922,6 +1087,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     );
   }
 
+  /**
+   * Builds an unsigned transaction for submitting an asset health score.
+   *
+   * @param params - Parameters for the health submission.
+   * @returns Promise resolving to the built transaction.
+   * @throws {BridgeWatchTransactionError} If building the transaction fails.
+   */
   async buildSubmitHealthTransaction(
     params: SubmitHealthParams
   ): ReturnType<BridgeWatchContractSdk["buildInvokeTransaction"]> {
@@ -939,6 +1111,14 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     });
   }
 
+  /**
+   * Builds an unsigned transaction for submitting a batch of health scores.
+   *
+   * @param caller - Stellar account address of the transaction source.
+   * @param records - Batch records to include in the transaction.
+   * @returns Promise resolving to the built transaction.
+   * @throws {BridgeWatchTransactionError} If building the transaction fails.
+   */
   async buildSubmitHealthBatchTransaction(
     caller: string,
     records: HealthScoreBatch[]
@@ -959,6 +1139,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     });
   }
 
+  /**
+   * Builds an unsigned transaction for submitting a price record.
+   *
+   * @param params - Parameters for the price submission.
+   * @returns Promise resolving to the built transaction.
+   * @throws {BridgeWatchTransactionError} If building the transaction fails.
+   */
   async buildSubmitPriceTransaction(
     params: SubmitPriceParams
   ): ReturnType<BridgeWatchContractSdk["buildInvokeTransaction"]> {
@@ -974,6 +1161,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     });
   }
 
+  /**
+   * Invokes and sends a transaction to update contract health calculation weights.
+   *
+   * @param params - Parameters for health weights update including caller, weights, and version.
+   * @returns Promise resolving to the transaction submission response.
+   * @throws {BridgeWatchTransactionError} If building, simulating, or submitting the transaction fails.
+   */
   async setHealthWeights(
     params: SetHealthWeightsParams
   ): ReturnType<BridgeWatchContractSdk["invokeAndSend"]> {
@@ -993,6 +1187,13 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     );
   }
 
+  /**
+   * Builds an unsigned transaction to update contract health calculation weights.
+   *
+   * @param params - Health weights parameters.
+   * @returns Promise resolving to the built transaction.
+   * @throws {BridgeWatchTransactionError} If building the transaction fails.
+   */
   async buildSetHealthWeightsTransaction(
     params: SetHealthWeightsParams
   ): ReturnType<BridgeWatchContractSdk["buildInvokeTransaction"]> {

@@ -471,3 +471,202 @@ describe("BridgeWatchContractSdk - auto-reconnecting WebSocket (issue #1244)", (
     vi.useRealTimers();
   });
 });
+
+describe("BridgeWatchContractSdk - HTTP retry and exponential backoff", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("succeeds on first try, with no retry", async () => {
+    const sdk = new BridgeWatchContractSdk(testConfig);
+    const mockData = { version: "1.0.0", features: [] };
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => mockData,
+    } as any);
+
+    const result = await sdk.getApiCapabilities();
+
+    expect(result).toEqual(mockData);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on 429, then succeeds", async () => {
+    const sdk = new BridgeWatchContractSdk(testConfig);
+    const mockData = { version: "1.0.0", features: [] };
+    const fetchSpy = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({}),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockData,
+      } as any);
+
+    const promise = sdk.getApiCapabilities();
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toEqual(mockData);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries on 500/502/503, then succeeds", async () => {
+    const sdk = new BridgeWatchContractSdk(testConfig);
+    const mockData = { version: "1.0.0", features: [] };
+    const fetchSpy = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => ({}),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      } as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockData,
+      } as any);
+
+    const promise = sdk.getApiCapabilities();
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result).toEqual(mockData);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry on 400, 401, 403 or 404", async () => {
+    const nonRetryableStatuses = [400, 401, 403, 404];
+
+    for (const status of nonRetryableStatuses) {
+      const sdk = new BridgeWatchContractSdk(testConfig);
+      const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
+        ok: false,
+        status,
+        json: async () => ({}),
+      } as any);
+
+      await expect(sdk.getApiCapabilities()).rejects.toThrow(BridgeWatchConnectionError);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("stops after the configured retry count and throws the final error", async () => {
+    const sdk = new BridgeWatchContractSdk(testConfig);
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as any);
+
+    const promise = sdk.getApiCapabilities();
+    const assertion = expect(promise).rejects.toThrow(
+      new BridgeWatchConnectionError("Compatibility request failed: 500")
+    );
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("respects a custom retryConfig (for example, retry count of 1, or 0 for no retries)", async () => {
+    // Retry count of 1
+    const sdk1 = new BridgeWatchContractSdk({
+      ...testConfig,
+      retryConfig: { maxRetries: 1 },
+    });
+    const fetchSpy1 = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as any);
+
+    const promise1 = sdk1.getApiCapabilities();
+    const assertion1 = expect(promise1).rejects.toThrow(BridgeWatchConnectionError);
+    await vi.runAllTimersAsync();
+    await assertion1;
+    expect(fetchSpy1).toHaveBeenCalledTimes(2);
+
+    fetchSpy1.mockRestore();
+
+    // Retry count of 0
+    const sdk0 = new BridgeWatchContractSdk({
+      ...testConfig,
+      retryConfig: { maxRetries: 0 },
+    });
+    const fetchSpy0 = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as any);
+
+    await expect(sdk0.getApiCapabilities()).rejects.toThrow(BridgeWatchConnectionError);
+    expect(fetchSpy0).toHaveBeenCalledTimes(1);
+  });
+
+  it("backoff delay grows with each attempt and stays within the max delay", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+
+    const delays: number[] = [];
+    const originalSetTimeout = global.setTimeout;
+    vi.spyOn(global, "setTimeout").mockImplementation(((callback: any, delay?: number) => {
+      if (typeof delay === "number") {
+        delays.push(delay);
+      }
+      return originalSetTimeout(callback, 0);
+    }) as any);
+
+    const baseDelayMs = 1000;
+    const maxDelayMs = 3000;
+    const sdk = new BridgeWatchContractSdk({
+      ...testConfig,
+      retryConfig: {
+        maxRetries: 3,
+        baseDelayMs,
+        maxDelayMs,
+      },
+    });
+
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as any);
+
+    const promise = sdk.getApiCapabilities();
+    const assertion = expect(promise).rejects.toThrow(BridgeWatchConnectionError);
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect(delays).toHaveLength(3);
+    expect(delays[1]).toBeGreaterThan(delays[0]);
+    expect(delays[2]).toBeGreaterThanOrEqual(delays[1]);
+    for (const d of delays) {
+      expect(d).toBeLessThanOrEqual(maxDelayMs);
+    }
+    expect(delays[2]).toBe(maxDelayMs);
+  });
+});
+
