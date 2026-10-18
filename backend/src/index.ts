@@ -27,6 +27,7 @@ import { getTelegramBotService } from "./services/telegram.bot.service.js";
 import { registerCompatibilityMiddleware } from "./api/compatibility/middleware.js";
 import { registerDrainProtectionMiddleware } from "./api/middleware/drainProtection.middleware.js";
 import { drainProtocolService } from "./services/drainProtocol.service.js";
+import { getMetricsService } from "./services/metrics.service.js";
 
 export async function buildServer() {
   const server = Fastify({
@@ -158,6 +159,7 @@ async function start() {
   const server = await buildServer();
 
   try {
+    await getMetricsService().startPendingMigrationMonitoring();
     await server.listen({ port: config.PORT, host: "0.0.0.0" });
     server.log.info(
       `Stellar Bridge Watch API running on port ${config.PORT}`

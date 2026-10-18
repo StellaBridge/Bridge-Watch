@@ -1,5 +1,13 @@
 import { Registry, Counter, Gauge, Histogram, collectDefaultMetrics } from "prom-client";
+import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
+
+type MigrationListEntry = string | { name?: string; file?: string };
+
+function migrationName(entry: MigrationListEntry): string {
+  if (typeof entry === "string") return entry;
+  return entry.name ?? entry.file ?? String(entry);
+}
 
 /**
  * Metrics Collection Service
@@ -20,6 +28,7 @@ class MetricsService {
   public dbQueryDuration: Histogram;
   public dbConnectionsActive: Gauge;
   public dbConnectionsIdle: Gauge;
+  public dbPendingMigrationsCount: Gauge;
   public dbQueriesTotal: Counter;
   public dbQueryErrors: Counter;
 
@@ -71,6 +80,8 @@ class MetricsService {
   // #1058 — Request Sampling Metrics
   public samplingRuleEvaluationsTotal: Counter;
 
+  private pendingMigrationPollingTimer: ReturnType<typeof setInterval> | null = null;
+
   // #1059 — Error Catalog Metrics
   public errorCatalogLookupsTotal: Counter;
 
@@ -92,6 +103,7 @@ class MetricsService {
     this.dbQueryDuration = undefined as any;
     this.dbConnectionsActive = undefined as any;
     this.dbConnectionsIdle = undefined as any;
+    this.dbPendingMigrationsCount = undefined as any;
     this.dbQueriesTotal = undefined as any;
     this.dbQueryErrors = undefined as any;
     this.queueJobsActive = undefined as any;
@@ -203,6 +215,13 @@ class MetricsService {
     this.dbConnectionsIdle = new Gauge({
       name: "db_connections_idle",
       help: "Number of idle database connections",
+      registers: [this.registry],
+    });
+
+    this.dbPendingMigrationsCount = new Gauge({
+      name: "db_pending_migrations_count",
+      help: "Number of database migrations pending application",
+      labelNames: ["migration_names"],
       registers: [this.registry],
     });
 
@@ -507,6 +526,35 @@ class MetricsService {
    */
   getRegistry(): Registry {
     return this.registry;
+  }
+
+  async startPendingMigrationMonitoring(): Promise<void> {
+    if (this.pendingMigrationPollingTimer) return;
+
+    await this.updatePendingMigrationsCount();
+    this.pendingMigrationPollingTimer = setInterval(() => {
+      void this.updatePendingMigrationsCount();
+    }, 5 * 60 * 1000);
+    this.pendingMigrationPollingTimer.unref?.();
+  }
+
+  private async updatePendingMigrationsCount(): Promise<void> {
+    try {
+      const [, pendingEntries] = (await getDatabase().migrate.list()) as [
+        MigrationListEntry[],
+        MigrationListEntry[],
+      ];
+      const names = pendingEntries.map(migrationName);
+      this.dbPendingMigrationsCount.reset();
+      this.dbPendingMigrationsCount.set(
+        { migration_names: names.join(",") },
+        names.length,
+      );
+    } catch (error) {
+      this.dbPendingMigrationsCount.reset();
+      this.dbPendingMigrationsCount.set({ migration_names: "" }, Number.NaN);
+      logger.error(error, "Failed to query pending database migrations");
+    }
   }
 
   /**

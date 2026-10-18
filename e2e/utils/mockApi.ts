@@ -8,6 +8,7 @@ const assetsFixture = [
   buildAssetWithHealth({ symbol: "XLM", name: "Stellar Lumens" }, 100),
   buildAssetWithHealth({ symbol: "USDC", name: "USD Coin" }, 101),
 ];
+assetsFixture[1].health.lastUpdated = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
 
 const assetHealthFixture = {
   XLM: assetsFixture[0].health,
@@ -150,6 +151,43 @@ export async function mockCoreApi(page: Page): Promise<void> {
   // Catch-all for any other API routes to prevent proxy errors
   // Registered first so specific routes registered later take precedence in Playwright's reverse-order routing
   await page.route("**/api/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/assets") {
+      await route.fulfill({
+        status: 200,
+        headers: jsonHeaders,
+        body: JSON.stringify({ assets: assetsFixture, total: assetsFixture.length }),
+      });
+      return;
+    }
+
+    if (url.pathname.includes("/assets/") && url.pathname.includes("health")) {
+      const symbol = assetsFixture.find((item) =>
+        url.pathname.toLowerCase().includes(item.symbol.toLowerCase()),
+      )?.symbol;
+      const asset = assetsFixture.find((item) => item.symbol === symbol);
+      await route.fulfill({
+        status: 200,
+        headers: jsonHeaders,
+        body: JSON.stringify(
+          (assetHealthFixture as Record<string, unknown>)[symbol ?? ""] ?? asset?.health ?? null,
+        ),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/v1/search") {
+      await route.fulfill({
+        status: 200,
+        headers: jsonHeaders,
+        body: JSON.stringify({
+          success: true,
+          data: { results: [], total: 0, facets: { bridgeProvider: [], sourceChain: [] } },
+        }),
+      });
+      return;
+    }
+
     await route.fulfill({
       status: 200,
       headers: jsonHeaders,
@@ -195,27 +233,6 @@ export async function mockCoreApi(page: Page): Promise<void> {
     });
   });
 
-  await page.route("**/api/v1/assets", async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: jsonHeaders,
-      body: JSON.stringify(assetsFixture),
-    });
-  });
-
-  await page.route("**/api/v1/assets/*/health*", async (route) => {
-    const url = new URL(route.request().url());
-    const match = url.pathname.match(/\/api\/v1\/assets\/([^/]+)\/health/);
-    const symbol = match?.[1] ?? "";
-    const body = (assetHealthFixture as Record<string, unknown>)[symbol] ?? null;
-
-    await route.fulfill({
-      status: 200,
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    });
-  });
-
   await page.route("**/api/v1/bridges**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -225,6 +242,11 @@ export async function mockCoreApi(page: Page): Promise<void> {
   });
 
   await page.route("**/health**", async (route) => {
+    if (new URL(route.request().url()).pathname.startsWith("/api/v1/assets/")) {
+      await route.fallback();
+      return;
+    }
+
     await route.fulfill({
       status: 200,
       headers: jsonHeaders,

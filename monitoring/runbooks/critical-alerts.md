@@ -29,6 +29,13 @@
 3. Check CPU and memory saturation.
 4. Scale backend workers or tune slow dependency calls.
 
+## PendingDatabaseMigrations
+
+1. Review the `migration_names` label to identify pending migration files.
+2. Check deployment logs and confirm the migration job ran against the production database.
+3. Verify database connectivity and permissions, then apply migrations using the normal deployment process.
+4. Confirm `db_pending_migrations_count` returns to zero and the alert resolves.
+
 ## BridgeHealthLow
 
 1. Identify affected bridge from labels.

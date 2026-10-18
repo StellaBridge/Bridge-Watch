@@ -80,6 +80,18 @@ groups:
           description: "HTTP p95 latency is above 2s for 10 minutes."
           runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#highp95latency"
 
+      - alert: PendingDatabaseMigrations
+        expr: db_pending_migrations_count > 0
+        for: 15m
+        labels:
+          severity: critical
+          service: backend
+          team: platform
+        annotations:
+          summary: "Database migrations are pending"
+          description: "{{ $value }} database migration(s) have been pending for more than 15 minutes: {{ $labels.migration_names }}"
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#pendingdatabasemigrations"
+
       - alert: BridgeHealthLow
         expr: bridge_health_score < 80
         for: 10m

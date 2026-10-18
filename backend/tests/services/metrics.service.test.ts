@@ -47,6 +47,7 @@ describe("MetricsService", () => {
       const byName = Object.fromEntries(json.map((m: any) => [m.name, m.type]));
       expect(byName["http_requests_total"]).toBe("counter");
       expect(byName["bridge_health_score"]).toBe("gauge");
+      expect(byName["db_pending_migrations_count"]).toBe("gauge");
       expect(byName["http_request_duration_seconds"]).toBe("histogram");
     });
 
