@@ -64,4 +64,8 @@ path = "tests/relay_contract_fuzz.rs"
 name = "relay_contract_integration"
 path = "tests/relay_contract_integration.rs"
 
+[[test]]
+name = "emergency_multisig_test"
+path = "tests/emergency_multisig.test.rs"
+
 # tests/version_migration_tests.rs is not built: it written as an in-crate module (`crate::` imports), not an integration test.
