@@ -67,7 +67,7 @@
     "@types/decimal.js": "^0.0.32",
     "@types/node": "^20.17.0",
     "@types/node-fetch": "^2.6.13",
-    "@types/nodemailer": "^7.0.11",
+    "@types/nodemailer": "^8.0.2",
     "@types/pdfkit": "^0.17.5",
     "@types/pg": "^8.11.10",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
