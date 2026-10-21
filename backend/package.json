@@ -43,7 +43,7 @@
     "bullmq": "^5.13.0",
     "csv-stringify": "^6.7.0",
     "decimal.js": "^10.6.0",
-    "discord.js": "^14.26.3",
+    "discord.js": "^14.27.0",
     "dotenv": "^16.4.5",
     "ethers": "^6.13.4",
     "fastify": "^5.8.4",
