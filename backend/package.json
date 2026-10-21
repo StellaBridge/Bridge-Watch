@@ -38,7 +38,7 @@
     "@fastify/swagger": "^9.7.0",
     "@fastify/swagger-ui": "^5.2.5",
     "@fastify/websocket": "^11.2.0",
-    "@stellar/stellar-sdk": "^12.3.0",
+    "@stellar/stellar-sdk": "^17.2.1",
     "@types/jsonwebtoken": "^9.0.10",
     "bullmq": "^5.13.0",
     "csv-stringify": "^6.7.0",
