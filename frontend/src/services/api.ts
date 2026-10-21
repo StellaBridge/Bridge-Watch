@@ -232,13 +232,14 @@ export function getAssetDetail(symbol: string) {
   return fetchApi<{ symbol: string; details: unknown }>(`/assets/${symbol}`);
 }
 
-export function getAssetHealth(symbol: string) {
-  return fetchApi<HealthScore | null>(`/assets/${symbol}/health`);
+export function getAssetHealth(symbol: string, signal?: AbortSignal) {
+  return fetchApi<HealthScore | null>(`/assets/${symbol}/health`, { signal });
 }
 
 export function getAssetHealthHistory(
   symbol: string,
-  period: "24h" | "7d" | "30d" = "7d"
+  period: "24h" | "7d" | "30d" = "7d",
+  signal?: AbortSignal
 ) {
   return fetchApi<
     | {
@@ -247,7 +248,7 @@ export function getAssetHealthHistory(
       points: Array<{ timestamp: string; score: number }>;
     }
     | null
-  >(`/assets/${symbol}/health/history?period=${period}`);
+  >(`/assets/${symbol}/health/history?period=${period}`, { signal });
 }
 
 export interface HealthScoreHistoryRecord {
@@ -323,8 +324,8 @@ export function getAssetPrice(symbol: string) {
   } | null>(`/assets/${symbol}/price`);
 }
 
-export function getAssetInfo(symbol: string) {
-  return fetchApi<AssetInfo | null>(`/assets/${symbol}/info`);
+export function getAssetInfo(symbol: string, signal?: AbortSignal) {
+  return fetchApi<AssetInfo | null>(`/assets/${symbol}/info`, { signal });
 }
 
 export function getAssetMetadataBySymbol(symbol: string) {
@@ -347,10 +348,10 @@ export function upsertAssetMetadata(payload: {
   });
 }
 
-export function getAssetPriceHistory(symbol: string, timeframe: string) {
+export function getAssetPriceHistory(symbol: string, timeframe: string, signal?: AbortSignal) {
   return fetchApi<Array<{ source: string; price: number; timestamp: string }>>(
     `/assets/${symbol}/price/history?timeframe=${timeframe}`
-  );
+  , { signal });
 }
 
 export function getAssetPriceSparkline(
@@ -375,48 +376,48 @@ export function getAssetVolumeSparkline(
   }>(`/assets/${symbol}/volume/history?period=${period}`);
 }
 
-export function getAssetPriceSources(symbol: string) {
+export function getAssetPriceSources(symbol: string, signal?: AbortSignal) {
   return fetchApi<Array<{ source: string; price: number; timestamp: string }>>(
     `/assets/${symbol}/price/sources`
-  );
+  , { signal });
 }
 
-export function getAssetLiquiditySources(symbol: string) {
+export function getAssetLiquiditySources(symbol: string, signal?: AbortSignal) {
   return fetchApi<Array<{
     dex: string;
     bidDepth: number;
     askDepth: number;
     totalLiquidity: number;
-  }>>(`/assets/${symbol}/liquidity/sources`);
+  }>>(`/assets/${symbol}/liquidity/sources`, { signal });
 }
 
-export function getAssetVolume(symbol: string) {
+export function getAssetVolume(symbol: string, signal?: AbortSignal) {
   return fetchApi<{
     symbol: string;
     volume24h: number;
     volume7d: number;
     volume30d: number;
-  } | null>(`/assets/${symbol}/volume`);
+  } | null>(`/assets/${symbol}/volume`, { signal });
 }
 
-export function getAssetSupplyVerification(symbol: string) {
+export function getAssetSupplyVerification(symbol: string, signal?: AbortSignal) {
   return fetchApi<{
     symbol: string;
     onChainSupply: number;
     offChainSupply: number;
     mismatchPercentage: number;
     lastVerified: string;
-  } | null>(`/assets/${symbol}/supply`);
+  } | null>(`/assets/${symbol}/supply`, { signal });
 }
 
-export function getAssetAlerts(symbol: string) {
+export function getAssetAlerts(symbol: string, signal?: AbortSignal) {
   return fetchApi<Array<{
     id: string;
     type: string;
     severity: "info" | "warning" | "critical";
     message: string;
     createdAt: string;
-  }>>(`/assets/${symbol}/alerts`);
+  }>>(`/assets/${symbol}/alerts`, { signal });
 }
 
 export interface AlertSuppressionRule {

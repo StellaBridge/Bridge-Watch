@@ -39,6 +39,7 @@ pub mod reputation_system;
 #[cfg(test)]
 pub mod sidecar_state;
 pub mod source_blessing;
+pub mod source_priority;
 pub mod source_trust;
 pub mod state_export;
 pub mod threshold_window;

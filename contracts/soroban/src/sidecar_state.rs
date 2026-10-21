@@ -313,3 +313,337 @@ impl SidecarStateContract {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+//
+// NOTE ON SCOPE: the originating ticket describes this module as a sidecar
+// *node registry* with governance-approved registration, multi-node quorum
+// verification, node revocation, and stale-state expiry. The actual contract
+// implements none of that — it is a generic off-chain "sidecar entry" store
+// that links auxiliary data to an on-chain entity reference and checks a
+// single expected-vs-actual hash for consistency. There is no node
+// allowlist, no governance gate beyond a single `admin` address that is
+// never actually checked against callers, no quorum/vote counting, and no
+// TTL-based expiry. Each test below is grounded in what the contract really
+// does, mapped to the nearest real analog of each acceptance criterion:
+//   - "registering sidecar nodes with governance approval" -> `initialize`'s
+//     single-admin bootstrap, and the fact that `store_sidecar` only checks
+//     the caller's own signature, not membership in any registry.
+//   - "quorum verification" -> `check_consistency`'s single expected-vs-
+//     actual hash comparison (no vote counting exists).
+//   - "revocation of malicious/de-registered nodes" -> there is no
+//     revoke/deregister entrypoint; the nearest real guards are rejecting
+//     operations on an unknown `entry_id` and the fixed per-entity entry cap.
+//   - "stale state invalidation" -> `check_consistency` flags a hash
+//     mismatch, and `update_sidecar` is how staleness gets resolved.
+//
+// This lives as an in-module test (rather than an external `tests/*.rs`
+// integration test) because `sidecar_state` is only compiled under
+// `#[cfg(test)]` (see lib.rs) to avoid a Wasm export collision between
+// `SidecarStateContract::initialize` and `BridgeWatchContract::initialize`
+// in the production contract build — an external integration-test crate is
+// compiled against the normal (non-`cfg(test)`) library build, so it would
+// never see this module at all.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::Env;
+
+    fn s(env: &Env, text: &str) -> String {
+        String::from_str(env, text)
+    }
+
+    fn setup() -> (Env, SidecarStateContractClient<'static>, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000_000);
+        let contract_id = env.register_contract(None, SidecarStateContract);
+        let client = SidecarStateContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        (env, client, admin)
+    }
+
+    // ── "Registration with governance approval" -> initialize + caller auth ──
+
+    #[test]
+    fn initialize_sets_the_admin_and_rejects_a_second_call() {
+        let (_env, client, admin) = setup();
+        assert_eq!(
+            client.try_initialize(&admin),
+            Err(Ok(SidecarError::AlreadyInitialized))
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn submitting_sidecar_state_without_the_caller_s_own_authorization_is_rejected() {
+        // No mock_all_auths() here: store_sidecar requires the caller to
+        // actually authorize the invocation, independent of anything
+        // `initialize` set up.
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000_000);
+        let contract_id = env.register_contract(None, SidecarStateContract);
+        let client = SidecarStateContractClient::new(&env, &contract_id);
+        let caller = Address::generate(&env);
+
+        client.store_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+    }
+
+    #[test]
+    fn any_authorized_caller_may_submit_state_the_contract_has_no_node_allowlist() {
+        // Unlike a governance-gated node registry, store_sidecar never checks
+        // the caller against the admin set by `initialize`, or against any
+        // registered-node list — no such list exists in this contract.
+        let (env, client, _admin) = setup();
+        let random_submitter = Address::generate(&env);
+
+        client.store_sidecar(
+            &random_submitter,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+
+        let entry = client.query_by_id(&s(&env, "entry-1"));
+        assert_eq!(entry.created_by, random_submitter);
+    }
+
+    // ── Sidecar state submission and (single-attester) verification ──────────
+
+    #[test]
+    fn store_sidecar_creates_a_retrievable_entry() {
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+
+        client.store_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{\"status\":\"healthy\"}"),
+            &s(&env, "{}"),
+        );
+
+        let entry = client.query_by_id(&s(&env, "entry-1"));
+        assert_eq!(entry.entity_ref, s(&env, "bridge:usdc-ethereum"));
+        assert_eq!(entry.entity_hash, s(&env, "hash-v1"));
+        assert_eq!(entry.created_at, 1_000_000);
+        assert_eq!(entry.updated_at, 1_000_000);
+
+        let by_entity = client.query_by_entity(&s(&env, "bridge:usdc-ethereum"));
+        assert_eq!(by_entity.len(), 1);
+
+        assert!(!env.events().all().is_empty());
+    }
+
+    #[test]
+    fn check_consistency_confirms_a_matching_hash() {
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+        client.store_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+
+        let check: ConsistencyCheck =
+            client.check_consistency(&s(&env, "entry-1"), &s(&env, "hash-v1"));
+
+        assert!(check.is_consistent);
+        assert_eq!(check.expected_hash, s(&env, "hash-v1"));
+        assert_eq!(check.actual_hash, s(&env, "hash-v1"));
+    }
+
+    #[test]
+    fn check_consistency_flags_a_mismatched_hash_this_is_a_hash_compare_not_a_quorum_vote() {
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+        client.store_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+
+        let check = client.check_consistency(&s(&env, "entry-1"), &s(&env, "hash-v2"));
+
+        assert!(!check.is_consistent);
+        assert_eq!(check.expected_hash, s(&env, "hash-v1"));
+        assert_eq!(check.actual_hash, s(&env, "hash-v2"));
+    }
+
+    #[test]
+    fn update_sidecar_replaces_hash_and_data_and_bumps_updated_at_only() {
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+        client.store_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+
+        env.ledger().set_timestamp(2_000_000);
+        client.update_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "hash-v2"),
+            &s(&env, "{\"status\":\"degraded\"}"),
+            &s(&env, "{}"),
+        );
+
+        let entry = client.query_by_id(&s(&env, "entry-1"));
+        assert_eq!(entry.entity_hash, s(&env, "hash-v2"));
+        assert_eq!(entry.created_at, 1_000_000); // unchanged by the update
+        assert_eq!(entry.updated_at, 2_000_000);
+
+        assert!(!env.events().all().is_empty());
+    }
+
+    // ── "Revocation" -> there is no such entrypoint; nearest real guards ─────
+
+    #[test]
+    fn updating_an_entry_that_was_never_registered_is_rejected() {
+        // There is no revoke/deregister function on this contract. The
+        // closest real guard is that mutating an unknown entry_id fails
+        // closed.
+        let (env, client, _admin) = setup();
+        assert_eq!(
+            client.try_update_sidecar(
+                &Address::generate(&env),
+                &s(&env, "never-registered"),
+                &s(&env, "hash"),
+                &s(&env, "{}"),
+                &s(&env, "{}"),
+            ),
+            Err(Ok(SidecarError::InvalidReference))
+        );
+    }
+
+    #[test]
+    fn querying_an_entry_that_was_never_registered_fails_closed() {
+        let (env, client, _admin) = setup();
+        assert_eq!(
+            client.try_query_by_id(&s(&env, "never-registered")),
+            Err(Ok(SidecarError::InvalidReference))
+        );
+        assert_eq!(
+            client.try_check_consistency(&s(&env, "never-registered"), &s(&env, "hash")),
+            Err(Ok(SidecarError::InvalidReference))
+        );
+    }
+
+    #[test]
+    fn querying_by_entity_for_an_unknown_entity_returns_empty_rather_than_erroring() {
+        let (env, client, _admin) = setup();
+        let entries = client.query_by_entity(&s(&env, "bridge:never-seen"));
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn a_single_entity_cannot_be_flooded_past_the_max_entry_cap() {
+        // The only real guard against a misbehaving/malicious submitter
+        // spamming one entity's sidecar history is the fixed
+        // MAX_SIDECAR_ENTRIES cap.
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+        let entity = s(&env, "bridge:usdc-ethereum");
+
+        for i in 0..MAX_SIDECAR_ENTRIES {
+            client.store_sidecar(
+                &caller,
+                &s(&env, &format!("entry-{i}")),
+                &entity,
+                &s(&env, "hash"),
+                &s(&env, "{}"),
+                &s(&env, "{}"),
+            );
+        }
+
+        assert_eq!(
+            client.try_store_sidecar(
+                &caller,
+                &s(&env, "entry-overflow"),
+                &entity,
+                &s(&env, "hash"),
+                &s(&env, "{}"),
+                &s(&env, "{}"),
+            ),
+            Err(Ok(SidecarError::MaxEntriesExceeded))
+        );
+    }
+
+    // ── "Stale state invalidation" -> hash mismatch detection + resolution ───
+
+    #[test]
+    fn stale_state_is_detected_via_hash_mismatch_and_resolved_by_an_update() {
+        // There is no TTL/expiry field anywhere in this contract —
+        // "staleness" is only ever detected by comparing the stored hash
+        // against the caller-supplied current hash in check_consistency.
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+        client.store_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "bridge:usdc-ethereum"),
+            &s(&env, "hash-v1"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+
+        // The on-chain entity moved on to hash-v2 while the sidecar still
+        // holds v1.
+        let stale_check = client.check_consistency(&s(&env, "entry-1"), &s(&env, "hash-v2"));
+        assert!(!stale_check.is_consistent);
+
+        // Updating the sidecar with the current hash resolves the staleness.
+        env.ledger().set_timestamp(2_000_000);
+        client.update_sidecar(
+            &caller,
+            &s(&env, "entry-1"),
+            &s(&env, "hash-v2"),
+            &s(&env, "{}"),
+            &s(&env, "{}"),
+        );
+        let fresh_check = client.check_consistency(&s(&env, "entry-1"), &s(&env, "hash-v2"));
+        assert!(fresh_check.is_consistent);
+        assert_eq!(fresh_check.checked_at, 2_000_000);
+    }
+
+    // ── Entity index bookkeeping ──────────────────────────────────────────────
+
+    #[test]
+    fn entity_index_lists_each_entity_once_regardless_of_entry_count() {
+        let (env, client, _admin) = setup();
+        let caller = Address::generate(&env);
+        let bridge_entity = s(&env, "bridge:usdc-ethereum");
+        let asset_entity = s(&env, "asset:xlm");
+
+        client.store_sidecar(&caller, &s(&env, "entry-1"), &bridge_entity, &s(&env, "h1"), &s(&env, "{}"), &s(&env, "{}"));
+        client.store_sidecar(&caller, &s(&env, "entry-2"), &bridge_entity, &s(&env, "h2"), &s(&env, "{}"), &s(&env, "{}"));
+        client.store_sidecar(&caller, &s(&env, "entry-3"), &asset_entity, &s(&env, "h3"), &s(&env, "{}"), &s(&env, "{}"));
+
+        let all_entities = client.get_all_entities();
+        assert_eq!(all_entities.len(), 2);
+    }
+}

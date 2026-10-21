@@ -26,6 +26,8 @@ export interface AnomalyTrendPoint {
 export interface AnomalyTrendData {
   trendPoints: AnomalyTrendPoint[];
   totalEvents: number;
+  /** Percentage change of the latter half of the window versus the former half. */
+  percentageChange?: number;
   bySeverity: Record<AnomalySeverity, number>;
   byAsset: Record<string, number>;
 }
@@ -46,6 +48,12 @@ async function fetchAnomalyEvents(params: {
   if (!res.ok) throw new Error("Failed to fetch anomaly events");
   const data = (await res.json()) as { events: AnomalyEvent[] };
   return data.events;
+}
+
+/** Defined zero-baseline behavior: 0→0 stays 0%; 0→positive is 100%. */
+export function calculateTrendPercentageChange(current: number, previous: number): number {
+  if (previous === 0) return current === 0 ? 0 : 100;
+  return ((current - previous) / previous) * 100;
 }
 
 function buildTrendData(events: AnomalyEvent[], days = 30): AnomalyTrendData {
@@ -79,7 +87,16 @@ function buildTrendData(events: AnomalyEvent[], days = 30): AnomalyTrendData {
     });
   }
 
-  return { trendPoints, totalEvents: events.length, bySeverity, byAsset };
+  const midpoint = Math.floor(trendPoints.length / 2);
+  const previousTotal = trendPoints.slice(0, midpoint).reduce((total, point) => total + point.total, 0);
+  const currentTotal = trendPoints.slice(midpoint).reduce((total, point) => total + point.total, 0);
+  return {
+    trendPoints,
+    totalEvents: events.length,
+    bySeverity,
+    byAsset,
+    percentageChange: calculateTrendPercentageChange(currentTotal, previousTotal),
+  };
 }
 
 export function useAnomalyTrends(params: {

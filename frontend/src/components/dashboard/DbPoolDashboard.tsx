@@ -1,46 +1,20 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  Box,
-  Card,
-  CardContent,
-  CardHeader,
-  Grid,
-  Gauge,
-  LineChart,
+  CartesianGrid,
+  Legend,
   Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Alert,
-  CircularProgress,
-  Chip,
-  Stack,
-  Typography,
-} from "@mui/material";
-import { format } from "date-fns";
+} from "recharts";
 
 interface PoolMetric {
   bucket: string;
   avg_active: number;
   avg_idle: number;
   avg_waiting: number;
-  max_active: number;
-  max_waiting: number;
-  min_active: number;
   pool_id: string;
 }
 
@@ -50,7 +24,6 @@ interface PoolEvent {
   pool_id: string;
   event_type: string;
   severity: "info" | "warning" | "critical";
-  details: Record<string, any>;
   message: string;
 }
 
@@ -67,23 +40,9 @@ interface PoolStatus {
   recommended_actions: string[];
 }
 
-const getSeverityColor = (severity: string) => {
-  switch (severity) {
-    case "critical":
-      return "error";
-    case "warning":
-      return "warning";
-    case "info":
-      return "info";
-    default:
-      return "default";
-  }
-};
+type ControlAction = "set_max_connections" | "set_min_connections" | "evict_idle" | "drain_pool" | "reset_stats";
 
-/**
- * Database Connection Pool Dashboard
- * Displays real-time and historical pool metrics with controls
- */
+/** Operational dashboard for database connection pools. */
 export const DbPoolDashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<PoolMetric[]>([]);
   const [events, setEvents] = useState<PoolEvent[]>([]);
@@ -91,71 +50,63 @@ export const DbPoolDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [controlDialogOpen, setControlDialogOpen] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<string>("");
-  const [actionParams, setActionParams] = useState<Record<string, any>>({});
+  const [selectedAction, setSelectedAction] = useState<ControlAction | "">("");
+  const [actionParams, setActionParams] = useState<Record<string, number>>({});
   const [executing, setExecuting] = useState(false);
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
-  const apiBase = process.env.REACT_APP_API_URL || "http://localhost:3001";
-
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
+    const token = localStorage.getItem("authToken");
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     try {
-      const token = localStorage.getItem("authToken");
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-      // Fetch metrics
-      const metricsRes = await fetch(`${apiBase}/api/v1/db-pool/metrics?range=24h&resolution=1h`, {
-        headers,
-      });
-      if (metricsRes.ok) {
-        const data = await metricsRes.json();
-        setMetrics(data.data || []);
+      const [metricsRes, eventsRes, statusRes] = await Promise.all([
+        fetch(`${apiBase}/api/v1/db-pool/metrics?range=24h&resolution=1h`, { headers, signal }),
+        fetch(`${apiBase}/api/v1/db-pool/events?range=24h&limit=50`, { headers, signal }),
+        fetch(`${apiBase}/api/v1/db-pool/status`, { headers, signal }),
+      ]);
+      if (!metricsRes.ok || !eventsRes.ok || !statusRes.ok) {
+        throw new Error("Failed to fetch database pool metrics");
       }
-
-      // Fetch events
-      const eventsRes = await fetch(`${apiBase}/api/v1/db-pool/events?range=24h&limit=50`, {
-        headers,
-      });
-      if (eventsRes.ok) {
-        const data = await eventsRes.json();
-        setEvents(data.data || []);
-      }
-
-      // Fetch status
-      const statusRes = await fetch(`${apiBase}/api/v1/db-pool/status`, { headers });
-      if (statusRes.ok) {
-        const data = await statusRes.json();
-        setStatus(data.data || null);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch pool data");
+      const [metricsBody, eventsBody, statusBody] = await Promise.all([
+        metricsRes.json(), eventsRes.json(), statusRes.json(),
+      ]);
+      if (signal?.aborted) return;
+      setMetrics(metricsBody.data ?? []);
+      setEvents(eventsBody.data ?? []);
+      setStatus(statusBody.data ?? null);
+    } catch (cause) {
+      if (signal?.aborted) return;
+      setError(cause instanceof Error ? cause.message : "Failed to fetch pool data");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [apiBase]);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
-
-    return () => clearInterval(interval);
+    const controller = new AbortController();
+    void fetchData(controller.signal);
+    const interval = window.setInterval(() => {
+      if (!controller.signal.aborted) void fetchData(controller.signal);
+    }, 30_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
   }, [fetchData]);
 
   const handleControlAction = async () => {
     if (!selectedAction || !status) return;
-
     setExecuting(true);
     try {
       const token = localStorage.getItem("authToken");
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
       const response = await fetch(`${apiBase}/api/v1/db-pool/control`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...headers,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           pool_id: status.pool_id,
@@ -164,259 +115,133 @@ export const DbPoolDashboard: React.FC = () => {
           confirmation: true,
         }),
       });
-
-      if (response.ok) {
-        alert("Control action executed successfully");
-        setControlDialogOpen(false);
-        setSelectedAction("");
-        setActionParams({});
-        await fetchData();
-      } else {
-        const data = await response.json();
-        alert(`Action failed: ${data.error}`);
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || "Pool control action failed");
       }
-    } catch (err) {
-      alert(`Error executing action: ${err instanceof Error ? err.message : "Unknown error"}`);
+      setControlDialogOpen(false);
+      setSelectedAction("");
+      setActionParams({});
+      await fetchData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to execute control action");
     } finally {
       setExecuting(false);
     }
   };
 
   if (loading && !status) {
-    return (
-      <Box sx={{ display: "flex", justifyContent: "center", p: 2 }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <div role="status" aria-label="Loading pool metrics" className="p-4">Loading pool metrics…</div>;
   }
 
   return (
-    <Box sx={{ p: 2 }}>
-      <Typography variant="h5" sx={{ mb: 2 }}>
-        Database Connection Pool Dashboard
-      </Typography>
+    <section aria-label="Database Connection Pool Dashboard" className="space-y-4 p-4">
+      <h2 className="text-xl font-semibold">Database Connection Pool Dashboard</h2>
+      {error && <p role="alert" className="rounded border border-red-500 p-3 text-red-600">{error}</p>}
+      {loading && status && <p role="status">Refreshing pool metrics…</p>}
+      {!status && <p>No pool status available</p>}
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-      {/* Status Overview */}
       {status && (
-        <Card sx={{ mb: 2 }}>
-          <CardHeader title="Pool Health" />
-          <CardContent>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: "center" }}>
-                  <Gauge value={status.current_utilization * 100} max={100} />
-                  <Typography variant="body2">Utilization</Typography>
-                  <Typography variant="h6">
-                    {(status.current_utilization * 100).toFixed(1)}%
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: "center", p: 1 }}>
-                  <Typography variant="h6">{status.active_connections}</Typography>
-                  <Typography variant="body2">Active</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: "center", p: 1 }}>
-                  <Typography variant="h6">{status.idle_connections}</Typography>
-                  <Typography variant="body2">Idle</Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: "center", p: 1 }}>
-                  <Chip
-                    label={status.is_healthy ? "Healthy" : "Unhealthy"}
-                    color={status.is_healthy ? "success" : "error"}
-                  />
-                </Box>
-              </Grid>
-            </Grid>
-
-            {/* Recommendations */}
-            {status.recommended_actions.length > 0 && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="subtitle2">Recommended Actions:</Typography>
-                <Stack direction="column" spacing={1}>
-                  {status.recommended_actions.map((action, idx) => (
-                    <Typography key={idx} variant="body2">
-                      • {action}
-                    </Typography>
-                  ))}
-                </Stack>
-              </Box>
-            )}
-          </CardContent>
-        </Card>
+        <section aria-label="Pool Health" className="rounded border p-4">
+          <h3 className="font-semibold">Pool Health</h3>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div>
+              <label htmlFor="pool-utilization">Utilization</label>
+              <progress id="pool-utilization" max={100} value={status.current_utilization * 100} />
+              <p>{(status.current_utilization * 100).toFixed(1)}%</p>
+            </div>
+            <div><p>Active</p><p>{status.active_connections}</p></div>
+            <div><p>Idle</p><p>{status.idle_connections}</p></div>
+            <div>
+              <span>{status.is_healthy ? "Healthy" : "Unhealthy"}</span>
+              {status.current_utilization > 0.8 && (
+                <span role="status" className="ml-2 text-amber-600">High utilization warning</span>
+              )}
+            </div>
+          </div>
+          <p>{status.active_connections} of {status.max_connections} connections active</p>
+          {status.recommended_actions.length > 0 && (
+            <div>
+              <h4>Recommended Actions:</h4>
+              <ul>{status.recommended_actions.map((action, index) => <li key={index}>{action}</li>)}</ul>
+            </div>
+          )}
+        </section>
       )}
 
-      {/* Metrics Chart */}
-      {metrics.length > 0 && (
-        <Card sx={{ mb: 2 }}>
-          <CardHeader title="24-Hour Metrics" />
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+      {metrics.length > 0 ? (
+        <section aria-label="24-Hour Metrics" className="rounded border p-4">
+          <h3 className="font-semibold">24-Hour Metrics</h3>
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
               <LineChart data={metrics}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="bucket"
-                  tickFormatter={(date) => format(new Date(date), "HH:mm")}
-                />
+                <XAxis dataKey="bucket" />
                 <YAxis />
-                <Tooltip
-                  labelFormatter={(date) => format(new Date(date as string), "HH:mm")}
-                />
+                <Tooltip />
                 <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="avg_active"
-                  stroke="#8884d8"
-                  name="Active"
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="avg_idle"
-                  stroke="#82ca9d"
-                  name="Idle"
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="avg_waiting"
-                  stroke="#ffc658"
-                  name="Waiting"
-                  dot={false}
-                />
+                <Line type="monotone" dataKey="avg_active" stroke="#8884d8" name="Active" dot={false} />
+                <Line type="monotone" dataKey="avg_idle" stroke="#82ca9d" name="Idle" dot={false} />
+                <Line type="monotone" dataKey="avg_waiting" stroke="#ffc658" name="Waiting" dot={false} />
               </LineChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </section>
+      ) : <p>No pool metrics available</p>}
 
-      {/* Events Table */}
-      <Card sx={{ mb: 2 }}>
-        <CardHeader
-          title="Recent Events"
-          action={
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => setControlDialogOpen(true)}
-            >
-              Pool Controls
-            </Button>
-          }
-        />
-        <CardContent>
-          {events.length > 0 ? (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Time</TableCell>
-                  <TableCell>Event Type</TableCell>
-                  <TableCell>Severity</TableCell>
-                  <TableCell>Message</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {events.map((event) => (
-                  <TableRow key={event.id}>
-                    <TableCell>{format(new Date(event.timestamp), "HH:mm:ss")}</TableCell>
-                    <TableCell>{event.event_type}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={event.severity}
-                        color={getSeverityColor(event.severity) as any}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell>{event.message}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <Typography variant="body2" color="textSecondary">
-              No recent events
-            </Typography>
-          )}
-        </CardContent>
-      </Card>
+      <section aria-label="Recent Events" className="rounded border p-4">
+        <h3 className="font-semibold">Recent Events</h3>
+        <button type="button" onClick={() => setControlDialogOpen(true)}>Pool Controls</button>
+        {events.length === 0 ? <p>No recent events</p> : (
+          <table>
+            <thead><tr><th>Time</th><th>Event Type</th><th>Severity</th><th>Message</th></tr></thead>
+            <tbody>{events.map(event => (
+              <tr key={event.id}>
+                <td>{new Date(event.timestamp).toLocaleTimeString()}</td>
+                <td>{event.event_type}</td>
+                <td>{event.severity}</td>
+                <td>{event.message}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </section>
 
-      {/* Control Dialog */}
-      <Dialog open={controlDialogOpen} onClose={() => setControlDialogOpen(false)}>
-        <DialogTitle>Pool Control Action</DialogTitle>
-        <DialogContent sx={{ minWidth: 400 }}>
-          <TextField
-            select
-            fullWidth
-            label="Action"
-            value={selectedAction}
-            onChange={(e) => {
-              setSelectedAction(e.target.value);
-              setActionParams({});
-            }}
-            margin="normal"
-            SelectProps={{
-              native: true,
-            }}
-          >
+      {controlDialogOpen && (
+        <div role="dialog" aria-label="Pool Control Action" className="rounded border p-4">
+          <h3>Pool Control Action</h3>
+          <label htmlFor="pool-action">Action</label>
+          <select id="pool-action" value={selectedAction} onChange={event => {
+            setSelectedAction(event.target.value as ControlAction | "");
+            setActionParams({});
+          }}>
             <option value="">Select an action...</option>
             <option value="set_max_connections">Set Max Connections</option>
             <option value="set_min_connections">Set Min Connections</option>
             <option value="evict_idle">Evict Idle Connections</option>
             <option value="drain_pool">Drain Pool</option>
             <option value="reset_stats">Reset Statistics</option>
-          </TextField>
-
-          {selectedAction === "set_max_connections" && (
-            <TextField
-              fullWidth
-              type="number"
-              label="Max Connections"
-              value={actionParams.max || ""}
-              onChange={(e) =>
-                setActionParams({ ...actionParams, max: parseInt(e.target.value) })
-              }
-              margin="normal"
-              inputProps={{ min: 1, max: 1000 }}
-            />
+          </select>
+          {(selectedAction === "set_max_connections" || selectedAction === "set_min_connections") && (
+            <label>
+              {selectedAction === "set_max_connections" ? "Max Connections" : "Min Connections"}
+              <input type="number" min={selectedAction === "set_max_connections" ? 1 : 0}
+                max={selectedAction === "set_max_connections" ? 1000 : 100}
+                value={actionParams[selectedAction === "set_max_connections" ? "max" : "min"] ?? ""}
+                onChange={event => setActionParams({
+                  ...actionParams,
+                  [selectedAction === "set_max_connections" ? "max" : "min"]: Number(event.target.value),
+                })} />
+            </label>
           )}
-
-          {selectedAction === "set_min_connections" && (
-            <TextField
-              fullWidth
-              type="number"
-              label="Min Connections"
-              value={actionParams.min || ""}
-              onChange={(e) =>
-                setActionParams({ ...actionParams, min: parseInt(e.target.value) })
-              }
-              margin="normal"
-              inputProps={{ min: 0, max: 100 }}
-            />
-          )}
-
-          <Alert severity="warning" sx={{ mt: 2 }}>
-            Control actions are logged for audit purposes. Proceed with caution.
-          </Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setControlDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleControlAction}
-            disabled={!selectedAction || executing}
-            variant="contained"
-            color="error"
-          >
+          <p>Control actions are logged for audit purposes. Proceed with caution.</p>
+          <button type="button" onClick={() => setControlDialogOpen(false)}>Cancel</button>
+          <button type="button" disabled={!selectedAction || executing} onClick={() => void handleControlAction()}>
             {executing ? "Executing..." : "Execute"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+          </button>
+        </div>
+      )}
+    </section>
   );
 };
 

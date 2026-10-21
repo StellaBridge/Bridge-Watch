@@ -1441,6 +1441,23 @@ mod tests {
     }
 
     #[test]
+    fn test_burst_at_exact_daily_ceiling_allowed_then_rejected() {
+        let (env, client, _admin) = setup();
+        let user = Address::generate(&env);
+        let ceiling = client.get_effective_limits(&user).daily_value;
+
+        // Landing exactly on the ceiling is inside the limit; one unit more is not.
+        assert_eq!(client.consume_limit(&user, &ceiling), ConsumeResult::Allowed);
+        assert_eq!(
+            client.consume_limit(&user, &1),
+            ConsumeResult::Rejected(RateLimitError::DailyValueLimitExceeded as u32)
+        );
+
+        // The rejected burst must not be recorded against the user.
+        assert_eq!(client.get_user_usage(&user).daily.value_used, ceiling);
+    }
+
+    #[test]
     fn test_consume_invalid_amount() {
         let (env, client, _admin) = setup();
         let user = Address::generate(&env);
