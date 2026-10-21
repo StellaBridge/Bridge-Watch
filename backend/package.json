@@ -64,7 +64,7 @@
     "zod-to-json-schema": "^3.24.6"
   },
   "devDependencies": {
-    "@types/decimal.js": "^0.0.32",
+    "@types/decimal.js": "^7.4.3",
     "@types/node": "^20.17.0",
     "@types/node-fetch": "^2.6.13",
     "@types/nodemailer": "^7.0.11",
