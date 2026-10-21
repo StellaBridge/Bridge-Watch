@@ -20,7 +20,7 @@ soroban-sdk = { version = "22.0.10" }
 
 [dev-dependencies]
 soroban-sdk = { version = "22.0.10", features = ["testutils"] }
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 
 # tests/asset_locking.test.rs is not built: it no longer matches the module API it tests (10 compile errors).
 
