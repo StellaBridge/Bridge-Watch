@@ -208,6 +208,32 @@
   color: rgb(var(--stellar-text-secondary));
 }
 
+[data-contrast="high"] [class*="text-yellow-"],
+[data-contrast="high"] [class*="text-amber-"],
+[data-contrast="high"] [class*="text-orange-"],
+[data-contrast="high"] [class*="text-red-"],
+[data-contrast="high"] [class*="text-rose-"],
+[data-contrast="high"] [class*="text-green-"],
+[data-contrast="high"] [class*="text-emerald-"],
+[data-contrast="high"] [class*="text-blue-"],
+[data-contrast="high"] [class*="text-sky-"],
+[data-contrast="high"] [class*="text-slate-"] {
+  color: rgb(var(--stellar-text-primary));
+}
+
+[data-contrast="high"] [class*="text-yellow-"][class*="bg-yellow-"],
+[data-contrast="high"] [class*="text-amber-"][class*="bg-amber-"],
+[data-contrast="high"] [class*="text-orange-"][class*="bg-orange-"],
+[data-contrast="high"] [class*="text-red-"][class*="bg-red-"],
+[data-contrast="high"] [class*="text-rose-"][class*="bg-rose-"],
+[data-contrast="high"] [class*="text-green-"][class*="bg-green-"],
+[data-contrast="high"] [class*="text-emerald-"][class*="bg-emerald-"],
+[data-contrast="high"] [class*="text-blue-"][class*="bg-blue-"],
+[data-contrast="high"] [class*="text-sky-"][class*="bg-sky-"],
+[data-contrast="high"] [class*="text-slate-"][class*="bg-slate-"] {
+  background-color: rgb(var(--stellar-card));
+}
+
 [data-density="compact"] {
   --section-gap: 1rem;
 }
@@ -439,4 +465,3 @@ body {
 .reduce-motion .skeleton::after {
   animation: none;
 }
-

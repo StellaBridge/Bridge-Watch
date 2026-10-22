@@ -10,6 +10,7 @@ import { useToast } from "../context/ToastContextValue";
 import { useNotificationContext } from "../hooks/useNotificationContext";
 import { useThemeStore, selectDensity } from "../stores/themeStore";
 import { Tabs, TabList, Tab, TabPanel } from "../components/Tabs";
+import HighContrastToggle from "../components/HighContrastToggle";
 
 const refreshOptions = [
   { value: 30000, label: "30s" },
@@ -143,6 +144,15 @@ export default function Settings() {
                 }}
               />
             </label>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-stellar-text-secondary">
+                High contrast mode
+                <span className="block text-xs mt-1 text-stellar-text-secondary/80">
+                  Increase text and border contrast for improved readability.
+                </span>
+              </span>
+              <HighContrastToggle />
+            </div>
             <label className="flex items-center justify-between gap-4 cursor-pointer">
               <span className="text-stellar-text-secondary">
                 {t("settings.uiDensity")}

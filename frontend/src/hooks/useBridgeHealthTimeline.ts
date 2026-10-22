@@ -70,7 +70,7 @@ export function useBridgeHealthTimeline(
   });
 
   const points = useMemo<BridgeHealthPoint[]>(() => {
-    if (query.data?.points?.length) return query.data.points;
+    if (query.data) return query.data.points ?? [];
     if (bridgeName) return generateMockHistory(bridgeName, period);
     return [];
   }, [query.data, bridgeName, period]);
@@ -78,7 +78,7 @@ export function useBridgeHealthTimeline(
   return {
     ...query,
     points,
-    isMockData: !query.data?.points?.length && bridgeName.length > 0,
+    isMockData: !query.data && bridgeName.length > 0,
   };
 }
 

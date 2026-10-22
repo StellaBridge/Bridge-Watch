@@ -159,17 +159,30 @@ function sanitizeLayout(layout: DashboardLayout): DashboardLayout {
 
   for (const definition of widgetDefinitions) {
     if (!seen.has(definition.id)) {
+      // Widgets missing from a stored layout are appended after the known
+      // ones. They must not reuse an existing order value, otherwise two
+      // widgets would occupy the same grid slot.
       normalized.push({
         id: definition.id,
         enabled: true,
         visible: true,
         size: "medium",
-        order: orderIndex++,
+        order: Number.MAX_SAFE_INTEGER,
       });
+      seen.add(definition.id);
     }
   }
 
-  return { widgets: normalized.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) };
+  const sorted = normalized.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  // Renumber so every widget owns exactly one slot: duplicate or missing
+  // order values in a persisted layout would otherwise let widgets overlap.
+  return {
+    widgets: sorted.map((widget, index) => ({
+      ...widget,
+      order: index,
+    })),
+  };
 }
 
 export function useDashboardLayout() {

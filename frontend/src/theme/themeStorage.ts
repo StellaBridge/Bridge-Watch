@@ -10,9 +10,8 @@ export const PROFILE_SYNC_USER_ID_KEY = "bridge-watch:profile-sync-user-id:v1";
 
 export function getSystemTheme(): ThemeName {
   if (typeof window === "undefined") return "dark";
-  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  const preference = window.matchMedia?.("(prefers-color-scheme: dark)");
+  return preference?.matches ? "dark" : "light";
 }
 
 export function normalizeMode(value: string | null): ThemeMode {

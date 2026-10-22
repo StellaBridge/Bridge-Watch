@@ -17,9 +17,9 @@ interface InlineStatusCardsProps {
 }
 
 const toneClasses: Record<StatusTone, string> = {
-  healthy: "border-green-400/30 bg-green-500/10 text-green-300",
-  warning: "border-yellow-400/30 bg-yellow-500/10 text-yellow-200",
-  critical: "border-red-400/30 bg-red-500/10 text-red-300",
+  healthy: "border-green-400/30 bg-green-500/10 text-green-800 dark:text-green-300",
+  warning: "border-yellow-400/30 bg-yellow-500/10 text-yellow-800 dark:text-yellow-200",
+  critical: "border-red-400/30 bg-red-500/10 text-red-800 dark:text-red-300",
   unknown: "border-stellar-border bg-stellar-dark/50 text-stellar-text-secondary",
 };
 

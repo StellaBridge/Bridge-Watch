@@ -20,23 +20,23 @@ const SEVERITY_ORDER: Record<IncidentSeverity, number> = {
 };
 
 const SEVERITY_BADGE: Record<IncidentSeverity, string> = {
-  critical: "bg-red-900/50 text-red-400 border border-red-700",
-  high: "bg-orange-900/50 text-orange-400 border border-orange-700",
-  medium: "bg-yellow-900/50 text-yellow-400 border border-yellow-700",
-  low: "bg-blue-900/50 text-blue-400 border border-blue-700",
+  critical: "bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300 border border-red-700",
+  high: "bg-orange-100 dark:bg-orange-900/50 text-orange-800 dark:text-orange-300 border border-orange-700",
+  medium: "bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-200 border border-yellow-700",
+  low: "bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 border border-blue-700",
 };
 
 const SEVERITY_ICON_COLOR: Record<IncidentSeverity, string> = {
-  critical: "text-red-500",
-  high: "text-orange-500",
-  medium: "text-yellow-500",
-  low: "text-blue-400",
+  critical: "text-red-700 dark:text-red-300",
+  high: "text-orange-700 dark:text-orange-300",
+  medium: "text-yellow-800 dark:text-yellow-200",
+  low: "text-blue-700 dark:text-blue-300",
 };
 
 const STATUS_STYLE: Record<IncidentStatus, string> = {
-  open: "text-red-400",
-  investigating: "text-yellow-400",
-  resolved: "text-green-400",
+  open: "text-red-700 dark:text-red-300",
+  investigating: "text-yellow-800 dark:text-yellow-200",
+  resolved: "text-green-800 dark:text-green-300",
 };
 
 function SeverityIcon({ severity }: { severity: IncidentSeverity }) {
@@ -617,7 +617,7 @@ export default function CompactAlertList({
             <button
               type="button"
               onClick={handleBulkDismiss}
-              className="px-3 py-1.5 text-xs rounded-md border border-red-700/50 text-red-400 hover:bg-red-900/20 transition-colors"
+              className="px-3 py-1.5 text-xs rounded-md border border-red-700/50 text-red-700 dark:text-red-300 hover:bg-red-900/20 transition-colors"
             >
               Dismiss
             </button>
@@ -725,7 +725,7 @@ export default function CompactAlertList({
         {/* Error state */}
         {error && !isLoading && (
           <div className="p-6 text-center">
-            <p className="text-sm text-red-400">
+            <p className="text-sm text-red-700 dark:text-red-300">
               Failed to load alerts. Please try again.
             </p>
           </div>
