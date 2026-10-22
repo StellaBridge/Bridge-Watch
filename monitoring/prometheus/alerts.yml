@@ -71,3 +71,17 @@ groups:
             A circuit breaker tripped within the last 5 minutes (reason:
             {{ $labels.reason }}); bridge operations through it are halted.
           runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#circuitbreakertripped"
+
+      - alert: DatabaseMigrationsPending
+        expr: max by (migration) (db_pending_migrations_count) == 1
+        for: 15m
+        labels:
+          severity: warning
+          service: backend
+          team: bridge
+        annotations:
+          summary: "Pending database migration: {{ $labels.migration }}"
+          description: >
+            Migration {{ $labels.migration }} has been pending for more than 15
+            minutes, which may indicate a failed or incomplete deployment.
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#databasemigrationspending"

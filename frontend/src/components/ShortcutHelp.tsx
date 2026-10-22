@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { SHORTCUTS, type ShortcutDefinition } from "../hooks/useKeyboardShortcuts";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 interface ShortcutHelpProps {
   isOpen: boolean;
@@ -23,22 +24,11 @@ function formatKey(def: ShortcutDefinition): string {
 const CATEGORIES = ["Navigation", "Actions", "UI"] as const;
 
 export default function ShortcutHelp({ isOpen, onClose }: ShortcutHelpProps) {
-  const overlayRef = useRef<HTMLDivElement>(null);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!isOpen) return;
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [isOpen, onClose]);
-
-  // Focus trap: keep focus inside modal while open
-  useEffect(() => {
-    if (isOpen) overlayRef.current?.focus();
-  }, [isOpen]);
+  const overlayRef = useFocusTrap({
+    isActive: isOpen,
+    onEscape: onClose,
+    returnFocusOnDeactivate: true,
+  });
 
   if (!isOpen) return null;
 
@@ -58,8 +48,7 @@ export default function ShortcutHelp({ isOpen, onClose }: ShortcutHelpProps) {
 
       {/* Panel */}
       <div
-        ref={overlayRef}
-        tabIndex={-1}
+        ref={overlayRef as React.RefObject<HTMLDivElement>}
         className="relative w-full max-w-lg mx-4 rounded-xl border border-stellar-border bg-stellar-card shadow-2xl focus:outline-none overflow-hidden"
       >
         {/* Header */}

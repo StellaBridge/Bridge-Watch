@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import CopyButton from "../CopyButton";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface DashboardSharingModalProps {
   open: boolean;
@@ -20,6 +21,12 @@ export default function DashboardSharingModal({
 }: DashboardSharingModalProps) {
   const [expiration, setExpiration] = useState("30d");
   const [includeReadonly, setIncludeReadonly] = useState(true);
+
+  const contentRef = useFocusTrap({
+    isActive: open,
+    onEscape: onClose,
+    returnFocusOnDeactivate: true,
+  });
 
   const shareUrl = useMemo(() => {
     const url = new URL(currentUrl);
@@ -43,6 +50,7 @@ export default function DashboardSharingModal({
         className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
       />
       <div
+        ref={contentRef as React.RefObject<HTMLDivElement>}
         role="dialog"
         aria-modal="true"
         aria-labelledby="dashboard-share-title"

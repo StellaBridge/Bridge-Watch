@@ -11,6 +11,15 @@ const connection = factory.getBullMQConnection();
 export const QUEUE_NAME = "bridge-watch-jobs";
 export type Priority = "critical" | "high" | "medium" | "low";
 
+// Queue concurrency configuration - loaded from config with env var fallbacks
+const QUEUE_CONCURRENCY_CONFIG = {
+  bridgeTransaction: config.QUEUE_CONCURRENCY_BRIDGE_TRANSACTION,
+  priceAggregator: config.QUEUE_CONCURRENCY_PRICE_AGGREGATOR,
+  analyticsAggregation: config.QUEUE_CONCURRENCY_ANALYTICS_AGGREGATION,
+  webhookDelivery: config.QUEUE_CONCURRENCY_WEBHOOK_DELIVERY,
+  default: config.QUEUE_CONCURRENCY_DEFAULT,
+};
+
 const LANE_CONCURRENCY: Record<Priority, number> = {
   critical: 5,
   high: 4,
@@ -55,6 +64,64 @@ export class JobQueue {
   private queueForPriority(priority?: Priority) {
     const p: Priority = priority || "medium";
     return this.queues[`${QUEUE_NAME}-${p}`];
+  }
+
+  /**
+   * Get or create a specific named queue with its configured concurrency.
+   * Used for specialized queues like bridgeTransaction, priceAggregator, etc.
+   */
+  private getOrCreateNamedQueue(queueType: keyof typeof QUEUE_CONCURRENCY_CONFIG): Queue {
+    const qname = `${QUEUE_NAME}-${queueType}`;
+    if (!this.queues[qname]) {
+      const concurrency = QUEUE_CONCURRENCY_CONFIG[queueType] ?? QUEUE_CONCURRENCY_CONFIG.default;
+      const retryPolicy = retryPolicyService.getPolicy({ operation: "queue:default" });
+
+      this.queues[qname] = new Queue(qname, {
+        connection,
+        defaultJobOptions: {
+          attempts: retryPolicy.maxRetries + 1,
+          backoff: retryPolicyService.getBullMQBackoff({ operation: "queue:default" }),
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      } as any);
+
+      logger.info({ queue: qname, concurrency }, "Created specialized queue");
+    }
+    return this.queues[qname];
+  }
+
+  /**
+   * Get a specialized queue by type (bridgeTransaction, priceAggregator, analyticsAggregation, webhookDelivery).
+   */
+  public getSpecializedQueue(queueType: keyof typeof QUEUE_CONCURRENCY_CONFIG): Queue {
+    return this.getOrCreateNamedQueue(queueType);
+  }
+
+  /**
+   * Initialize a worker for a specialized queue with its configured concurrency.
+   */
+  public initSpecializedWorker(
+    queueType: keyof typeof QUEUE_CONCURRENCY_CONFIG,
+    processor: (job: Job) => Promise<void>,
+  ): Worker {
+    const queue = this.getOrCreateNamedQueue(queueType);
+    const concurrency = QUEUE_CONCURRENCY_CONFIG[queueType] ?? QUEUE_CONCURRENCY_CONFIG.default;
+
+    const worker = new Worker(queue.name, async (job) => processor(job), {
+      connection,
+      concurrency,
+    });
+
+    worker.on("completed", (job: Job) => {
+      logger.info({ jobId: job.id, jobName: job.name, queue: queueType }, "Specialized job completed");
+    });
+
+    worker.on("failed", (job: Job | undefined, err: Error) => {
+      logger.error({ jobId: job?.id, jobName: job?.name, queue: queueType, error: err.message }, "Specialized job failed");
+    });
+
+    return worker;
   }
 
   public async addJob(name: string, data: unknown, options: Record<string, any> = {}) {
@@ -141,6 +208,44 @@ export class JobQueue {
       counts[k] = await this.queues[k].getJobCounts();
     }
     return counts;
+  }
+
+  /**
+   * Get queue concurrency configuration for monitoring/metrics.
+   * Returns both the configured concurrency and current job counts.
+   */
+  public async getQueueConcurrencyMetrics() {
+    const metrics: Record<string, { concurrency: number; counts: any }> = {};
+    const keys = Object.keys(this.queues);
+
+    for (const k of keys) {
+      const queue = this.queues[k];
+      // Determine concurrency based on queue name
+      let concurrency = LANE_CONCURRENCY.medium; // default
+
+      // Check if it's a priority lane queue
+      for (const p of ["critical", "high", "medium", "low"] as Priority[]) {
+        if (k === `${QUEUE_NAME}-${p}`) {
+          concurrency = LANE_CONCURRENCY[p];
+          break;
+        }
+      }
+
+      // Check if it's a specialized queue
+      for (const qType of Object.keys(QUEUE_CONCURRENCY_CONFIG) as Array<keyof typeof QUEUE_CONCURRENCY_CONFIG>) {
+        if (k === `${QUEUE_NAME}-${qType}`) {
+          concurrency = QUEUE_CONCURRENCY_CONFIG[qType];
+          break;
+        }
+      }
+
+      metrics[k] = {
+        concurrency,
+        counts: await queue.getJobCounts(),
+      };
+    }
+
+    return metrics;
   }
 
   public async getFailedJobs() {

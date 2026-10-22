@@ -12,6 +12,7 @@ import {
   RecentSearches,
   EmptyState,
 } from "./SearchResults";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -43,6 +44,12 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  const modalRef = useFocusTrap({
+    isActive: isOpen,
+    onEscape: onClose,
+    returnFocusOnDeactivate: true,
+  });
 
   // Flat ordered list of items visible right now (used for keyboard nav)
   const flatItems = useMemo<SearchResult[]>(() => {
@@ -139,6 +146,7 @@ export default function SearchModal({ isOpen, onClose }: SearchModalProps) {
 
       {/* Modal panel */}
       <div
+        ref={modalRef as React.RefObject<HTMLDivElement>}
         className="relative w-full max-w-xl bg-stellar-card border border-stellar-border rounded-xl shadow-2xl overflow-hidden"
         onKeyDown={handleKeyDown}
       >

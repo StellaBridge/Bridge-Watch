@@ -22,6 +22,7 @@ class MetricsService {
   public dbConnectionsIdle: Gauge;
   public dbQueriesTotal: Counter;
   public dbQueryErrors: Counter;
+  public dbPendingMigrationsCount: Gauge;
 
   // Queue Metrics
   public queueJobsActive: Gauge;
@@ -217,6 +218,14 @@ class MetricsService {
       name: "db_query_errors_total",
       help: "Total number of database query errors",
       labelNames: ["operation", "table", "error_type"],
+      registers: [this.registry],
+    });
+
+    // Set to 1 per currently-pending migration, labeled by name (#1426).
+    this.dbPendingMigrationsCount = new Gauge({
+      name: "db_pending_migrations_count",
+      help: "Set to 1 per pending database migration, labeled by migration name",
+      labelNames: ["migration"],
       registers: [this.registry],
     });
 

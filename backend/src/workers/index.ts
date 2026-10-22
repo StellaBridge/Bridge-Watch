@@ -216,4 +216,45 @@ export async function initJobSystem() {
   await scheduleEvmReserveAttestations();
 
   logger.info("Scheduled job system initialized");
+
+  // Graceful shutdown handling
+  const shutdownTimeoutMs = 30_000; // 30 second max drain timeout
+
+  async function gracefulShutdown(signal: string) {
+    logger.info({ signal }, "Received shutdown signal, starting graceful shutdown");
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Shutdown timeout exceeded")), shutdownTimeoutMs);
+    });
+
+    try {
+      // Close BullMQ worker to finish in-flight jobs
+      await Promise.race([
+        jobQueue.close(),
+        timeoutPromise,
+      ]);
+      logger.info("Job queue closed gracefully");
+    } catch (error) {
+      logger.error({ error }, "Error during graceful shutdown, forcing exit");
+      process.exit(1);
+    }
+
+    process.exit(0);
+  }
+
+  // Register signal handlers
+  ["SIGTERM", "SIGINT"].forEach((signal) => {
+    process.on(signal, () => gracefulShutdown(signal));
+  });
+
+  // Handle uncaught exceptions
+  process.on("uncaughtException", (error) => {
+    logger.error({ error }, "Uncaught exception, initiating graceful shutdown");
+    gracefulShutdown("uncaughtException");
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    logger.error({ reason }, "Unhandled rejection, initiating graceful shutdown");
+    gracefulShutdown("unhandledRejection");
+  };
 }

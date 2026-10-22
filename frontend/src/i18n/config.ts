@@ -16,6 +16,8 @@ import zhTranslations from "./locales/zh.json";
 import jaTranslations from "./locales/ja.json";
 import koTranslations from "./locales/ko.json";
 import arTranslations from "./locales/ar.json";
+import heTranslations from "./locales/he.json";
+import faTranslations from "./locales/fa.json";
 
 export const SUPPORTED_LANGUAGES = [
   { code: "en", name: "English", nativeName: "English" },
@@ -26,6 +28,8 @@ export const SUPPORTED_LANGUAGES = [
   { code: "ja", name: "Japanese", nativeName: "日本語" },
   { code: "ko", name: "Korean", nativeName: "한국어" },
   { code: "ar", name: "Arabic", nativeName: "العربية", rtl: true },
+  { code: "he", name: "Hebrew", nativeName: "עברית", rtl: true },
+  { code: "fa", name: "Persian", nativeName: "فارسی", rtl: true },
 ] as const;
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]["code"];
@@ -39,6 +43,8 @@ export const LOCALE_RESOURCES = {
   ja: { translation: jaTranslations },
   ko: { translation: koTranslations },
   ar: { translation: arTranslations },
+  he: { translation: heTranslations },
+  fa: { translation: faTranslations },
 } as const;
 
 i18n

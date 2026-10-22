@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssetWithHealth, Bridge, ExportFormat, ExportDataType, ExportRecord } from "../types";
 import { requestExport, getExportStatus, generateExportDownloadLink } from "../services/api";
 import { useLocalStorageState } from "../hooks/useLocalStorageState";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 const STORAGE_KEY = "bridge-watch.export-picker.v1";
 
@@ -96,6 +97,12 @@ export default function ExportPickerDialog({
     error: null,
   });
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const contentRef = useFocusTrap({
+    isActive: open,
+    onEscape: onClose,
+    returnFocusOnDeactivate: true,
+  });
 
   const selectedAssetLabels = useMemo(() => {
     const assets = new Set(preferences.assetCodes);
@@ -310,8 +317,15 @@ export default function ExportPickerDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6">
-      <div role="dialog" aria-modal="true" aria-labelledby="export-dialog-title" aria-describedby="export-dialog-desc" className="relative mx-auto w-full max-w-4xl rounded-3xl border border-stellar-border bg-stellar-card shadow-2xl">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 px-4 py-6" role="presentation">
+      <div
+        ref={contentRef as React.RefObject<HTMLDivElement>}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-dialog-title"
+        aria-describedby="export-dialog-desc"
+        className="relative mx-auto w-full max-w-4xl rounded-3xl border border-stellar-border bg-stellar-card shadow-2xl"
+      >
         <div className="flex flex-col gap-6 p-6 lg:p-8">
           <div className="flex items-start justify-between gap-4">
             <div>

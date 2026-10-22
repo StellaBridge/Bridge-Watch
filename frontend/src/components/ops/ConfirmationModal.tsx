@@ -1,4 +1,5 @@
 import React from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface ConfirmationModalProps {
   open: boolean;
@@ -19,6 +20,12 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
 }) => {
   const [input, setInput] = React.useState("");
 
+  const contentRef = useFocusTrap({
+    isActive: open,
+    onEscape: onCancel,
+    returnFocusOnDeactivate: true,
+  });
+
   React.useEffect(() => {
     if (!open) setInput("");
   }, [open]);
@@ -29,9 +36,15 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   const canConfirm = phraseRequired ? input === confirmationPhrase : true;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-2xl p-6 bg-white dark:bg-slate-800 rounded shadow-lg">
-        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="presentation">
+      <div
+        ref={contentRef as React.RefObject<HTMLDivElement>}
+        className="w-full max-w-2xl p-6 bg-white dark:bg-slate-800 rounded shadow-lg"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-title"
+      >
+        <h3 id="confirmation-title" className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>
         {description && <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{description}</p>}
 
         {phraseRequired && (

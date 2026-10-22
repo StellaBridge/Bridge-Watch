@@ -1,0 +1,108 @@
+{
+  "common": {
+    "loading": "در حال بارگذاری...",
+    "error": "خطا",
+    "success": "موفقیت",
+    "cancel": "لغو",
+    "save": "ذخیره",
+    "delete": "حذف",
+    "edit": "ویرایش",
+    "close": "بستن",
+    "search": "جستجو",
+    "filter": "فیلتر",
+    "export": "صادرات",
+    "refresh": "به‌روزرسانی",
+    "viewMore": "مشاهده بیشتر",
+    "backToTop": "بازگشت به بالا"
+  },
+  "nav": {
+    "dashboard": "داشبورد",
+    "assets": "دارایی‌ها",
+    "bridges": "پل‌ها",
+    "analytics": "تحلیل‌ها",
+    "alerts": "هشدارها",
+    "settings": "تنظیمات",
+    "docs": "مستندات"
+  },
+  "dashboard": {
+    "title": "داشبورد",
+    "welcome": "به Stellar Bridge Watch خوش آمدید",
+    "assetOverview": "نمای کلی دارایی‌ها",
+    "bridgeStatus": "وضعیت پل‌ها",
+    "recentAlerts": "هشدارهای اخیر",
+    "priceCharts": "نمودارهای قیمت"
+  },
+  "assets": {
+    "title": "دارایی‌ها",
+    "healthScore": "امتیاز سلامت",
+    "price": "قیمت",
+    "liquidity": "نقدشوندگی",
+    "volume24h": "حجم ۲۴ ساعته",
+    "change24h": "تغییر ۲۴ ساعته",
+    "marketCap": "ارزش بازار",
+    "viewDetails": "مشاهده جزئیات"
+  },
+  "bridges": {
+    "title": "پل‌ها",
+    "status": "وضعیت",
+    "tvl": "مجموع ارزش قفل‌شده",
+    "supplyOnStellar": "ارائه در استلر",
+    "supplyOnSource": "ارائه در مبدا",
+    "mismatch": "ناسازگاری",
+    "lastVerified": "آخرین تایید",
+    "viewDetails": "مشاهده جزئیات"
+  },
+  "analytics": {
+    "title": "تحلیل‌ها",
+    "priceHistory": "تاریخچه قیمت",
+    "volumeHistory": "تاریخچه حجم",
+    "liquidityDepth": "عمق نقدشوندگی",
+    "timeRange": "بازه زمانی",
+    "exportData": "صادرات داده‌ها"
+  },
+  "alerts": {
+    "title": "هشدارها",
+    "configure": "پیکربندی هشدارها",
+    "enabled": "فعال",
+    "disabled": "غیرفعال",
+    "createRule": "ایجاد قانون",
+    "editRule": "ویرایش قانون",
+    "deleteRule": "حذف قانون",
+    "simulate": "شبیه‌سازی"
+  },
+  "settings": {
+    "title": "تنظیمات",
+    "language": "زبان",
+    "theme": "موضوع",
+    "notifications": "اعلان‌ها",
+    "apiKeys": "کلیدهای API",
+    "account": "حساب کاربری"
+  },
+  "alertsConfig": {
+    "title": "پیکربندی هشدارها",
+    "addRule": "افزودن قانون هشدار",
+    "ruleName": "نام قانون",
+    "condition": "شرط",
+    "threshold": "آستانه",
+    "notificationChannel": "کانال اعلان",
+    "save": "ذخیره قانون",
+    "cancel": "لغو"
+  },
+  "language": {
+    "select": "انتخاب زبان",
+    "current": "زبان فعلی"
+  },
+  "theme": {
+    "light": "روشن",
+    "dark": "تیره",
+    "system": "سیستم",
+    "highContrast": "تناقض بالا"
+  },
+  "errors": {
+    "generic": "خطایی رخ داد",
+    "network": "خطای شبکه",
+    "unauthorized": "غیرمجاز",
+    "notFound": "یافت نشد",
+    "serverError": "خطای سرور"
+  }
+}

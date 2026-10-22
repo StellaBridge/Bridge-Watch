@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 interface SessionTimeoutModalProps {
   isOpen: boolean;
@@ -19,6 +20,12 @@ export function SessionTimeoutModal({
   onLogout,
 }: SessionTimeoutModalProps) {
   const [secondsRemaining, setSecondsRemaining] = useState(timeoutSeconds);
+
+  const contentRef = useFocusTrap({
+    isActive: isOpen,
+    onEscape: onExtendSession,
+    returnFocusOnDeactivate: true,
+  });
 
   useEffect(() => {
     if (!isOpen) {
@@ -56,12 +63,16 @@ export function SessionTimeoutModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="session-timeout-title"
-      aria-describedby="session-timeout-description"
+      role="presentation"
     >
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+      <div
+        ref={contentRef as React.RefObject<HTMLDivElement>}
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full mx-4 p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-timeout-title"
+        aria-describedby="session-timeout-description"
+      >
         {/* Icon */}
         <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
           <svg

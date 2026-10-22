@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 type OnboardingStep = {
   title: string;
@@ -14,7 +15,12 @@ type Props = {
 
 export default function OnboardingDialog({ open, onClose, onComplete }: Props) {
   const [stepIndex, setStepIndex] = useState(0);
-  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const contentRef = useFocusTrap({
+    isActive: open,
+    onEscape: onClose,
+    returnFocusOnDeactivate: true,
+  });
 
   const steps: OnboardingStep[] = useMemo(
     () => [
@@ -82,26 +88,16 @@ export default function OnboardingDialog({ open, onClose, onComplete }: Props) {
     setStepIndex(0);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-
-    closeBtnRef.current?.focus();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   const isLast = stepIndex === steps.length - 1;
   const step = steps[stepIndex];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation">
       <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
       <div
+        ref={contentRef as React.RefObject<HTMLDivElement>}
         className="relative w-full max-w-lg bg-stellar-card border border-stellar-border rounded-lg shadow-xl"
         role="dialog"
         aria-modal="true"
@@ -119,7 +115,6 @@ export default function OnboardingDialog({ open, onClose, onComplete }: Props) {
               </p>
             </div>
             <button
-              ref={closeBtnRef}
               type="button"
               onClick={onClose}
               className="rounded-md px-2 py-1 text-sm text-stellar-text-secondary hover:text-stellar-text-primary focus:outline-none focus:ring-2 focus:ring-stellar-blue"

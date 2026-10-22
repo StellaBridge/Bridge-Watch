@@ -1,0 +1,108 @@
+{
+  "common": {
+    "loading": "טוען...",
+    "error": "שגיאה",
+    "success": "הצלחה",
+    "cancel": "ביטול",
+    "save": "שמור",
+    "delete": "מחק",
+    "edit": "ערוך",
+    "close": "סגור",
+    "search": "חיפוש",
+    "filter": "סנן",
+    "export": "ייצוא",
+    "refresh": "רענן",
+    "viewMore": "צפה עוד",
+    "backToTop": "חזור לראש הדף"
+  },
+  "nav": {
+    "dashboard": "לוח בקרה",
+    "assets": "נכסים",
+    "bridges": "גשרים",
+    "analytics": "אנליטיקה",
+    "alerts": "התראות",
+    "settings": "הגדרות",
+    "docs": "תיעוד"
+  },
+  "dashboard": {
+    "title": "לוח בקרה",
+    "welcome": "ברוכים הבאים ל-Stellar Bridge Watch",
+    "assetOverview": "סקירת נכסים",
+    "bridgeStatus": "מצב גשרים",
+    "recentAlerts": "התראות אחרונות",
+    "priceCharts": "תרשימי מחירים"
+  },
+  "assets": {
+    "title": "נכסים",
+    "healthScore": "ציון בריאות",
+    "price": "מחיר",
+    "liquidity": "נזילות",
+    "volume24h": "נפח 24 שעות",
+    "change24h": "שינוי 24 שעות",
+    "marketCap": "שווי שוק",
+    "viewDetails": "צפה בפרטים"
+  },
+  "bridges": {
+    "title": "גשרים",
+    "status": "סטטוס",
+    "tvl": "סך ערך נעול",
+    "supplyOnStellar": "היצע בסטלר",
+    "supplyOnSource": "היצע במקור",
+    "mismatch": "אי התאמה",
+    "lastVerified": "אומת לאחרונה",
+    "viewDetails": "צפה בפרטים"
+  },
+  "analytics": {
+    "title": "אנליטיקה",
+    "priceHistory": "היסטוריית מחירים",
+    "volumeHistory": "היסטוריית נפח",
+    "liquidityDepth": "עומק נזילות",
+    "timeRange": "טווח זמן",
+    "exportData": "ייצוא נתונים"
+  },
+  "alerts": {
+    "title": "התראות",
+    "configure": "הגדר התראות",
+    "enabled": "מופעל",
+    "disabled": "מושבת",
+    "createRule": "צור כלל",
+    "editRule": "ערוך כלל",
+    "deleteRule": "מחק כלל",
+    "simulate": "סימולציה"
+  },
+  "settings": {
+    "title": "הגדרות",
+    "language": "שפה",
+    "theme": "ערכת נושא",
+    "notifications": "התראות",
+    "apiKeys": "מפתחות API",
+    "account": "חשבון"
+  },
+  "alertsConfig": {
+    "title": "הגדרת התראות",
+    "addRule": "הוסף כלל התראה",
+    "ruleName": "שם הכלל",
+    "condition": "תנאי",
+    "threshold": "סף",
+    "notificationChannel": "ערוץ התראה",
+    "save": "שמור כלל",
+    "cancel": "ביטול"
+  },
+  "language": {
+    "select": "בחר שפה",
+    "current": "שפה נוכחית"
+  },
+  "theme": {
+    "light": "בהיר",
+    "dark": "כהה",
+    "system": "מערכת",
+    "highContrast": "ניגודיות גבוהה"
+  },
+  "errors": {
+    "generic": "אירעה שגיאה",
+    "network": "שגיאת רשת",
+    "unauthorized": "לא מורשה",
+    "notFound": "לא נמצא",
+    "serverError": "שגיאת שרת"
+  }
+}

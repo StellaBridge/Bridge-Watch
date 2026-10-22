@@ -235,6 +235,106 @@ soroban contract invoke \
 - **Deployment fails:** Check container health with `docker logs bridge-watch-soroban-sandbox`
 - **Reset state:** Run `npm run sandbox:reset` to start fresh
 
+## Docker Development Environment
+
+The project includes a comprehensive Docker Compose configuration for local development with all services pre-configured with health checks and data persistence.
+
+### Architecture
+
+The development stack includes:
+- **PostgreSQL + TimescaleDB** — Primary database with health checks (`pg_isready`) and named volume persistence
+- **Redis** — Caching layer with health checks (`redis-cli ping`) and data persistence
+- **Backend** — Node.js/TypeScript API with hot reload, depends on healthy PostgreSQL and Redis
+- **Frontend** — Vite/React with HMR, depends on backend
+- **PgAdmin 4** — Database management UI at `http://localhost:5050`
+- **Redis Commander** — Redis management UI at `http://localhost:8081`
+
+### Quick Start with Docker
+
+```bash
+# Start all services in background
+docker compose -f docker-compose.dev.yml up -d
+
+# View logs for all services
+docker compose -f docker-compose.dev.yml logs -f
+
+# View logs for specific service
+docker compose -f docker-compose.dev.yml logs -f backend
+
+# Check service health status
+docker compose -f docker-compose.dev.yml ps
+
+# Stop and remove containers (preserves volumes)
+docker compose -f docker-compose.dev.yml down
+
+# Stop and remove containers + volumes (full reset)
+docker compose -f docker-compose.dev.yml down -v
+```
+
+### Service URLs
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Frontend | http://localhost:5173 | Vite dev server with HMR |
+| Backend API | http://localhost:3001 | REST API & WebSocket |
+| Backend Health | http://localhost:3001/health | Health check endpoint |
+| PgAdmin 4 | http://localhost:5050 | Database management UI |
+| Redis Commander | http://localhost:8081 | Redis management UI |
+| PostgreSQL | localhost:5432 | Direct database access |
+| Redis | localhost:6379 | Direct Redis access |
+
+### Health Checks
+
+All services include health checks:
+- **PostgreSQL**: `pg_isready` every 10s
+- **Redis**: `redis-cli ping` every 10s
+- **Backend**: `wget` to `/health` every 30s
+- **Frontend**: `wget` to root every 30s
+- **PgAdmin**: `wget` to `/misc/ping` every 30s
+- **Redis Commander**: `wget` to root every 30s
+
+Services use `depends_on` with `condition: service_healthy` to ensure proper startup order.
+
+### Data Persistence
+
+Named volumes ensure data survives container restarts:
+- `postgres_data` — PostgreSQL data directory
+- `redis_data` — Redis data directory
+- `pgadmin_data` — PgAdmin configuration
+- `backend_node_modules` — Isolated node_modules for hot reload
+- `frontend_node_modules` — Isolated node_modules for hot reload
+
+To reset all data: `docker compose -f docker-compose.dev.yml down -v`
+
+### Using Make Commands
+
+```bash
+make dev        # Start development environment (docker compose up -d)
+make dev-logs   # View all logs
+make dev-down   # Stop containers (preserves volumes)
+make dev-clean  # Stop and remove everything including volumes
+```
+
+### Environment Variables
+
+Create a `.env` file from the example:
+
+```bash
+cp .env.example .env
+```
+
+Key variables for Docker:
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` — Database credentials
+- `POSTGRES_PORT` — Database port (default: 5432)
+- `REDIS_PORT` — Redis port (default: 6379)
+- `PORT` — Backend port (default: 3001)
+- `WS_PORT` — WebSocket port (default: 3002)
+- `FRONTEND_PORT` — Frontend port (default: 5173)
+- `PGADMIN_EMAIL`, `PGADMIN_PASSWORD` — PgAdmin credentials
+- `REDIS_PASSWORD` — Redis password (optional)
+- `REDIS_COMMANDER_USER`, `REDIS_COMMANDER_PASSWORD` — Redis Commander credentials
+
+See `.env.example` for all available options.
 
 ## API Endpoints (MVP)
 

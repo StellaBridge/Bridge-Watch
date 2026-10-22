@@ -19,58 +19,58 @@ export function useAssetDetail(symbol: string) {
 
   const assetInfo = useQuery({
     queryKey: ["asset-info", symbol],
-    queryFn: () => getAssetInfo(symbol),
+    queryFn: ({ signal }) => getAssetInfo(symbol, signal),
     enabled: !!symbol,
   });
 
   const health = useQuery({
     queryKey: ["asset-health", symbol],
-    queryFn: () => getAssetHealth(symbol),
+    queryFn: ({ signal }) => getAssetHealth(symbol, signal),
     enabled: !!symbol,
     refetchInterval: 30_000,
   });
 
   const priceHistory = useQuery({
     queryKey: ["asset-price-history", symbol, timeframe],
-    queryFn: () => getAssetPriceHistory(symbol, timeframe),
+    queryFn: ({ signal }) => getAssetPriceHistory(symbol, timeframe, signal),
     enabled: !!symbol,
   });
 
   const priceSources = useQuery({
     queryKey: ["asset-price-sources", symbol],
-    queryFn: () => getAssetPriceSources(symbol),
+    queryFn: ({ signal }) => getAssetPriceSources(symbol, signal),
     enabled: !!symbol,
     refetchInterval: 30_000,
   });
 
   const liquidity = useQuery({
     queryKey: ["asset-liquidity-sources", symbol],
-    queryFn: () => getAssetLiquiditySources(symbol),
+    queryFn: ({ signal }) => getAssetLiquiditySources(symbol, signal),
     enabled: !!symbol,
   });
 
   const volume = useQuery({
     queryKey: ["asset-volume", symbol],
-    queryFn: () => getAssetVolume(symbol),
+    queryFn: ({ signal }) => getAssetVolume(symbol, signal),
     enabled: !!symbol,
   });
 
   const supply = useQuery({
     queryKey: ["asset-supply", symbol],
-    queryFn: () => getAssetSupplyVerification(symbol),
+    queryFn: ({ signal }) => getAssetSupplyVerification(symbol, signal),
     enabled: !!symbol,
     refetchInterval: 60_000,
   });
 
   const healthHistory = useQuery({
     queryKey: ["asset-health-history", symbol],
-    queryFn: () => getAssetHealthHistory(symbol),
+    queryFn: ({ signal }) => getAssetHealthHistory(symbol, "7d", signal),
     enabled: !!symbol,
   });
 
   const alerts = useQuery({
     queryKey: ["asset-alerts", symbol],
-    queryFn: () => getAssetAlerts(symbol),
+    queryFn: ({ signal }) => getAssetAlerts(symbol, signal),
     enabled: !!symbol,
   });
 

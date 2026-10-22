@@ -84,7 +84,9 @@ const envSchema = z.object({
   JWT_SECRET: z.string().optional(),
   JWT_ISSUER: z.string().default("bridge-watch-api"),
   JWT_AUDIENCE: z.string().default("bridge-watch-api"),
-  JWT_TTL_SECONDS: z.coerce.number().default(3600),
+  JWT_TTL_SECONDS: z.coerce.number().default(3600), // 1 hour access token TTL
+  JWT_REFRESH_TTL_SECONDS: z.coerce.number().default(604800), // 7 days refresh token TTL
+  JWT_REFRESH_ROTATION: z.coerce.boolean().default(true), // Rotate refresh token on use
 
   // Logging
   LOG_LEVEL: z
@@ -98,6 +100,11 @@ const envSchema = z.object({
   LOG_RESPONSE_BODY: z.coerce.boolean().default(false),
   LOG_SENSITIVE_DATA: z.coerce.boolean().default(false),
   REQUEST_SLOW_THRESHOLD_MS: z.coerce.number().default(1000),
+
+  // Body size limits (in bytes)
+  BODY_LIMIT_DEFAULT: z.coerce.number().default(1048576), // 1MB default
+  BODY_LIMIT_UPLOAD: z.coerce.number().default(10485760), // 10MB for uploads
+  BODY_LIMIT_BULK_IMPORT: z.coerce.number().default(52428800), // 50MB for bulk imports
 
   // Rate Limiting
   RATE_LIMIT_MAX: z.coerce.number().default(100),
@@ -182,6 +189,17 @@ const envSchema = z.object({
   EXPORT_QUEUE_CONCURRENCY: z.coerce.number().default(3),
   EXPORT_MAX_DATE_RANGE_DAYS: z.coerce.number().default(90),
   EXPORT_STREAMING_MAX_ROWS: z.coerce.number().default(0),
+
+  // Worker Queue Concurrency Configuration
+  // High-throughput queues
+  QUEUE_CONCURRENCY_BRIDGE_TRANSACTION: z.coerce.number().default(10),
+  QUEUE_CONCURRENCY_PRICE_AGGREGATOR: z.coerce.number().default(10),
+  // CPU-intensive queues
+  QUEUE_CONCURRENCY_ANALYTICS_AGGREGATION: z.coerce.number().default(2),
+  // I/O-bound queues
+  QUEUE_CONCURRENCY_WEBHOOK_DELIVERY: z.coerce.number().default(20),
+  // Default for other queues
+  QUEUE_CONCURRENCY_DEFAULT: z.coerce.number().default(5),
 
   // Email Configuration
   SMTP_HOST: z.string().optional(),

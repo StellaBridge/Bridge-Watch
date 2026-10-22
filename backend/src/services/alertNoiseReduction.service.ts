@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { database } from "../database/index.js";
+import { getDatabase } from "../database/connection.js";
 import { logger } from "../utils/logger.js";
 
 export interface AlertNoiseAnalysisParams {

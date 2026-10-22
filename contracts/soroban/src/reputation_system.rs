@@ -1616,6 +1616,33 @@ mod tests {
         assert_eq!(slash.penalty_amount, 1_000);
     }
 
+    #[test]
+    fn test_penalty_deducts_slashing_percentage_of_amount() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::OracleNode);
+
+        // Default slashing_percentage is 10, so a 500 penalty costs 50 points.
+        client.apply_penalty(&entity, &500, &String::from_str(&env, "late report"));
+
+        let rep = client.get_reputation(&entity).expect("reputation exists");
+        assert_eq!(rep.overall_score, 7_450);
+        assert_eq!(rep.total_penalties, 500);
+    }
+
+    #[test]
+    fn test_penalty_floors_score_at_zero() {
+        let (env, client, _admin) = setup();
+        let entity = registered(&env, &client, EntityType::RelayOperator);
+
+        // 10% of 100_000 is 10_000 points, more than the 7_500 starting score.
+        client.apply_penalty(&entity, &100_000, &String::from_str(&env, "fraud"));
+
+        let rep = client.get_reputation(&entity).expect("reputation exists");
+        assert_eq!(rep.overall_score, 0);
+        assert!(rep.is_slashed);
+        assert_eq!(client.get_last_slash(&entity).unwrap().previous_score, 7_500);
+    }
+
     /// Windows in the ledger-day range outlive the test environment's
     /// persistent-entry TTL, so these tests run the same logic with a short
     /// configured window; the defaults are pinned separately.

@@ -4,6 +4,7 @@ import Layout from "./components/Layout";
 import { LoadingFallback } from "./components/LoadingFallback";
 import { GlobalErrorBoundary, ComponentErrorBoundary } from "./components/ErrorBoundary";
 import { NotificationProvider } from "./context/NotificationContext";
+import { RTLProvider } from "./contexts/RTLContext";
 import { useNotifications } from "./hooks/useNotifications";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -133,10 +134,11 @@ function PageBoundary({ page, children }: { page: string; children: ReactNode })
 function App() {
   return (
     <GlobalErrorBoundary>
-      <NotificationProvider>
-        <NotificationInitializer />
-        <Suspense fallback={<LoadingFallback />}>
-          <Routes>
+      <RTLProvider>
+        <NotificationProvider>
+          <NotificationInitializer />
+          <Suspense fallback={<LoadingFallback />}>
+            <Routes>
             <Route path="/" element={<Landing />} />
 
             <Route element={<Layout />}>
@@ -316,6 +318,7 @@ function App() {
           </Routes>
         </Suspense>
       </NotificationProvider>
+    </RTLProvider>
     </GlobalErrorBoundary>
   );
 }

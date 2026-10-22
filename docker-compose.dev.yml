@@ -3,6 +3,18 @@ version: "3.8"
 # Development environment — standalone file with hot reload and dev tools.
 # Usage:  docker compose -f docker-compose.dev.yml up
 # Or:     make dev
+#
+# This file defines the complete local development stack:
+# - PostgreSQL + TimescaleDB (with health checks and data persistence)
+# - Redis (with health checks and data persistence)
+# - Backend API (Node.js/TypeScript with hot reload)
+# - Frontend (Vite/React with HMR)
+# - PgAdmin 4 (database management UI)
+# - Redis Commander (Redis management UI)
+#
+# All databases include health checks and named volumes for data persistence.
+# Services use `depends_on` with `condition: service_healthy` to ensure
+# proper startup order and prevent connection failures.
 
 networks:
   bridge-watch:
@@ -126,6 +138,12 @@ services:
       - frontend_node_modules:/app/node_modules
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5173 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - bridge-watch
 
@@ -149,6 +167,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/misc/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - bridge-watch
 
@@ -168,6 +192,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - bridge-watch
 
