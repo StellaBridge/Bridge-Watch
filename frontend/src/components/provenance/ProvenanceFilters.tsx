@@ -35,6 +35,8 @@ export function ProvenanceFilters({
   setSelectedNodeId,
   graphData,
 }: ProvenanceFiltersProps) {
+  const freshCount = graphData?.nodes.filter((n) => n.freshness === "fresh").length ?? 0;
+  const staleCount = graphData?.nodes.filter((n) => n.freshness === "stale").length ?? 0;
 
   return (
     <section aria-label="Metric filters and selector">
@@ -113,6 +115,8 @@ export function ProvenanceFilters({
           <div className="flex flex-wrap gap-3">
             {[
               { label: "Total nodes", value: graphData.nodes.length, color: "" },
+              { label: "Fresh", value: freshCount, color: "text-green-400" },
+              { label: "Stale", value: staleCount, color: "text-yellow-400" },
               { label: "Fresh", value: graphData.nodes.filter((n) => n.freshness === "fresh").length, color: "text-green-400" },
               { label: "Stale", value: graphData.nodes.filter((n) => n.freshness === "stale").length, color: "text-yellow-400" },
               { label: "Edges", value: graphData.edges.length, color: "" },
@@ -179,12 +183,14 @@ export function ProvenanceFilters({
   );
 }
 
+const KIND_COLORS: Record<string, string> = {
 const KIND_COLORS: Record<ProvenanceNodeKind, string> = {
   source: "#818cf8",
   transform: "#f59e0b",
   destination: "#22c55e",
 };
 
+const KIND_LABEL: Record<string, string> = {
 const KIND_LABEL: Record<ProvenanceNodeKind, string> = {
   source: "Source",
   transform: "Transform",
