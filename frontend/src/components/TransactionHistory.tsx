@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTransactions } from "../hooks/useTransactions";
 import { exportTransactionsCsv } from "../services/api";
 import TransactionFiltersComponent from "./TransactionFilters";
@@ -14,6 +15,8 @@ type TransactionHistoryProps = {
   refreshInterval?: number | false;
   refreshOnWindowFocus?: boolean;
 };
+
+const ESTIMATED_ROW_HEIGHT = 64;
 
 export default function TransactionHistory({
   refreshInterval,
@@ -37,9 +40,20 @@ export default function TransactionHistory({
   });
 
   const [selectedTx, setSelectedTx] = useState<BridgeTransaction | null>(null);
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
 
   const transactions = data?.transactions ?? [];
   const total = data?.total ?? 0;
+
+  const rowVirtualizer = useVirtualizer({
+    count: transactions.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT,
+    overscan: 10,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const totalSize = rowVirtualizer.getTotalSize();
 
   function handleExport() {
     const url = exportTransactionsCsv(filters);
@@ -127,23 +141,64 @@ export default function TransactionHistory({
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {isLoading ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-6">
-                    <SkeletonTable rows={5} columns={6} ariaLabel="Loading transaction table" />
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((tx) => (
-                  <TransactionRow
-                    key={tx.id}
-                    transaction={tx}
-                    onSelect={setSelectedTx}
-                  />
-                ))
-              )}
-            </tbody>
+            <div
+              ref={tableContainerRef}
+              className="max-h-[520px] overflow-auto"
+              role="region"
+              aria-label="Transaction table content"
+            >
+              <table className="w-full text-sm">
+                <tbody className="text-stellar-text-primary">
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-6">
+                        <SkeletonTable rows={5} columns={6} ariaLabel="Loading transaction table" />
+                      </td>
+                    </tr>
+                  ) : transactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-6 text-center text-stellar-text-secondary">
+                        No transactions match your filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      {virtualItems.length > 0 && virtualItems[0].start > 0 ? (
+                        <tr>
+                          <td style={{ height: virtualItems[0].start }} colSpan={6} />
+                        </tr>
+                      ) : null}
+
+                      {virtualItems.map((virtualItem) => {
+                        const tx = transactions[virtualItem.index];
+                        if (!tx) return null;
+                        return (
+                          <TransactionRow
+                            key={tx.id}
+                            transaction={tx}
+                            onSelect={setSelectedTx}
+                          />
+                        );
+                      })}
+
+                      {virtualItems.length > 0 &&
+                      totalSize - virtualItems[virtualItems.length - 1].end > 0 ? (
+                        <tr>
+                          <td
+                            style={{
+                              height:
+                                totalSize -
+                                virtualItems[virtualItems.length - 1].end,
+                            }}
+                            colSpan={6}
+                          />
+                        </tr>
+                      ) : null}
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </table>
 
           {!isLoading && transactions.length === 0 && (
