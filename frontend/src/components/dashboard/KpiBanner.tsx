@@ -18,8 +18,8 @@ interface KpiBannerProps {
 }
 
 const trendClasses: Record<KpiTrendDirection, string> = {
-  up: "border-green-400/30 bg-green-500/10 text-green-300",
-  down: "border-red-400/30 bg-red-500/10 text-red-300",
+  up: "border-green-400/30 bg-green-500/10 text-green-800 dark:text-green-300",
+  down: "border-red-400/30 bg-red-500/10 text-red-800 dark:text-red-300",
   neutral: "border-stellar-border bg-stellar-dark/50 text-stellar-text-secondary",
 };
 

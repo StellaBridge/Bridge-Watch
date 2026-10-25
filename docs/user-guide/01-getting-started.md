@@ -62,7 +62,7 @@ When you first land on the platform, you'll see:
    - Display preferences
    - Notification settings
    - Data refresh intervals
-   - Theme (light/dark mode)
+   - Theme (light/dark mode and the high-contrast accessibility option)
 
 ## Next Steps
 

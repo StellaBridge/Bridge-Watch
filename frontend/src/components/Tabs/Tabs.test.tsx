@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
@@ -119,7 +119,7 @@ describe("Mouse interaction", () => {
   it("activates a tab on click", async () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" />);
-    await user.click(screen.getByRole("tab", { name: "Tab B" }));
+    await act(async () => user.click(screen.getByRole("tab", { name: "Tab B" })));
     expect(screen.getByRole("tab", { name: "Tab B" })).toHaveAttribute(
       "aria-selected",
       "true"
@@ -130,7 +130,7 @@ describe("Mouse interaction", () => {
   it("does not activate a disabled tab on click", async () => {
     const user = userEvent.setup();
     render(<TabsWithDisabled />);
-    await user.click(screen.getByRole("tab", { name: "Tab B" }));
+    await act(async () => user.click(screen.getByRole("tab", { name: "Tab B" })));
     expect(screen.getByRole("tab", { name: "Tab B" })).toHaveAttribute(
       "aria-selected",
       "false"
@@ -146,15 +146,24 @@ describe("Keyboard navigation — horizontal", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" />);
     screen.getByRole("tab", { name: "Tab A" }).focus();
-    await user.keyboard("{ArrowRight}");
+    await act(async () => user.keyboard("{ArrowRight}"));
     expect(screen.getByRole("tab", { name: "Tab B" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Tab B" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(screen.getByText("Panel B")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Tab A" })).toHaveAttribute(
+      "aria-selected",
+      "false"
+    );
   });
 
   it("moves focus to the previous tab with ArrowLeft", async () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="b" />);
     screen.getByRole("tab", { name: "Tab B" }).focus();
-    await user.keyboard("{ArrowLeft}");
+    await act(async () => user.keyboard("{ArrowLeft}"));
     expect(screen.getByRole("tab", { name: "Tab A" })).toHaveFocus();
   });
 
@@ -162,7 +171,7 @@ describe("Keyboard navigation — horizontal", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="c" />);
     screen.getByRole("tab", { name: "Tab C" }).focus();
-    await user.keyboard("{ArrowRight}");
+    await act(async () => user.keyboard("{ArrowRight}"));
     expect(screen.getByRole("tab", { name: "Tab A" })).toHaveFocus();
   });
 
@@ -170,7 +179,7 @@ describe("Keyboard navigation — horizontal", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" />);
     screen.getByRole("tab", { name: "Tab A" }).focus();
-    await user.keyboard("{ArrowLeft}");
+    await act(async () => user.keyboard("{ArrowLeft}"));
     expect(screen.getByRole("tab", { name: "Tab C" })).toHaveFocus();
   });
 
@@ -178,7 +187,7 @@ describe("Keyboard navigation — horizontal", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="c" />);
     screen.getByRole("tab", { name: "Tab C" }).focus();
-    await user.keyboard("{Home}");
+    await act(async () => user.keyboard("{Home}"));
     expect(screen.getByRole("tab", { name: "Tab A" })).toHaveFocus();
   });
 
@@ -186,7 +195,7 @@ describe("Keyboard navigation — horizontal", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" />);
     screen.getByRole("tab", { name: "Tab A" }).focus();
-    await user.keyboard("{End}");
+    await act(async () => user.keyboard("{End}"));
     expect(screen.getByRole("tab", { name: "Tab C" })).toHaveFocus();
   });
 });
@@ -198,7 +207,7 @@ describe("Keyboard navigation — vertical", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" orientation="vertical" />);
     screen.getByRole("tab", { name: "Tab A" }).focus();
-    await user.keyboard("{ArrowDown}");
+    await act(async () => user.keyboard("{ArrowDown}"));
     expect(screen.getByRole("tab", { name: "Tab B" })).toHaveFocus();
   });
 
@@ -206,7 +215,7 @@ describe("Keyboard navigation — vertical", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="b" orientation="vertical" />);
     screen.getByRole("tab", { name: "Tab B" }).focus();
-    await user.keyboard("{ArrowUp}");
+    await act(async () => user.keyboard("{ArrowUp}"));
     expect(screen.getByRole("tab", { name: "Tab A" })).toHaveFocus();
   });
 
@@ -214,7 +223,7 @@ describe("Keyboard navigation — vertical", () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" orientation="vertical" />);
     screen.getByRole("tab", { name: "Tab A" }).focus();
-    await user.keyboard("{ArrowRight}");
+    await act(async () => user.keyboard("{ArrowRight}"));
     // Focus should not have moved
     expect(screen.getByRole("tab", { name: "Tab A" })).toHaveFocus();
   });
@@ -227,7 +236,7 @@ describe("Disabled tab skipping", () => {
     const user = userEvent.setup();
     render(<TabsWithDisabled />);
     screen.getByRole("tab", { name: "Tab A" }).focus();
-    await user.keyboard("{ArrowRight}");
+    await act(async () => user.keyboard("{ArrowRight}"));
     // Tab B is disabled — focus should land on Tab C
     expect(screen.getByRole("tab", { name: "Tab C" })).toHaveFocus();
   });
@@ -236,7 +245,7 @@ describe("Disabled tab skipping", () => {
     const user = userEvent.setup();
     render(<TabsWithDisabled />);
     screen.getByRole("tab", { name: "Tab C" }).focus();
-    await user.keyboard("{ArrowLeft}");
+    await act(async () => user.keyboard("{ArrowLeft}"));
     // Tab B is disabled — focus should land on Tab A
     expect(screen.getByRole("tab", { name: "Tab A" })).toHaveFocus();
   });
@@ -255,7 +264,7 @@ describe("Panel visibility", () => {
   it("shows the correct panel after tab change", async () => {
     const user = userEvent.setup();
     render(<ControlledTabs defaultTab="a" />);
-    await user.click(screen.getByRole("tab", { name: "Tab C" }));
+    await act(async () => user.click(screen.getByRole("tab", { name: "Tab C" })));
     expect(screen.queryByText("Panel A")).not.toBeInTheDocument();
     expect(screen.getByText("Panel C")).toBeInTheDocument();
   });

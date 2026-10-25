@@ -151,7 +151,7 @@ export default function AlertSuppressionControls() {
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
 
       {loading ? (
         <div className="space-y-2">
@@ -177,7 +177,7 @@ export default function AlertSuppressionControls() {
                   onClick={() => void handleToggle(rule)}
                   className={`rounded px-3 py-1 text-xs font-medium ${
                     rule.isActive
-                      ? "bg-green-500/20 text-green-300 border border-green-500/40"
+                      ? "bg-green-500/20 text-green-800 dark:text-green-300 border border-green-500/40"
                       : "bg-stellar-border/40 text-stellar-text-secondary border border-stellar-border"
                   }`}
                 >

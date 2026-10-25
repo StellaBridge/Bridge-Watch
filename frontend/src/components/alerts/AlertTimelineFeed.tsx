@@ -20,9 +20,9 @@ const SEVERITY_STYLES: Record<SeverityLevel, { bg: string; border: string; icon:
 };
 
 const RESOLUTION_STYLES: Record<ResolutionStatus, string> = {
-  open: "bg-red-500/20 text-red-300 border border-red-500/50",
-  investigating: "bg-yellow-500/20 text-yellow-300 border border-yellow-500/50",
-  resolved: "bg-green-500/20 text-green-300 border border-green-500/50",
+  open: "bg-red-500/20 text-red-800 dark:text-red-300 border border-red-500/50",
+  investigating: "bg-yellow-500/20 text-yellow-800 dark:text-yellow-200 border border-yellow-500/50",
+  resolved: "bg-green-500/20 text-green-800 dark:text-green-300 border border-green-500/50",
 };
 
 function AlertCard({ incident }: { readonly incident: BridgeIncident }) {
@@ -204,7 +204,7 @@ export default function AlertTimelineFeed({
         </div>
       ) : error ? (
         <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-4">
-          <p className="text-sm text-red-300">Failed to load alerts: {error instanceof Error ? error.message : String(error)}</p>
+          <p className="text-sm text-red-800 dark:text-red-300">Failed to load alerts: {error instanceof Error ? error.message : String(error)}</p>
         </div>
       ) : filteredIncidents.length === 0 ? (
         <div className="rounded-lg border border-stellar-border bg-stellar-card/50 p-8 text-center">

@@ -15,9 +15,21 @@ interface TabsContextValue {
   setActiveTab: (id: string) => void;
   baseId: string;
   orientation: "horizontal" | "vertical";
+  activationMode: TabActivationMode;
 }
 
 const TabsContext = createContext<TabsContextValue | null>(null);
+
+/**
+ * How a tab becomes active when it is reached with the keyboard.
+ *
+ * - `automatic` (default, and what the WAI-ARIA authoring practices
+ *   recommend for tablists): moving focus with an arrow key also selects the
+ *   tab, so `aria-selected` always matches what the user is looking at.
+ * - `manual`: arrow keys only move focus; the tab is selected with
+ *   Enter/Space (or a click).
+ */
+export type TabActivationMode = "automatic" | "manual";
 
 function useTabsContext() {
   const ctx = useContext(TabsContext);
@@ -35,6 +47,11 @@ export interface TabsProps {
   children: ReactNode;
   /** Keyboard navigation orientation — defaults to horizontal */
   orientation?: "horizontal" | "vertical";
+  /**
+   * Whether moving focus with the keyboard also selects the tab.
+   * Defaults to `automatic` so `aria-selected` always reflects the focused tab.
+   */
+  activationMode?: TabActivationMode;
   className?: string;
 }
 
@@ -48,18 +65,29 @@ export interface TabsProps {
  * - Home / End jump to first / last tab
  * - Disabled tabs are skipped during keyboard navigation
  * - Each tab is linked to its panel via aria-controls / aria-labelledby
+ * - With the default `automatic` activation the focused tab is also selected,
+ *   so `aria-selected` and the visible panel never disagree
  */
 export function Tabs({
   activeTab,
   onTabChange,
   children,
   orientation = "horizontal",
+  activationMode = "automatic",
   className = "",
 }: TabsProps) {
   const baseId = useId();
 
   return (
-    <TabsContext.Provider value={{ activeTab, setActiveTab: onTabChange, baseId, orientation }}>
+    <TabsContext.Provider
+      value={{
+        activeTab,
+        setActiveTab: onTabChange,
+        baseId,
+        orientation,
+        activationMode,
+      }}
+    >
       <div className={className}>{children}</div>
     </TabsContext.Provider>
   );
@@ -85,7 +113,7 @@ export function TabList({
   "aria-labelledby": ariaLabelledBy,
   className = "",
 }: TabListProps) {
-  const { orientation } = useTabsContext();
+  const { orientation, activationMode, setActiveTab } = useTabsContext();
   const listRef = useRef<HTMLDivElement>(null);
 
   const handleKeyDown = useCallback(
@@ -120,10 +148,21 @@ export function TabList({
 
       if (targetIndex !== null) {
         e.preventDefault();
-        tabs[targetIndex].focus();
+        const target = tabs[targetIndex];
+        target.focus();
+
+        // Automatic activation keeps `aria-selected` and the visible panel in
+        // sync with the tab the user is on. Manual activation waits for
+        // Enter/Space (the native button activation).
+        if (activationMode === "automatic") {
+          const targetId = target.dataset.tabId;
+          if (targetId) {
+            setActiveTab(targetId);
+          }
+        }
       }
     },
-    [orientation]
+    [activationMode, orientation, setActiveTab]
   );
 
   return (
@@ -181,6 +220,7 @@ export function Tab({
       type="button"
       role="tab"
       id={`${baseId}-tab-${id}`}
+      data-tab-id={id}
       aria-controls={`${baseId}-panel-${id}`}
       aria-selected={isSelected}
       disabled={disabled}

@@ -8,9 +8,9 @@ interface AlertConfigSectionProps {
 }
 
 const SEVERITY_STYLES: Record<Alert["severity"], string> = {
-  info: "bg-blue-500/20 text-blue-400",
-  warning: "bg-yellow-500/20 text-yellow-400",
-  critical: "bg-red-500/20 text-red-400",
+  info: "bg-blue-500/20 text-blue-700 dark:text-blue-300",
+  warning: "bg-yellow-500/20 text-yellow-800 dark:text-yellow-200",
+  critical: "bg-red-500/20 text-red-700 dark:text-red-300",
 };
 
 export default function AlertConfigSection({ alerts, isLoading }: AlertConfigSectionProps) {

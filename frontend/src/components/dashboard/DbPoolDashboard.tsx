@@ -155,7 +155,7 @@ export const DbPoolDashboard: React.FC = () => {
             <div>
               <span>{status.is_healthy ? "Healthy" : "Unhealthy"}</span>
               {status.current_utilization > 0.8 && (
-                <span role="status" className="ml-2 text-amber-600">High utilization warning</span>
+                <span role="status" className="ml-2 text-amber-800 dark:text-amber-300">High utilization warning</span>
               )}
             </div>
           </div>
