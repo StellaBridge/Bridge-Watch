@@ -36,7 +36,7 @@
     "@fastify/helmet": "^13.0.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/swagger": "^9.7.0",
-    "@fastify/swagger-ui": "^5.2.5",
+    "@fastify/swagger-ui": "^6.1.2",
     "@fastify/websocket": "^11.2.0",
     "@stellar/stellar-sdk": "^12.3.0",
     "@types/jsonwebtoken": "^9.0.10",
