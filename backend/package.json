@@ -71,7 +71,7 @@
     "@types/pdfkit": "^0.17.5",
     "@types/pg": "^8.11.10",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
-    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/parser": "^8.72.0",
     "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^8.57.1",
     "ioredis-mock": "^8.13.1",
