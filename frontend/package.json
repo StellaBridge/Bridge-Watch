@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "@storybook/addon-a11y": "^8.4.7",
+    "@storybook/addon-a11y": "^10.6.3",
     "@storybook/addon-essentials": "^8.4.7",
     "@storybook/react-vite": "^8.4.7",
     "@storybook/test": "^8.4.7",
