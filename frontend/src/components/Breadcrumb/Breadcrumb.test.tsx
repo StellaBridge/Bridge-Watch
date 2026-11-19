@@ -2,6 +2,12 @@ import { screen } from "../../test/utils";
 import { render } from "@testing-library/react";
 import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 import { Breadcrumb } from "./Breadcrumb";
+import { useBreadcrumbLabel } from "./breadcrumbLabels";
+
+function LabelledPage({ path, label }: { path: string; label: string }) {
+  useBreadcrumbLabel(path, label);
+  return null;
+}
 
 // Helper to render Breadcrumb with a specific route
 function renderAtRoute(path: string, props?: Parameters<typeof Breadcrumb>[0]) {
@@ -56,6 +62,57 @@ describe("Breadcrumb", () => {
     await router.navigate("/assets/usdc/alerts");
 
     expect(screen.getByText("Alerts")).toBeInTheDocument();
+  });
+
+  // ── Dynamic segment labels ─────────────────────────────
+
+  it("uses a label registered by the page instead of the raw segment", () => {
+    render(
+      <MemoryRouter initialEntries={["/incidents/replay/3f2a9c1e-77b0-4d1e-9a52-1c0f3b9e8d11"]}>
+        <LabelledPage
+          path="/incidents/replay/3f2a9c1e-77b0-4d1e-9a52-1c0f3b9e8d11"
+          label="Bridge outage"
+        />
+        <Breadcrumb />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Bridge outage")).toBeInTheDocument();
+    expect(screen.queryByText(/3f2a9c1e/i)).not.toBeInTheDocument();
+
+    const data = JSON.parse(
+      document.querySelector('script[type="application/ld+json"]')!.textContent!,
+    );
+    expect(data.itemListElement[data.itemListElement.length - 1].name).toBe("Bridge outage");
+  });
+
+  it("applies a registered label to intermediate segments of nested routes", () => {
+    render(
+      <MemoryRouter initialEntries={["/assets/usdc/alerts"]}>
+        <LabelledPage path="/assets/usdc" label="USDC" />
+        <Breadcrumb />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("USDC").closest("a")).toHaveAttribute("href", "/assets/usdc");
+    expect(screen.getByText("Alerts")).toBeInTheDocument();
+  });
+
+  it("falls back to the generated label once the page unmounts", () => {
+    function Harness({ showPage }: { showPage: boolean }) {
+      return (
+        <MemoryRouter initialEntries={["/assets/usdc"]}>
+          {showPage && <LabelledPage path="/assets/usdc" label="USDC" />}
+          <Breadcrumb />
+        </MemoryRouter>
+      );
+    }
+
+    const { rerender } = render(<Harness showPage />);
+    expect(screen.getByText("USDC")).toBeInTheDocument();
+
+    rerender(<Harness showPage={false} />);
+    expect(screen.getByText("Usdc")).toBeInTheDocument();
   });
 
   // ── Manual override items ──────────────────────────────
