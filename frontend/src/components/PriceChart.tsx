@@ -11,6 +11,7 @@ import {
 import ChartTooltip from "./Tooltip/ChartTooltip.js";
 import { useEffect, useMemo, useState } from "react";
 import { useTimeRange } from "../hooks/useTimeRange";
+import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
 import { filterSeriesByTimeRange } from "../utils/timeRange";
 import {
   generateDynamicColor,
@@ -49,6 +50,7 @@ export default function PriceChart({
 }: PriceChartProps) {
   const { getEffectiveSelection } = useTimeRange();
   const selection = getEffectiveSelection(chartId);
+  const prefersReducedMotion = usePrefersReducedMotion();
   const theme = getVisualizationTheme({
     theme: "dark",
     colorblindMode: getColorblindModePreference(),
@@ -207,7 +209,7 @@ export default function PriceChart({
         />
       </div>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={chartData}>
+        <LineChart data={chartData} isAnimationActive={!prefersReducedMotion}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
           <XAxis
             dataKey="timestamp"
@@ -243,6 +245,7 @@ export default function PriceChart({
                 stroke={sourceColors[source]}
                 dot={false}
                 strokeWidth={2}
+                isAnimationActive={!prefersReducedMotion}
               />
             ))}
           {annotationMarks.map((annotation) => (

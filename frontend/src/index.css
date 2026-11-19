@@ -257,6 +257,21 @@ body {
   transition-timing-function: ease;
 }
 
+/* Respect user's motion preferences for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  html,
+  body {
+    transition: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
 body {
   margin: 0;
   font-family:
