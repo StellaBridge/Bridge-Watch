@@ -39,6 +39,7 @@ import DashboardSharingModal from "../components/dashboard/DashboardSharingModal
 import AssetInsightsTray from "../components/asset/AssetInsightsTray";
 import { useUIStore } from "../stores/uiStore";
 import { SkeletonCard } from "../components/Skeleton";
+import { WidgetErrorBoundary } from "../components/ErrorBoundary";
 import type { AssetWithHealth, Bridge, FilterStatus } from "../types";
 
 type DashboardView = "overview" | "assets" | "bridges";
@@ -547,14 +548,26 @@ export default function Dashboard() {
       ? `https://bridge-watch.local${location.pathname}${location.search}`
       : window.location.href;
 
+  const withWidgetErrorBoundary = (
+    widget: React.ReactNode | null,
+    widgetId: string,
+    widgetTitle: string
+  ) => {
+    if (!widget) return null;
+    return (
+      <WidgetErrorBoundary key={`${widgetId}-boundary`} widgetId={widgetId} widgetTitle={widgetTitle}>
+        {widget}
+      </WidgetErrorBoundary>
+    );
+  };
+
   const renderWidget = (id: string) => {
     if (!isWidgetVisible(id)) return null;
 
     switch (id) {
       case "kpi-banner":
-        return (
+        return withWidgetErrorBoundary(
           <div
-            key="kpi-banner"
             data-tour="kpis"
             data-widget-id="kpi-banner"
             tabIndex={0}
@@ -567,23 +580,27 @@ export default function Dashboard() {
               onDrilldown={(item) => setDrilldown(item.id)}
               onInspectMetric={(item) => setInspectedMetricId(item.id)}
             />
-          </div>
+          </div>,
+          "kpi-banner",
+          "KPI Banner"
         );
 
       case "status-cards":
-        return (
-          <div key="status-cards" data-tour="status-cards">
+        return withWidgetErrorBoundary(
+          <div data-tour="status-cards">
             <InlineStatusCards
               assets={filteredAssets}
               bridges={filteredBridges}
               loading={assetsLoading || bridgesLoading}
             />
-          </div>
+          </div>,
+          "status-cards",
+          "Status Cards"
         );
 
       case "overview-stats":
-        return (
-          <section key="overview-stats" aria-labelledby="overview-stats" className="w-full min-w-0">
+        return withWidgetErrorBoundary(
+          <section aria-labelledby="overview-stats" className="w-full min-w-0">
             <h2 id="overview-stats" className="text-xl font-semibold text-white mb-4">
               Overview
             </h2>
@@ -628,66 +645,84 @@ export default function Dashboard() {
                 href="/analytics"
               />
             </div>
-          </section>
+          </section>,
+          "overview-stats",
+          "Overview Statistics"
         );
 
       case "sparkline-grid":
-        return showAssets ? (
-          <div key="sparkline-grid" className="w-full min-w-0 overflow-hidden">
-            <ComparativeSparklineGrid items={sparklineItems} />
-          </div>
-        ) : null;
+        return showAssets
+          ? withWidgetErrorBoundary(
+              <div className="w-full min-w-0 overflow-hidden">
+                <ComparativeSparklineGrid items={sparklineItems} />
+              </div>,
+              "sparkline-grid",
+              "Sparkline Grid"
+            )
+          : null;
 
       case "asset-discovery":
-        return showAssets ? (
-          <section key="asset-discovery" ref={gridRef}>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-white">Asset Health</h2>
-            </div>
-            {showFilteredAssetEmpty ? (
-              <div
-                data-widget-id="asset-empty"
-                tabIndex={0}
-                className="rounded-lg border border-stellar-border bg-stellar-card p-8 text-center focus:ring-2 focus:ring-stellar-blue outline-none"
-              >
-                <p className="text-stellar-text-secondary">No assets match the selected filters.</p>
-                <button
-                  type="button"
-                  onClick={clearAll}
-                  className="mt-3 text-sm text-stellar-blue hover:underline"
-                >
-                  Clear filters
-                </button>
-              </div>
-            ) : (
-              <div
-                data-widget-id="asset-discovery"
-                tabIndex={0}
-                className="focus:ring-2 focus:ring-stellar-blue outline-none"
-              >
-                <AssetDiscoverySection assets={filteredAssets} isLoading={assetsLoading} />
-              </div>
-            )}
-          </section>
-        ) : null;
+        return showAssets
+          ? withWidgetErrorBoundary(
+              <section ref={gridRef}>
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-xl font-semibold text-white">Asset Health</h2>
+                </div>
+                {showFilteredAssetEmpty ? (
+                  <div
+                    data-widget-id="asset-empty"
+                    tabIndex={0}
+                    className="rounded-lg border border-stellar-border bg-stellar-card p-8 text-center focus:ring-2 focus:ring-stellar-blue outline-none"
+                  >
+                    <p className="text-stellar-text-secondary">No assets match the selected filters.</p>
+                    <button
+                      type="button"
+                      onClick={clearAll}
+                      className="mt-3 text-sm text-stellar-blue hover:underline"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    data-widget-id="asset-discovery"
+                    tabIndex={0}
+                    className="focus:ring-2 focus:ring-stellar-blue outline-none"
+                  >
+                    <AssetDiscoverySection assets={filteredAssets} isLoading={assetsLoading} />
+                  </div>
+                )}
+              </section>,
+              "asset-discovery",
+              "Asset Discovery"
+            )
+          : null;
 
       case "watchlist":
-        return showAssets ? (
-          <div key="watchlist">
-            <WatchlistWidget />
-          </div>
-        ) : null;
+        return showAssets
+          ? withWidgetErrorBoundary(
+              <div>
+                <WatchlistWidget />
+              </div>,
+              "watchlist",
+              "Watchlist"
+            )
+          : null;
 
       case "external-dependencies":
-        return showAssets ? (
-          <div key="external-dependencies">
-            <ExternalDependencyPanel />
-          </div>
-        ) : null;
+        return showAssets
+          ? withWidgetErrorBoundary(
+              <div>
+                <ExternalDependencyPanel />
+              </div>,
+              "external-dependencies",
+              "External Dependencies"
+            )
+          : null;
 
       case "activity-timeline":
-        return (
-          <section key="activity-timeline">
+        return withWidgetErrorBoundary(
+          <section>
             <RecentActivityTimeline
               maxEvents={50}
               defaultMode="compact"
@@ -695,70 +730,76 @@ export default function Dashboard() {
               showHeader={true}
               sourceOptions={activitySourceOptions}
             />
-          </section>
+          </section>,
+          "activity-timeline",
+          "Activity Timeline"
         );
 
       case "bridge-status":
-        return showBridges ? (
-          <section key="bridge-status">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white">Bridge Status</h2>
-              <Link to="/bridges" className="text-sm text-stellar-blue hover:underline">
-                View all
-              </Link>
-            </div>
-            {bridgesLoading ? (
-              <div
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
-                role="status"
-                aria-label="Loading bridges"
-              >
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <SkeletonCard
-                    key={i}
-                    showHeader={false}
-                    rows={4}
-                    height={160}
-                    ariaLabel="Loading bridge card"
-                  />
-                ))}
-              </div>
-            ) : filteredBridges.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                {filteredBridges.map((bridge) => (
-                  <div key={bridge.name} className="space-y-2">
-                    <BridgeStatusCard
-                      {...bridge}
-                      topRight={
-                        <FavoriteTagChip
-                          compact
-                          label={bridge.name}
-                          active={favoriteBridges.includes(bridge.name)}
-                          onToggle={() => toggleFavoriteBridge(bridge.name)}
-                        />
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setDrilldown("bridges")}
-                      className="w-full min-h-[44px] rounded-md border border-stellar-border px-3 py-2.5 text-xs font-medium text-stellar-text-secondary transition-colors hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue flex items-center justify-center"
-                    >
-                      Inspect bridge details
-                    </button>
+        return showBridges
+          ? withWidgetErrorBoundary(
+              <section>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-semibold text-white">Bridge Status</h2>
+                  <Link to="/bridges" className="text-sm text-stellar-blue hover:underline">
+                    View all
+                  </Link>
+                </div>
+                {bridgesLoading ? (
+                  <div
+                    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
+                    role="status"
+                    aria-label="Loading bridges"
+                  >
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <SkeletonCard
+                        key={i}
+                        showHeader={false}
+                        rows={4}
+                        height={160}
+                        ariaLabel="Loading bridge card"
+                      />
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
-                <p className="text-stellar-text-secondary">
-                  {bridgeFiltersActive
-                    ? "No bridges match the selected filters."
-                    : "No bridge data available yet."}
-                </p>
-              </div>
-            )}
-          </section>
-        ) : null;
+                ) : filteredBridges.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {filteredBridges.map((bridge) => (
+                      <div key={bridge.name} className="space-y-2">
+                        <BridgeStatusCard
+                          {...bridge}
+                          topRight={
+                            <FavoriteTagChip
+                              compact
+                              label={bridge.name}
+                              active={favoriteBridges.includes(bridge.name)}
+                              onToggle={() => toggleFavoriteBridge(bridge.name)}
+                            />
+                          }
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDrilldown("bridges")}
+                          className="w-full min-h-[44px] rounded-md border border-stellar-border px-3 py-2.5 text-xs font-medium text-stellar-text-secondary transition-colors hover:border-stellar-blue hover:text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue flex items-center justify-center"
+                        >
+                          Inspect bridge details
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-stellar-card border border-stellar-border rounded-lg p-8 text-center">
+                    <p className="text-stellar-text-secondary">
+                      {bridgeFiltersActive
+                        ? "No bridges match the selected filters."
+                        : "No bridge data available yet."}
+                    </p>
+                  </div>
+                )}
+              </section>,
+              "bridge-status",
+              "Bridge Status"
+            )
+          : null;
 
       default:
         return null;

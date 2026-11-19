@@ -1,5 +1,6 @@
 export { default as GlobalErrorBoundary } from "./GlobalErrorBoundary";
 export { default as ComponentErrorBoundary } from "./ComponentErrorBoundary";
+export { default as WidgetErrorBoundary } from "./WidgetErrorBoundary";
 export { default as ErrorFallback } from "./ErrorFallback";
 export { useErrorReporting } from "./useErrorReporting";
 export { logError, getErrorLog, clearErrorLog, getErrorSummary } from "./errorReporting";

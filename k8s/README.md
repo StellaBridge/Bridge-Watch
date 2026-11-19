@@ -177,3 +177,29 @@ kubectl set image deployment/bridge-watch-frontend \
   frontend=ghcr.io/stellabridge/bridge-watch-frontend:<new-tag> \
   -n bridge-watch
 ```
+
+## Network Policies
+
+The `network-policy.yaml` manifest defines egress and ingress rules for backend and frontend pods to restrict unauthorized traffic and prevent data exfiltration.
+
+### Backend egress rules
+- **DNS (UDP 53)**: For external service discovery
+- **PostgreSQL (TCP 5432)**: Database access to internal postgres pod
+- **Redis (TCP 6379)**: Cache access to internal redis pod
+- **External APIs (TCP 443)**: HTTPS access to Stellar Horizon, RPC nodes, and third-party APIs (Circle, Coinbase)
+
+The policy **blocks** egress to cloud metadata IP ranges (169.254.169.254) by not including them in the allow rules.
+
+### Frontend egress rules
+- **DNS (UDP 53)**: For external service discovery
+- **Backend API (TCP 3001)**: Access to backend service
+- **External HTTPS (TCP 443)**: For external API calls from browser if needed
+
+### Testing network policies
+Verify policies are enforced:
+```bash
+kubectl get networkpolicies -n bridge-watch
+kubectl describe networkpolicy bridge-watch-backend-policy -n bridge-watch
+```
+
+If pods cannot reach external APIs after enabling policies, check the logs and verify that required egress rules are present.

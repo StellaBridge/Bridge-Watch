@@ -29,6 +29,13 @@ spec:
         - protocol: TCP
           port: 3001
   egress:
+    # DNS resolution for external service discovery
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # PostgreSQL database access
     - to:
         - podSelector:
             matchLabels:
@@ -36,6 +43,7 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+    # Redis cache access
     - to:
         - podSelector:
             matchLabels:
@@ -43,13 +51,14 @@ spec:
       ports:
         - protocol: TCP
           port: 6379
-    # External APIs (Stellar, Ethereum, Circle, Coinbase)
+    # External APIs (Stellar Horizon, RPC nodes, Circle, Coinbase) - HTTPS
     - to: []
       ports:
         - protocol: TCP
           port: 443
-        - protocol: TCP
-          port: 80
+    # Block metadata IP - no rule for 169.254.169.254
+    # Deny implicit default via empty to: [] without ports for port 80 is unnecessary
+    # since we explicitly define only required ports above
 
 ---
 apiVersion: networking.k8s.io/v1
@@ -73,6 +82,13 @@ spec:
         - protocol: TCP
           port: 3000
   egress:
+    # DNS resolution for service discovery
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Backend API access
     - to:
         - podSelector:
             matchLabels:
@@ -80,3 +96,8 @@ spec:
       ports:
         - protocol: TCP
           port: 3001
+    # Allow external HTTPS traffic for external APIs if needed
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
