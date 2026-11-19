@@ -18,6 +18,7 @@ export default defineConfig({
       "tests/jobs/**/*.test.ts",
       "tests/testing/**/*.test.ts",
       "tests/contracts/**/*.test.ts",
+      "src/__tests__/routes/**/*.test.ts",
     ],
     fileParallelism: false,
   },
