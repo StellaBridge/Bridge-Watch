@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Breadcrumb } from "../../components/Breadcrumb/Breadcrumb";
 
 interface AllowlistEntry {
   id: string;
@@ -126,6 +127,8 @@ export default function AllowlistManagement() {
 
   return (
     <div className="space-y-8">
+      <Breadcrumb />
+
       <header>
         <p className="text-xs uppercase tracking-[0.3em] text-stellar-blue">Admin</p>
         <h1 className="mt-2 text-3xl font-bold text-white">Contract Allowlist Management</h1>

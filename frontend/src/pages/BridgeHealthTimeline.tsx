@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useBridgeHealthTimeline, useBridges } from "../hooks/useBridgeHealthTimeline";
 import type { HealthPeriod } from "../hooks/useBridgeHealthTimeline";
 import { HealthTimelineChart, AnnotationList } from "../components/BridgeHealthTimeline";
+import { Breadcrumb } from "../components/Breadcrumb/Breadcrumb";
 
 const PERIODS: { id: HealthPeriod; label: string }[] = [
   { id: "24h", label: "24 Hours" },
@@ -128,6 +129,8 @@ export default function BridgeHealthTimeline() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumb />
+
       <header>
         <h1 className="text-3xl font-bold text-white">Bridge Health Timeline</h1>
         <p className="mt-2 text-stellar-text-secondary">

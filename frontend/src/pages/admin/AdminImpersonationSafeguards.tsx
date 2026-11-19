@@ -6,6 +6,7 @@ import {
   stopAdminImpersonation,
 } from "../../services/api";
 import { useLocalStorageState } from "../../hooks/useLocalStorageState";
+import { Breadcrumb } from "../../components/Breadcrumb/Breadcrumb";
 import type { AdminImpersonationSession, ImpersonationAuditLog } from "../../types";
 
 export default function AdminImpersonationSafeguards() {
@@ -110,6 +111,8 @@ export default function AdminImpersonationSafeguards() {
 
   return (
     <div className="space-y-8">
+      <Breadcrumb />
+
       {/* Impersonation Warning Banner */}
       {activeSession && (
         <div className="rounded-2xl border border-amber-500/50 bg-amber-500/15 p-4 flex flex-wrap items-center justify-between gap-4">

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import SupplyChainViz from "../components/SupplyChainViz";
 import { useSupplyChainData } from "../hooks/useSupplyChainData";
+import { Breadcrumb } from "../components/Breadcrumb/Breadcrumb";
 import type { BridgeEdge, ChainNode } from "../components/SupplyChainViz/types";
 
 function TopologyDetailPanel({
@@ -140,6 +141,8 @@ export default function BridgeTopologyExplorer() {
 
   return (
     <div className="flex h-full flex-col gap-4">
+      <Breadcrumb />
+
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-stellar-text-primary">Bridge Topology Explorer</h1>
