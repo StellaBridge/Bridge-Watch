@@ -150,6 +150,34 @@ kubectl get ingress -n bridge-watch
 kubectl logs -n bridge-watch deploy/bridge-watch-backend --tail=50
 ```
 
+## TLS and Security Configuration
+
+### TLS Enforcement
+
+The ingress is configured to enforce TLS 1.2 and TLS 1.3 only, disabling legacy SSL/TLS versions that may be vulnerable to downgrade attacks. This meets PCI-DSS and SOC 2 compliance requirements.
+
+**Key annotations in `ingress.yaml`:**
+- `nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"` — Enforces minimum TLS 1.2
+- `nginx.ingress.kubernetes.io/ssl-redirect: "true"` — Redirects HTTP to HTTPS
+- `nginx.ingress.kubernetes.io/force-ssl-redirect: "true"` — Forces HTTPS for all paths
+
+### Rate Limiting
+
+Ingress-level rate limiting protects the backend from DoS attacks before requests reach the application:
+
+- **Limit RPS:** 100 requests per second per IP
+- **Burst:** 200 requests (allows short traffic spikes)
+- **Whitelist:** 10.0.0.0/8 (internal network, excluded from rate limits)
+
+Adjust `limit-rps` and `limit-burst` values based on expected traffic patterns.
+
+### HSTS Headers
+
+Strict-Transport-Security (HSTS) headers are set with:
+- `max-age=31536000` — 1 year validity
+- `includeSubDomains` — Applies to all subdomains
+- `preload` — Allows inclusion in HSTS preload lists
+
 ## Health endpoints
 
 | Path | Purpose |

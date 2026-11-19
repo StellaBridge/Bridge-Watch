@@ -108,6 +108,42 @@ k6 run --env TARGET_VUS=500 --env HOLD_SECONDS=120 \
 
 5,000 connections need a raised file-descriptor limit on the load generator (`ulimit -n 20000`).
 
+### 5. High-Concurrency WebSocket Stress Test (`scenarios/websocket-5k-concurrency.js`)
+Sustained stress test with 5,000 concurrent WebSocket clients over 15 minutes - **Closes #1522**
+
+This scenario tests backend stability and memory behavior under sustained high concurrency:
+- Ramps up to 5,000 concurrent connections over 5 minutes
+- Holds connections for 15 minutes (adjustable via `HOLD_MINUTES`)
+- Measures connection establishment latency, broadcast message delivery latency, and event loop lag
+- Tracks connection drop rate and message delivery failures
+
+#### Metrics Collected
+- `ws_connection_latency` - WebSocket upgrade time (p95 < 5s, p99 < 10s)
+- `ws_broadcast_latency` - Server message timestamp to client receipt (p95 < 2s, p99 < 5s)
+- `ws_connection_drop_rate` - Percentage of connections dropped before hold period (< 2%)
+- `ws_message_drop_rate` - Percentage of clients receiving no messages (< 2%)
+- `ws_event_loop_lag_ms` - Backend event loop lag sampled from `/metrics` endpoint
+- `ws_clients_held_full_duration` - Count of clients that maintained connections for full hold period
+
+#### Test Execution
+```bash
+# Default: 5000 VUs, 15-minute hold, 5-minute ramp-up
+k6 run load-tests/scenarios/websocket-5k-concurrency.js
+
+# Custom hold duration (10 minutes)
+k6 run --env HOLD_MINUTES=10 --env BASE_URL=http://localhost:3001 \
+  load-tests/scenarios/websocket-5k-concurrency.js
+
+# Production server stress test
+k6 run --env BASE_URL=https://bridge-watch.example.com \
+  load-tests/scenarios/websocket-5k-concurrency.js
+```
+
+**Prerequisites:**
+- Raise file descriptor limit: `ulimit -n 65536`
+- Ensure backend has sufficient memory (monitor `/metrics` for event loop lag)
+- Disable client rate limiting during test to isolate backend bottlenecks
+
 ## Quick Start
 
 1. Start the backend service:

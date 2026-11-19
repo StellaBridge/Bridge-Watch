@@ -18,9 +18,23 @@ terraform {
     }
   }
 
-  # In a production environment, this should be an S3 bucket with DynamoDB locking.
-  # For the purpose of this PR, we'll keep it as a placeholder.
-  # backend "s3" {}
+  # Remote backend with S3 and DynamoDB state locking
+  backend "s3" {
+    # Configure these values before init. Example:
+    # terraform init \
+    #   -backend-config="bucket=bridge-watch-tfstate" \
+    #   -backend-config="key=prod/terraform.tfstate" \
+    #   -backend-config="region=us-east-1" \
+    #   -backend-config="dynamodb_table=bridge-watch-tfstate-lock" \
+    #   -backend-config="encrypt=true" \
+    #   -backend-config="kms_key_id=arn:aws:kms:us-east-1:ACCOUNT:key/ID"
+    bucket         = ""  # Set via -backend-config
+    key            = ""  # Set via -backend-config
+    region         = ""  # Set via -backend-config
+    dynamodb_table = ""  # Set via -backend-config
+    encrypt        = true
+    kms_key_id     = ""  # Set via -backend-config (optional, uses SSE-S3 if empty)
+  }
 }
 
 provider "aws" {
