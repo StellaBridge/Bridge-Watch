@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { useLocation } from "react-router-dom";
 import { BreadcrumbItem } from "./BreadcrumbItem";
 import { resolveLabel } from "./routeUtils";
+import { useBreadcrumbLabels } from "./breadcrumbLabels";
 import type { BreadcrumbItemConfig, BreadcrumbProps } from "./types";
 
 const HomeIcon = () => (
@@ -41,7 +42,10 @@ const ChevronSeparator = () => (
  *
  * `/admin/api-keys` → [ { label: "Admin", href: "/admin" }, { label: "API Keys" } ]
  */
-function buildItemsFromPath(pathname: string): BreadcrumbItemConfig[] {
+function buildItemsFromPath(
+  pathname: string,
+  labelOverrides: Readonly<Record<string, string>>,
+): BreadcrumbItemConfig[] {
   const segments = pathname.split("/").filter(Boolean);
   const items: BreadcrumbItemConfig[] = [];
 
@@ -50,7 +54,7 @@ function buildItemsFromPath(pathname: string): BreadcrumbItemConfig[] {
     const isLast = idx === segments.length - 1;
 
     items.push({
-      label: resolveLabel(path, segment),
+      label: labelOverrides[path] ?? resolveLabel(path, segment),
       href: isLast ? undefined : path,
     });
   });
@@ -110,7 +114,8 @@ export function Breadcrumb({
   className = "",
 }: BreadcrumbProps) {
   const location = useLocation();
-  const items = manualItems ?? buildItemsFromPath(location.pathname);
+  const labelOverrides = useBreadcrumbLabels();
+  const items = manualItems ?? buildItemsFromPath(location.pathname, labelOverrides);
 
   // Don't render breadcrumbs on the root dashboard (single segment)
   if (items.length === 0) return null;

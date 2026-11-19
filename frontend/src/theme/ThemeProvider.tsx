@@ -51,7 +51,7 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
     } catch {
       // ignore
     }
-  }, [mode, highContrast]);
+  }, [mode, resolvedTheme, highContrast]);
 
   const setMode = useCallback((next: ThemeMode) => {
     setModeState(next);

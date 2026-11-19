@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { usePrices } from "../hooks/usePrices";
 import { useLiquidity } from "../hooks/useLiquidity";
 import { useAssetHealth } from "../hooks/useAssets";
@@ -24,6 +24,7 @@ import ChartAnnotationPanel from "../components/asset/ChartAnnotationPanel";
 import { AlertTimelineFeed } from "../components/alerts";
 import { EntitySummaryBanner, type EntitySummaryField } from "../components/entity";
 import { LiveUpdatePill } from "../components/LiveUpdatePill";
+import { useBreadcrumbLabel } from "../components/Breadcrumb";
 
 const USER_NAME = "xqcxx";
 type TabId = "summary" | "history" | "alerts" | "metadata";
@@ -72,6 +73,9 @@ function trendChip(
 
 export default function AssetDetail() {
   const { symbol } = useParams<{ symbol: string }>();
+  const { pathname } = useLocation();
+  // Match the raw pathname segment so the Layout breadcrumb finds the override.
+  useBreadcrumbLabel(pathname.split("/").slice(0, 3).join("/"), symbol?.toUpperCase());
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [draftTags, setDraftTags] = useState<string[]>([]);
