@@ -1,0 +1,32 @@
+# Railway.app Deployment Configuration
+# https://docs.railway.app/deploy/configurator
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+startCommand = "node dist/index.js"
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 5
+
+# Health check configuration
+# Allows adequate time for database migrations during cold-start
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+healthcheckInterval = 10
+healthcheckStartPeriod = 90
+
+# Environment variables for production
+[env]
+NODE_ENV = "production"
+LOG_LEVEL = "info"
+
+# Volume mounts for persistent data (if needed)
+# [[volumes]]
+# name = "data"
+# mountPath = "/app/data"
+
+# Networking configuration
+[networking]
+ports = [3001]

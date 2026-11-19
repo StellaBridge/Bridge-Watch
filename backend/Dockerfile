@@ -49,8 +49,9 @@ COPY --from=builder /app/dist ./dist
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-# Non-root user for security
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Non-root user for security (UID 10001)
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup -u 10001 && \
+    chown -R appuser:appgroup /app
 USER appuser
 
 EXPOSE 3001 3002

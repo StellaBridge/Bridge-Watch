@@ -15,14 +15,15 @@ This document is your complete guide to contributing. Read it once and you'll kn
 3. [Before You Start](#before-you-start)
 4. [Development Setup](#development-setup)
 5. [Coding Standards](#coding-standards)
-6. [Creating Issues](#creating-issues)
-7. [Pull Request Process](#pull-request-process)
-8. [Testing Requirements](#testing-requirements)
-9. [Documentation Requirements](#documentation-requirements)
-10. [Review Process](#review-process)
-11. [Release Process](#release-process)
-12. [Communication Channels](#communication-channels)
-13. [Recognising Contributors](#recognising-contributors)
+6. [Secret Scanning and Credential Management](#secret-scanning-and-credential-management)
+7. [Creating Issues](#creating-issues)
+8. [Pull Request Process](#pull-request-process)
+9. [Testing Requirements](#testing-requirements)
+10. [Documentation Requirements](#documentation-requirements)
+11. [Review Process](#review-process)
+12. [Release Process](#release-process)
+13. [Communication Channels](#communication-channels)
+14. [Recognising Contributors](#recognising-contributors)
 
 ---
 
@@ -275,6 +276,76 @@ feat(api)!: change health score range to 0–100
 BREAKING CHANGE: Health scores previously ranged 0–10. All consumers
 must update their thresholds accordingly.
 ```
+
+---
+
+## Secret Scanning and Credential Management
+
+We use **Gitleaks** to automatically scan for secrets, private keys, and sensitive data in every pull request. This protects the security of Stellar bridge reserves, infrastructure, and user data.
+
+### What Gitleaks scans for
+
+Gitleaks detects:
+- **Stellar seed phrases** (`S...` format, 56-character keys)
+- **Private keys and API secrets** (AWS, Stripe, GitHub, Slack tokens)
+- **Database credentials and connection strings**
+- **JWT bearer tokens**
+- **Blockchain private keys**
+
+### Never commit
+
+- Database passwords or connection strings
+- API keys, tokens, or secret credentials
+- Private keys (.pem, .key files)
+- Seed phrases or mnemonic phrases
+- SSH keys
+- OAuth tokens or refresh tokens
+
+### If Gitleaks flags your PR
+
+The secret scanning workflow runs automatically on every PR. If secrets are detected:
+
+1. **Stop immediately** — Do not push further commits with that secret
+2. **Rotate the credential** — Invalidate the exposed secret in your infrastructure
+3. **Remove the secret from git history**:
+   ```bash
+   # Option 1: Remove just the last commit (if not yet pushed)
+   git reset --soft HEAD~1
+   # Remove the secret from your code, then recommit
+   
+   # Option 2: Rewrite history with git-filter-repo (for pushed commits)
+   pip install git-filter-repo
+   git filter-repo --invert-mailmap --replace-text '${SECRET}==>${PLACEHOLDER}'
+   git push --force-with-lease
+   ```
+4. **Re-run Gitleaks** to verify the secret is removed:
+   ```bash
+   gitleaks detect --source . --verbose
+   ```
+5. **Request a re-scan** by pushing a new commit to your PR
+
+### Local secret scanning
+
+Before pushing, scan your branch locally:
+
+```bash
+# Install Gitleaks (macOS)
+brew install gitleaks
+
+# Scan your uncommitted changes
+gitleaks detect --source . --verbose
+
+# Scan git history since main
+gitleaks detect --source . --log-opts=main.. --verbose
+```
+
+### Best practices
+
+- **Use environment variables** for secrets (never hardcode)
+- **Keep `.env` files in `.gitignore`** — never commit them
+- **Use GitHub Secrets** for CI/CD workflows
+- **Rotate credentials regularly** — especially before public deployments
+- **Review your commits before pushing** — `git diff main` to catch secrets
 
 ---
 
