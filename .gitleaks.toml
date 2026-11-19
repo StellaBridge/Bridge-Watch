@@ -1,0 +1,74 @@
+title = "Gitleaks config"
+
+[[rules]]
+id = "stellar-seed-phrase"
+description = "Stellar seed phrase (S... format, 56 characters)"
+regex = '''(?i)\bS[A-Z2-7]{55}\b'''
+tags = ["stellar", "seed", "secret"]
+severity = "critical"
+
+[[rules]]
+id = "private-key-generic"
+description = "Generic private key patterns"
+regex = '''(?i)(private.{0,10}key|secret.{0,10}key|api.{0,10}secret|access.{0,10}key)[\s=:'"]+[A-Za-z0-9+/\-=]{40,}'''
+tags = ["key", "secret"]
+severity = "high"
+
+[[rules]]
+id = "database-url"
+description = "Database connection strings with credentials"
+regex = '''(?i)(database.?url|db.?url|mongodb.?url|postgres.?url)[\s=:'"]+[^'"\s]+://[^@]+@[^/]+/'''
+tags = ["database", "credential"]
+severity = "high"
+
+[[rules]]
+id = "aws-key"
+description = "AWS Access Key ID"
+regex = '''(?i)(aws.?access.?key|AKIA)[A-Z0-9]{16}'''
+tags = ["aws", "key"]
+severity = "high"
+
+[[rules]]
+id = "jwt-token"
+description = "JWT Bearer tokens in code"
+regex = '''(?i)(bearer|jwt|token)[\s=:'"]+eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.'''
+tags = ["jwt", "token"]
+severity = "high"
+
+[[rules]]
+id = "stripe-key"
+description = "Stripe API keys"
+regex = '''(sk_live|pk_live|sk_test|pk_test)_[A-Za-z0-9]{20,}'''
+tags = ["stripe", "payment"]
+severity = "high"
+
+[[rules]]
+id = "github-token"
+description = "GitHub personal access tokens"
+regex = '''ghp_[A-Za-z0-9_]{36,}'''
+tags = ["github", "token"]
+severity = "critical"
+
+[[rules]]
+id = "slack-token"
+description = "Slack bot and app tokens"
+regex = '''(xox[p|b|o|a]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*|xoxp-\d+-\d+-\d+-[a-z0-9]+)'''
+tags = ["slack", "token"]
+severity = "high"
+
+[allowlist]
+description = "Allowlist for false positives"
+paths = [
+    '''(\.gitleaks|\.gitignore|CONTRIBUTING\.md|docs)''',
+    '''test.*secret|mock.*secret|example.*secret''',
+]
+commits = []
+branches = []
+
+[whitespace]
+# Treat newlines as whitespace
+# unicode = true
+
+[threshold]
+count = 1
+duration = "5 minutes"

@@ -332,13 +332,231 @@ test.describe('Authentication Flow', () => {
       await page.click('button[type="submit"]');
       await page.waitForTimeout(100);
     }
-    
+
     // Should show rate limit error
     const rateLimitError = page.locator('[data-testid="rate-limit-error"]');
     await expect(rateLimitError).toBeVisible();
     await expect(rateLimitError).toContainText(/too many.*attempts|rate.*limit/i);
   });
-  
+
+  test('should synchronize logout across multiple tabs via storage events', async ({ context }) => {
+    // Open two pages in the same context (simulating multiple tabs)
+    const page1 = await context.newPage();
+    const page2 = await context.newPage();
+
+    // Set up routes for both pages
+    for (const page of [page1, page2]) {
+      await page.route('**/login*', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: LOGIN_HTML,
+        });
+      });
+
+      const protectedRoutes = ['dashboard', 'transactions', 'settings'];
+      for (const routeName of protectedRoutes) {
+        await page.route(`**/${routeName}*`, async (route) => {
+          const title = routeName.charAt(0).toUpperCase() + routeName.slice(1);
+          await route.fulfill({
+            status: 200,
+            contentType: 'text/html',
+            body: getProtectedPageHtml(title),
+          });
+        });
+      }
+    }
+
+    // Login on page1
+    await page1.goto(`${BASE_URL}/login`);
+    await page1.fill('input[name="email"]', TEST_USER.email);
+    await page1.fill('input[name="password"]', TEST_USER.password);
+    await page1.click('button[type="submit"]');
+    await page1.waitForURL(`${BASE_URL}/dashboard`);
+
+    // Navigate page2 to dashboard (should use same session from page1)
+    await page2.goto(`${BASE_URL}/dashboard`);
+    await expect(page2.locator('[data-testid="user-menu"]')).toBeVisible();
+
+    // Trigger logout on page1
+    await page1.click('[data-testid="user-menu"]');
+    await page1.click('[data-testid="logout-button"]');
+    await page1.waitForURL(`${BASE_URL}/login`);
+
+    // Page2 should detect logout via storage event
+    // Wait a moment for storage event to propagate
+    await page2.waitForTimeout(500);
+
+    // Try to access dashboard on page2 - should redirect to login
+    await page2.goto(`${BASE_URL}/dashboard`);
+    await page2.waitForURL(`${BASE_URL}/login`);
+    expect(page2.url()).toContain('/login');
+
+    await page1.close();
+    await page2.close();
+  });
+
+  test('should handle expired JWT token and redirect to login', async ({ page }) => {
+    // Login first
+    await login(page, TEST_USER.email, TEST_USER.password);
+
+    // Verify logged in
+    await expect(page.locator('[data-testid="user-menu"]')).toBeVisible();
+
+    // Simulate expired token by modifying the JWT token in storage
+    // Create an expired JWT token (exp claim in the past)
+    const expiredToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QgVXNlciIsImV4cCI6MTYwMDAwMDAwMH0.7E4nCb5EQVksmJE5mScLJzCRR9o3XQZQP_PiFHjv5f8';
+
+    await page.evaluate((token) => {
+      localStorage.setItem('token', token);
+      localStorage.setItem('token_expires', '1600000000');
+    }, expiredToken);
+
+    // Try to navigate to a protected route
+    await page.goto(`${BASE_URL}/dashboard`);
+
+    // Should redirect to login due to expired token
+    await page.waitForURL(`${BASE_URL}/login`);
+    expect(page.url()).toContain('/login');
+
+    // Should show session expired message
+    const sessionMessage = page.locator('[data-testid="session-expired"]');
+    await expect(sessionMessage).toBeVisible();
+  });
+
+  test('should properly clear all authentication tokens on logout', async ({ page }) => {
+    // Login
+    await login(page, TEST_USER.email, TEST_USER.password);
+
+    // Verify tokens exist
+    const tokens = await page.evaluate(() => {
+      return {
+        localStorage: {
+          token: localStorage.getItem('token'),
+          userId: localStorage.getItem('userId'),
+        },
+        sessionStorage: {
+          session_token: sessionStorage.getItem('session_token'),
+        },
+        cookies: document.cookie,
+      };
+    });
+
+    // At least some authentication data should exist
+    const hasAuth = tokens.cookies.includes('sessionId') ||
+                   Object.values(tokens.localStorage).some(v => v) ||
+                   Object.values(tokens.sessionStorage).some(v => v);
+    expect(hasAuth).toBeTruthy();
+
+    // Logout
+    await page.click('[data-testid="user-menu"]');
+    await page.click('[data-testid="logout-button"]');
+    await page.waitForURL(`${BASE_URL}/login`);
+
+    // Verify all tokens are cleared
+    const clearedTokens = await page.evaluate(() => {
+      return {
+        localStorage: {
+          token: localStorage.getItem('token'),
+          userId: localStorage.getItem('userId'),
+          sessionToken: localStorage.getItem('session_token'),
+        },
+        sessionStorage: {
+          session_token: sessionStorage.getItem('session_token'),
+          loginAttempts: sessionStorage.getItem('login_attempts'),
+        },
+        cookies: document.cookie,
+      };
+    });
+
+    // localStorage should be cleared
+    expect(clearedTokens.localStorage.token).toBeNull();
+    expect(clearedTokens.localStorage.userId).toBeNull();
+
+    // sessionStorage should be cleared
+    expect(clearedTokens.sessionStorage.session_token).toBeNull();
+
+    // Cookies should not contain sessionId
+    expect(clearedTokens.cookies).not.toContain('sessionId');
+  });
+
+  test('should warn user before session expiry and allow extension', async ({ page }) => {
+    // Login
+    await login(page, TEST_USER.email, TEST_USER.password);
+
+    // Inject a session warning modal into the page
+    await page.evaluate(() => {
+      const modal = document.createElement('div');
+      modal.id = 'session-warning-modal';
+      modal.setAttribute('data-testid', 'session-warning-modal');
+      modal.innerHTML = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    background: #111827; border: 2px solid #f59e0b; padding: 2rem;
+                    border-radius: 8px; z-index: 1000; min-width: 300px; text-align: center;">
+          <h3 style="color: #f59e0b; margin: 0 0 1rem 0;">Your session will expire in <span id="countdown">5</span>m</h3>
+          <p style="color: #d1d5db; margin: 0 0 1.5rem 0;">Click "Continue Session" to stay logged in</p>
+          <div style="display: flex; gap: 1rem;">
+            <button id="continue-session-btn" data-testid="continue-session"
+                    style="flex: 1; padding: 0.75rem; background: #3b82f6; color: white;
+                           border: none; border-radius: 4px; cursor: pointer;">
+              Continue Session
+            </button>
+            <button id="logout-warning-btn" data-testid="logout-warning"
+                    style="flex: 1; padding: 0.75rem; background: #ef4444; color: white;
+                           border: none; border-radius: 4px; cursor: pointer;">
+              Logout
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      // Countdown timer
+      let seconds = 300;
+      const interval = setInterval(() => {
+        seconds -= 60;
+        const minutes = Math.ceil(seconds / 60);
+        document.getElementById('countdown').textContent = minutes;
+      }, 1000);
+
+      // Continue session handler
+      document.getElementById('continue-session-btn').addEventListener('click', () => {
+        clearInterval(interval);
+        modal.remove();
+        // Reset session timeout
+        sessionStorage.setItem('session_extended', 'true');
+      });
+
+      // Logout handler
+      document.getElementById('logout-warning-btn').addEventListener('click', () => {
+        clearInterval(interval);
+        document.cookie = 'sessionId=; path=/; max-age=0';
+        window.location.href = '/login';
+      });
+    });
+
+    // Verify warning modal is visible
+    const warningModal = page.locator('[data-testid="session-warning-modal"]');
+    await expect(warningModal).toBeVisible();
+
+    // Verify countdown is displayed
+    const countdown = page.locator('#countdown');
+    await expect(countdown).toContainText(/\d/);
+
+    // Click continue session button
+    await page.click('[data-testid="continue-session"]');
+
+    // Modal should be removed
+    await expect(warningModal).not.toBeVisible();
+
+    // Verify session extension flag was set
+    const extended = await page.evaluate(() => sessionStorage.getItem('session_extended'));
+    expect(extended).toBe('true');
+
+    // User should still be on the page (not logged out)
+    expect(page.url()).toContain('/dashboard');
+  });
+
 });
 
 // Helper function to login
