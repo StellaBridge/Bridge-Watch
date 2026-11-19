@@ -19,6 +19,17 @@ metadata:
       proxy_set_header Upgrade $http_upgrade;
       proxy_set_header Connection "upgrade";
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # TLS 1.3 enforcement (minimum TLS 1.2)
+    nginx.ingress.kubernetes.io/ssl-protocols: "TLSv1.2 TLSv1.3"
+    # Rate limiting for public endpoints
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-burst: "200"
+    nginx.ingress.kubernetes.io/limit-whitelist: "10.0.0.0/8"
+    # HSTS headers with preload
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
 spec:
   ingressClassName: nginx
   tls:
