@@ -103,3 +103,30 @@ groups:
           summary: "BullMQ failed jobs growing rapidly"
           description: "The rate of failed jobs in queue {{ $labels.queue_name }} is increasing rapidly."
           runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#bullqueuefailedgrowingrapidly"
+
+  - name: bridge-watch-redis
+    interval: 30s
+    rules:
+      - alert: RedisMemoryFragmentationHigh
+        expr: redis_mem_fragmentation_ratio > 1.5
+        for: 15m
+        labels:
+          severity: warning
+          service: cache
+          team: platform
+        annotations:
+          summary: "High Redis memory fragmentation"
+          description: "Redis memory fragmentation ratio is {{ $value | printf \"%.2f\" }} on {{ $labels.instance }} (threshold: 1.5)."
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/redis-alerts.md#redismemoryfragmentationhigh"
+
+      - alert: RedisKeyEvictionsOccurring
+        expr: rate(redis_evicted_keys_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cache
+          team: platform
+        annotations:
+          summary: "Redis evicting keys due to memory pressure"
+          description: "Redis is evicting keys on {{ $labels.instance }} at a rate of {{ $value }} evictions/sec. Active session and rate-limiting keys may be lost."
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/redis-alerts.md#rediskeyevictionsoccurring"
