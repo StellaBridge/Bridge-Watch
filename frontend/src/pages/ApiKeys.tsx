@@ -32,6 +32,8 @@ export default function ApiKeys() {
   );
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [revokeCandidate, setRevokeCandidate] = useState<{ id: string; name: string } | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [generatedClientId, setGeneratedClientId] = useState<string | null>(null);
   const [generatedClientSecret, setGeneratedClientSecret] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -114,6 +116,7 @@ export default function ApiKeys() {
     try {
       const response = await createApiKey(adminToken, form);
       setGeneratedKey(response.apiKey);
+      setCopyStatus(null);
       setGeneratedClientId(response.clientId ?? null);
       setGeneratedClientSecret(response.clientSecret ?? null);
       setForm(DEFAULT_FORM);
@@ -139,6 +142,7 @@ export default function ApiKeys() {
     try {
       const response = await rotateApiKey(adminToken, id);
       setGeneratedKey(response.apiKey);
+      setCopyStatus(null);
       await loadKeys();
     } catch (rotateError) {
       setError(
@@ -159,6 +163,7 @@ export default function ApiKeys() {
     setError(null);
     try {
       await revokeApiKey(adminToken, id);
+      setRevokeCandidate(null);
       await loadKeys();
     } catch (revokeError) {
       setError(
@@ -168,6 +173,16 @@ export default function ApiKeys() {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCopyGeneratedKey = async () => {
+    if (!generatedKey) return;
+    try {
+      await navigator.clipboard.writeText(generatedKey);
+      setCopyStatus("Copied API key to clipboard.");
+    } catch {
+      setCopyStatus("Copy failed. Select and copy the key manually.");
     }
   };
 
@@ -387,6 +402,16 @@ export default function ApiKeys() {
                     {generatedKey}
                   </code>
                 </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyGeneratedKey()}
+                    className="rounded-full border border-emerald-500/40 px-4 py-2 text-sm text-emerald-200 hover:border-emerald-300"
+                  >
+                    Copy generated API key
+                  </button>
+                  {copyStatus && <p role="status" className="text-sm text-emerald-200">{copyStatus}</p>}
+                </div>
                 {generatedClientId && generatedClientSecret && (
                   <>
                     <div>
@@ -512,7 +537,8 @@ export default function ApiKeys() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleRevoke(key.id)}
+                      disabled={Boolean(key.revokedAt)}
+                      onClick={() => setRevokeCandidate({ id: key.id, name: key.name })}
                       className="rounded-full border border-red-500/40 px-4 py-2 text-sm text-red-300 transition hover:bg-red-500/10"
                     >
                       Revoke
@@ -524,6 +550,24 @@ export default function ApiKeys() {
           </div>
         </section>
       </section>
+      {revokeCandidate && (
+        <div role="dialog" aria-modal="true" aria-labelledby="revoke-key-heading"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-2xl border border-stellar-border bg-stellar-card p-6 text-white">
+            <h2 id="revoke-key-heading" className="text-xl font-semibold">Revoke API key?</h2>
+            <p>Revoke "{revokeCandidate.name}"? Clients using this key will lose access.</p>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setRevokeCandidate(null)}
+                className="rounded-full border border-stellar-border px-4 py-2">Cancel</button>
+              <button type="button" disabled={loading}
+                onClick={async () => {
+                  await handleRevoke(revokeCandidate.id);
+                }}
+                className="rounded-full bg-red-600 px-4 py-2 disabled:opacity-60">Confirm revoke</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

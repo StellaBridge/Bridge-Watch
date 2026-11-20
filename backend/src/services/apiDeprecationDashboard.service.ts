@@ -104,6 +104,44 @@ export class ApiDeprecationDashboardService {
     }
   }
 
+  /** Persist a deprecated endpoint hit with client identity and version. */
+  async recordDeprecatedHit(
+    endpoint: string,
+    method: string,
+    clientId: string,
+    clientVersion: string,
+    occurredAt: Date = new Date()
+  ): Promise<void> {
+    if (!clientId.trim() || !clientVersion.trim() || Number.isNaN(occurredAt.getTime())) {
+      throw new Error("Valid client ID, version and timestamp are required");
+    }
+    const record = await this.model.getByEndpoint(endpoint, method);
+    if (!record || record.status === "active") return;
+    await this.model.recordClientUsage(record.id, clientId, clientVersion, occurredAt);
+    await this.model.updateLastUsed(record.id);
+  }
+
+  async getWeeklyActiveDeprecatedClients(
+    endpoint: string,
+    method: string,
+    since: Date
+  ): Promise<Array<{ week: string; active_clients: number }>> {
+    if (Number.isNaN(since.getTime())) throw new Error("Invalid start date");
+    const record = await this.model.getByEndpoint(endpoint, method);
+    if (!record) return [];
+    return this.model.getWeeklyActiveClients(record.id, since);
+  }
+
+  classifyClientVersion(
+    version: string,
+    supportedVersions: readonly string[],
+    deprecatedVersions: readonly string[]
+  ): "supported" | "deprecated" | "sunset" {
+    if (supportedVersions.includes(version)) return "supported";
+    if (deprecatedVersions.includes(version)) return "deprecated";
+    return "sunset";
+  }
+
   async updateImpactMetrics(endpoint: string, method: string, impact_score: number, active_clients: number): Promise<void> {
     try {
       const deprecation = await this.model.getByEndpoint(endpoint, method);

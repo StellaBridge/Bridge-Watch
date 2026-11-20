@@ -31,6 +31,7 @@ export default defineConfig({
             "tests/testing/**/*.test.ts",
             "tests/contracts/**/*.test.ts",
             "src/__tests__/routes/**/*.test.ts",
+            "src/__tests__/services/**/*.test.ts",
           ],
           setupFiles: ["./tests/setup.ts"],
         },

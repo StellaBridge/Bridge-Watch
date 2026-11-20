@@ -50,6 +50,38 @@ export class ApiDeprecationModel {
       .orderBy('sunset_date', 'asc');
   }
 
+  async recordClientUsage(
+    deprecationId: string,
+    clientId: string,
+    clientVersion: string,
+    occurredAt: Date
+  ): Promise<void> {
+    await this.db("api_deprecation_usage").insert({
+      id: crypto.randomUUID(),
+      deprecation_id: deprecationId,
+      client_id: clientId,
+      client_version: clientVersion,
+      occurred_at: occurredAt,
+    });
+  }
+
+  async getWeeklyActiveClients(
+    deprecationId: string,
+    since: Date
+  ): Promise<Array<{ week: string; active_clients: number }>> {
+    const rows = await this.db("api_deprecation_usage")
+      .where("deprecation_id", deprecationId)
+      .where("occurred_at", ">=", since)
+      .select(this.db.raw("date_trunc('week', occurred_at) as week"))
+      .countDistinct("client_id as active_clients")
+      .groupByRaw("date_trunc('week', occurred_at)")
+      .orderBy("week", "asc");
+    return rows.map((row: { week: Date | string; active_clients: number | string }) => ({
+      week: new Date(row.week).toISOString().slice(0, 10),
+      active_clients: Number(row.active_clients),
+    }));
+  }
+
   async updateLastUsed(id: string): Promise<void> {
     await this.db(this.table)
       .where({ id })
