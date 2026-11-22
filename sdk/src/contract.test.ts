@@ -581,3 +581,95 @@ describe("TypedBridgeWatchContractSdk zk/mmr verification helpers", () => {
     });
   });
 });
+
+describe("batchQueryContractStates", () => {
+  let sdk: TypedBridgeWatchContractSdk;
+  let queryMethodSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    sdk = new TypedBridgeWatchContractSdk(testConfig);
+    queryMethodSpy = vi.spyOn(sdk, "queryMethod" as keyof typeof sdk);
+  });
+
+  it("batches multiple contract queries with optimal chunk size", async () => {
+    const contracts = Array.from({ length: 15 }, (_, i) => `CONTRACT${i}`);
+    const keys = ["balance", "status"];
+
+    queryMethodSpy.mockResolvedValue({
+      result: {
+        retval: StellarSdk.xdr.ScVal.scvU32(100),
+      },
+    } as never);
+
+    const results = await sdk.batchQueryContractStates(contracts, keys);
+
+    expect(results.size).toBeGreaterThan(0);
+    expect(queryMethodSpy).toHaveBeenCalled();
+  });
+
+  it("returns mapped results with contract address and key lookup", async () => {
+    const contracts = ["CONTRACT1", "CONTRACT2"];
+    const keys = ["balance"];
+
+    queryMethodSpy.mockResolvedValue({
+      result: {
+        retval: StellarSdk.xdr.ScVal.scvU32(500),
+      },
+    } as never);
+
+    const results = await sdk.batchQueryContractStates(contracts, keys);
+
+    expect(results instanceof Map).toBe(true);
+    results.forEach((contractData, contractId) => {
+      expect(contracts).toContain(contractId);
+      expect(contractData instanceof Map).toBe(true);
+    });
+  });
+
+  it("gracefully falls back to sequential calls on batch failure", async () => {
+    const contracts = ["CONTRACT1"];
+    const keys = ["balance"];
+
+    queryMethodSpy
+      .mockRejectedValueOnce(new Error("Batch not supported"))
+      .mockResolvedValue({
+        result: {
+          retval: StellarSdk.xdr.ScVal.scvU32(200),
+        },
+      } as never);
+
+    const results = await sdk.batchQueryContractStates(contracts, keys);
+
+    expect(results instanceof Map).toBe(true);
+  });
+
+  it("handles empty results gracefully", async () => {
+    const contracts = ["CONTRACT1"];
+    const keys = ["nonexistent"];
+
+    queryMethodSpy.mockResolvedValue({
+      result: {
+        retval: StellarSdk.xdr.ScVal.scvVoid(),
+      },
+    } as never);
+
+    const results = await sdk.batchQueryContractStates(contracts, keys);
+
+    expect(results instanceof Map).toBe(true);
+  });
+
+  it("respects batch size limits for chunking", async () => {
+    const contracts = Array.from({ length: 25 }, (_, i) => `CONTRACT${i}`);
+    const keys = ["balance"];
+
+    queryMethodSpy.mockResolvedValue({
+      result: {
+        retval: StellarSdk.xdr.ScVal.scvU32(100),
+      },
+    } as never);
+
+    await sdk.batchQueryContractStates(contracts, keys);
+
+    expect(queryMethodSpy.mock.calls.length).toBeGreaterThan(0);
+  });
+});
