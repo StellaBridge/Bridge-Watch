@@ -180,27 +180,34 @@ export class ParseQuarantineQueueService {
       return null;
     }
 
-    const [, updated] = await db.transaction(async (trx) => {
-      const history = existing.retryHistory;
+    const updated = await db.transaction(async (trx) => {
+      // Lock and recheck inside the transaction so concurrent replay attempts
+      // cannot both increment the same stale retry count.
+      const row = await trx("parse_quarantine_records")
+        .where({ id })
+        .forUpdate()
+        .first();
+      if (!row || row.status === "disposed" || row.status === "resolved") return null;
+
+      const history = this.parseArray(row.retry_history);
       history.push({
         attemptedAt: new Date().toISOString(),
         by: actor,
-        error: existing.parseError,
+        error: String(row.parse_error),
       });
 
-      return Promise.all([
-        trx("parse_quarantine_records")
-          .where({ id })
-          .update({
-            status: "in_review",
-            retry_count: existing.retryCount + 1,
-            retry_history: JSON.stringify(history),
-            reviewed_by: actor,
-            reviewed_at: new Date(),
-            updated_at: new Date(),
-          }),
-        trx("parse_quarantine_records").where({ id }).first(),
-      ]);
+      const [saved] = await trx("parse_quarantine_records")
+        .where({ id })
+        .update({
+          status: "in_review",
+          retry_count: Number(row.retry_count) + 1,
+          retry_history: JSON.stringify(history),
+          reviewed_by: actor,
+          reviewed_at: new Date(),
+          updated_at: new Date(),
+        })
+        .returning("*");
+      return saved ?? null;
     });
 
     logger.info(
