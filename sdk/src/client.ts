@@ -178,16 +178,16 @@ export class BridgeWatchContractSdk {
 
   private async fetchCompatibility<T>(path: string, version?: ApiVersion): Promise<T> {
     const url = `${this.config.apiUrl.replace(/\/$/, "")}/api/v1/compatibility${path}`;
-    // Propagate W3C trace context so the backend can correlate this request
-    // with the caller's trace. An explicit per-call context wins over config.
     const headers = injectTraceHeaders(
       compatibilityHeaders(version),
       this.config.tracing as TraceContextOptions | undefined
     );
 
-    // maxRetries represents the maximum number of retries after the first attempt.
     const maxRetries = this.retryConfig.maxRetries;
     let attempt = 0;
+    const startTime = performance.now();
+
+    this.config.telemetry?.onRequest?.(url, "GET");
 
     while (true) {
       const request = await this.interceptors.onRequest?.(
@@ -198,21 +198,28 @@ export class BridgeWatchContractSdk {
         ? await this.interceptors.onResponse(rawResponse)
         : rawResponse;
 
+      const duration = performance.now() - startTime;
+
       if (response.ok) {
+        Promise.resolve().then(() => {
+          this.config.telemetry?.onResponse?.(url, "GET", duration, response.status, attempt);
+        });
         return response.json() as Promise<T>;
       }
 
-      // Retry only on HTTP 429 and 5xx responses. Do not retry other 4xx responses.
       const isRetryable =
         response.status === 429 || (response.status >= 500 && response.status <= 599);
 
       if (!isRetryable || attempt >= maxRetries) {
-        throw new BridgeWatchConnectionError(`Compatibility request failed: ${response.status}`);
+        const error = new BridgeWatchConnectionError(`Compatibility request failed: ${response.status}`);
+        Promise.resolve().then(() => {
+          this.config.telemetry?.onError?.(url, "GET", duration, error, attempt);
+        });
+        throw error;
       }
 
       attempt++;
 
-      // Exponential backoff with jitter between retries.
       const exponentialDelay = this.retryConfig.baseDelayMs * Math.pow(2, attempt - 1);
       const cappedDelay = Math.min(exponentialDelay, this.retryConfig.maxDelayMs);
       const jitter = Math.random() * (cappedDelay * 0.1);

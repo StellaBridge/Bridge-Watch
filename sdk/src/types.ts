@@ -44,6 +44,39 @@ export interface BridgeWatchSdkConfig {
     onRequest?: (request: Request) => Request | Promise<Request>;
     onResponse?: (response: Response) => Response | Promise<Response>;
   };
+  /** Optional telemetry hooks for observing request duration and errors. */
+  telemetry?: TelemetryHooks;
+}
+
+/**
+ * Telemetry hooks for observing HTTP request lifecycle events.
+ * Callbacks execute asynchronously without blocking API responses.
+ */
+export interface TelemetryHooks {
+  /**
+   * Called before an HTTP request is sent.
+   * @param url - Request URL
+   * @param method - HTTP method
+   */
+  onRequest?: (url: string, method: string) => void;
+  /**
+   * Called after receiving a successful or failed HTTP response.
+   * @param url - Request URL
+   * @param method - HTTP method
+   * @param durationMs - Request duration in milliseconds
+   * @param statusCode - HTTP status code
+   * @param retryCount - Number of retries performed for this request
+   */
+  onResponse?: (url: string, method: string, durationMs: number, statusCode: number, retryCount: number) => void;
+  /**
+   * Called when a request fails with an error.
+   * @param url - Request URL
+   * @param method - HTTP method
+   * @param durationMs - Request duration in milliseconds
+   * @param error - Error object
+   * @param retryCount - Number of retries performed before failure
+   */
+  onError?: (url: string, method: string, durationMs: number, error: Error, retryCount: number) => void;
 }
 
 
