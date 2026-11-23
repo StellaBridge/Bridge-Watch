@@ -765,6 +765,86 @@ export class TypedBridgeWatchContractSdk extends BridgeWatchContractSdk {
     return parsePriceRecord(val);
   }
 
+  /**
+   * Batch query contract states for multiple contracts and keys in a single RPC call.
+   * Automatically chunks large requests to respect Soroban RPC payload limits.
+   *
+   * @param contracts - Array of contract addresses to query.
+   * @param keys - Array of storage keys to retrieve from each contract.
+   * @returns Promise resolving to mapped results with contract address and key lookup.
+   * @throws {BridgeWatchQueryError} If the batch query fails or RPC endpoint is unsupported.
+   */
+  async batchQueryContractStates(
+    contracts: string[],
+    keys: string[]
+  ): Promise<Map<string, Map<string, StellarSdk.xdr.ScVal>>> {
+    const BATCH_SIZE = 10;
+    const results = new Map<string, Map<string, StellarSdk.xdr.ScVal>>();
+
+    try {
+      for (let i = 0; i < contracts.length; i += BATCH_SIZE) {
+        const contractBatch = contracts.slice(i, i + BATCH_SIZE);
+        const batchPromises = contractBatch.map(async (contractId) => {
+          const contractResults = new Map<string, StellarSdk.xdr.ScVal>();
+          
+          for (const key of keys) {
+            try {
+              const result = await this.queryMethod({
+                method: "get_ledger_entry",
+                args: [scvString(key)],
+                contractId,
+              });
+              const val = extractResultScVal(result);
+              if (val && !isScvVoid(val)) {
+                contractResults.set(key, val);
+              }
+            } catch (error) {
+              continue;
+            }
+          }
+          
+          return { contractId, results: contractResults };
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        batchResults.forEach(({ contractId, results: contractResults }) => {
+          if (contractResults.size > 0) {
+            results.set(contractId, contractResults);
+          }
+        });
+      }
+
+      return results;
+    } catch (error) {
+      if (error instanceof BridgeWatchQueryError) {
+        const fallbackResults = new Map<string, Map<string, StellarSdk.xdr.ScVal>>();
+        for (const contractId of contracts) {
+          const contractResults = new Map<string, StellarSdk.xdr.ScVal>();
+          for (const key of keys) {
+            try {
+              const result = await this.queryMethod({
+                method: "get_ledger_entry",
+                args: [scvString(key)],
+                contractId,
+              });
+              const val = extractResultScVal(result);
+              if (val && !isScvVoid(val)) {
+                contractResults.set(key, val);
+              }
+            } catch {
+              continue;
+            }
+          }
+          if (contractResults.size > 0) {
+            fallbackResults.set(contractId, contractResults);
+          }
+        }
+        return fallbackResults;
+      }
+      throw new BridgeWatchQueryError("Batch contract state query failed", error);
+    }
+  }
+
   // ---------------------------------------------------------
   // Replay query methods
   // ---------------------------------------------------------

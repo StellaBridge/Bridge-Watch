@@ -31,6 +31,7 @@
     "check:api-contract": "node scripts/check-api-contract.mjs",
     "generate:api-contract": "node scripts/check-api-contract.mjs --write",
     "lint": "npm run lint --workspaces --if-present",
+    "validate:migrations": "tsx scripts/validate-migration-checksums.ts",
     "setup": "bash scripts/setup.sh",
     "setup:quick": "bash scripts/setup.sh --skip-contracts --skip-ide -y",
     "sandbox": "NODE_ENV=sandbox tsx sandbox/seed.ts && npm run dev",

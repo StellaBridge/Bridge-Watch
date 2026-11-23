@@ -670,3 +670,152 @@ describe("BridgeWatchContractSdk - HTTP retry and exponential backoff", () => {
   });
 });
 
+
+describe("BridgeWatchContractSdk - telemetry hooks", () => {
+  let sdk: BridgeWatchContractSdk;
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    global.fetch = mockFetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("should call onRequest hook before making HTTP request", async () => {
+    const onRequest = vi.fn();
+    const onResponse = vi.fn();
+
+    sdk = new BridgeWatchContractSdk({
+      ...testConfig,
+      telemetry: { onRequest, onResponse },
+    });
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ current: "v1", versions: [] }),
+    });
+
+    await sdk.getApiVersions();
+
+    expect(onRequest).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/compatibility/versions"),
+      "GET"
+    );
+  });
+
+  it("should call onResponse hook with accurate duration and status code", async () => {
+    const onRequest = vi.fn();
+    const onResponse = vi.fn();
+
+    sdk = new BridgeWatchContractSdk({
+      ...testConfig,
+      telemetry: { onRequest, onResponse },
+    });
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ current: "v1", versions: [] }),
+    });
+
+    await sdk.getApiVersions();
+
+    expect(onResponse).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/compatibility/versions"),
+      "GET",
+      expect.any(Number),
+      200,
+      0
+    );
+
+    const duration = onResponse.mock.calls[0][2];
+    expect(duration).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should call onError hook when request fails", async () => {
+    const onRequest = vi.fn();
+    const onError = vi.fn();
+
+    sdk = new BridgeWatchContractSdk({
+      ...testConfig,
+      telemetry: { onRequest, onError },
+      retryConfig: { maxRetries: 0 },
+    });
+
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+
+    await expect(sdk.getApiVersions()).rejects.toThrow();
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/compatibility/versions"),
+      "GET",
+      expect.any(Number),
+      expect.any(Error),
+      0
+    );
+  });
+
+  it("should pass retry count to telemetry hooks", async () => {
+    const onResponse = vi.fn();
+
+    sdk = new BridgeWatchContractSdk({
+      ...testConfig,
+      telemetry: { onResponse },
+      retryConfig: { maxRetries: 2, baseDelayMs: 100 },
+    });
+
+    let callCount = 0;
+    mockFetch.mockImplementation(() => {
+      callCount++;
+      if (callCount < 3) {
+        return Promise.resolve({ ok: false, status: 500 });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ current: "v1", versions: [] }),
+      });
+    });
+
+    await sdk.getApiVersions();
+
+    expect(onResponse).toHaveBeenCalledWith(
+      expect.any(String),
+      "GET",
+      expect.any(Number),
+      200,
+      2
+    );
+  });
+
+  it("should execute telemetry callbacks asynchronously without blocking response", async () => {
+    let hookExecuted = false;
+    const onResponse = vi.fn(() => {
+      hookExecuted = true;
+    });
+
+    sdk = new BridgeWatchContractSdk({
+      ...testConfig,
+      telemetry: { onResponse },
+    });
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ current: "v1", versions: [] }),
+    });
+
+    const result = await sdk.getApiVersions();
+
+    expect(result).toBeDefined();
+    
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(hookExecuted).toBe(true);
+  });
+});
