@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import i18n from "./config";
+import i18n from "../i18n/config";
 
 interface RTLContextType {
   isRTL: boolean;
