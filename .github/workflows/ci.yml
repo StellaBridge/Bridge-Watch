@@ -67,6 +67,9 @@ jobs:
             fi
           done
 
+      - name: Validate migration checksums
+        run: npm run validate:migrations
+
       - name: Validate migration modules
         working-directory: backend
         run: npm run migrate:validate
