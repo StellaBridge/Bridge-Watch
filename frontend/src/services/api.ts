@@ -420,6 +420,19 @@ export function getAssetAlerts(symbol: string, signal?: AbortSignal) {
   }>>(`/assets/${symbol}/alerts`, { signal });
 }
 
+export interface AlertThresholds {
+  warningThreshold: number;
+  criticalThreshold: number;
+  cooldownMinutes: number;
+}
+
+export function updateAlertThresholds(payload: AlertThresholds) {
+  return fetchApi<{ thresholds: AlertThresholds }>("/alerts/config/thresholds", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export interface AlertSuppressionRule {
   id: string;
   name: string;

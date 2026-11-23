@@ -28,6 +28,13 @@ const ALERT_TYPES: PreviewType[] = [
 
 const PRIORITIES: PreviewPriority[] = ["critical", "high", "medium", "low"];
 
+const SNOOZE_DURATIONS = [
+  { label: "15m", minutes: 15 },
+  { label: "1h", minutes: 60 },
+  { label: "4h", minutes: 240 },
+  { label: "24h", minutes: 1440 },
+] as const;
+
 export default function AlertSuppressionControls() {
   const [rules, setRules] = useState<AlertSuppressionRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +48,12 @@ export default function AlertSuppressionControls() {
   const [previewType, setPreviewType] = useState<PreviewType>("price_deviation");
   const [previewPriority, setPreviewPriority] = useState<PreviewPriority>("high");
   const [previewResult, setPreviewResult] = useState<string>("");
+
+  const [snoozeMinutes, setSnoozeMinutes] = useState<number | "custom">(60);
+  const [customSnoozeUntil, setCustomSnoozeUntil] = useState("");
+  const [snoozeReason, setSnoozeReason] = useState("");
+  const [snoozeError, setSnoozeError] = useState<string | null>(null);
+  const [snoozeStatus, setSnoozeStatus] = useState<string | null>(null);
 
   const actor = "dashboard";
 
@@ -125,6 +138,44 @@ export default function AlertSuppressionControls() {
     }
   };
 
+  const handleSnoozeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setSnoozeError(null);
+    setSnoozeStatus(null);
+    if (!snoozeReason.trim()) {
+      setSnoozeError("Please provide a suppression reason.");
+      return;
+    }
+
+    const startAt = new Date();
+    let endAt: Date;
+    if (snoozeMinutes === "custom") {
+      if (!customSnoozeUntil || Number.isNaN(new Date(customSnoozeUntil).getTime())) {
+        setSnoozeError("Please choose a valid custom snooze end time.");
+        return;
+      }
+      endAt = new Date(customSnoozeUntil);
+    } else {
+      endAt = new Date(startAt.getTime() + snoozeMinutes * 60_000);
+    }
+
+    try {
+      await createMaintenanceOverride({
+        actor,
+        startAt: startAt.toISOString(),
+        endAt: endAt.toISOString(),
+        description: snoozeReason.trim(),
+      });
+      setSnoozeStatus(`Alerts snoozed until ${endAt.toLocaleString()}`);
+      setSnoozeReason("");
+      setCustomSnoozeUntil("");
+      await refreshRules();
+    } catch (err) {
+      setSnoozeError(err instanceof Error ? err.message : "Failed to snooze alerts");
+    }
+  };
+
   return (
     <section className="rounded-xl border border-stellar-border bg-stellar-card p-6 space-y-6" aria-labelledby="suppression-controls-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -188,6 +239,53 @@ export default function AlertSuppressionControls() {
           )}
         </div>
       )}
+
+      <form onSubmit={handleSnoozeSubmit} aria-label="Snooze alerts"
+        className="space-y-3 rounded-lg border border-stellar-border p-4">
+        <h3 className="text-sm font-semibold text-stellar-text-primary">Snooze active alerts</h3>
+        <div className="flex flex-wrap gap-2" aria-label="Snooze duration">
+          {SNOOZE_DURATIONS.map(({ label, minutes }) => (
+            <button key={label} type="button" aria-pressed={snoozeMinutes === minutes}
+              onClick={() => setSnoozeMinutes(minutes)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                snoozeMinutes === minutes
+                  ? "border-stellar-blue bg-stellar-blue text-white"
+                  : "border-stellar-border text-stellar-text-secondary"
+              }`}>
+              {label}
+            </button>
+          ))}
+          <button type="button" aria-pressed={snoozeMinutes === "custom"}
+            onClick={() => setSnoozeMinutes("custom")}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+              snoozeMinutes === "custom"
+                ? "border-stellar-blue bg-stellar-blue text-white"
+                : "border-stellar-border text-stellar-text-secondary"
+            }`}>
+            Custom
+          </button>
+        </div>
+        {snoozeMinutes === "custom" && (
+          <label className="block text-xs text-stellar-text-secondary">
+            <span className="mb-1 block">Custom snooze until</span>
+            <input type="datetime-local" value={customSnoozeUntil}
+              onChange={(event) => setCustomSnoozeUntil(event.target.value)}
+              className="w-full rounded border border-stellar-border bg-stellar-dark px-2 py-2 text-sm text-stellar-text-primary" />
+          </label>
+        )}
+        <label className="block text-xs text-stellar-text-secondary">
+          <span className="mb-1 block">Suppression reason</span>
+          <input type="text" value={snoozeReason}
+            onChange={(event) => setSnoozeReason(event.target.value)}
+            placeholder="Planned bridge upgrade"
+            className="mt-1 w-full rounded border border-stellar-border bg-stellar-dark px-2 py-2 text-sm text-stellar-text-primary" />
+        </label>
+        {snoozeError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{snoozeError}</p>}
+        {snoozeStatus && <p role="status" className="text-sm text-green-700 dark:text-green-300">{snoozeStatus}</p>}
+        <button type="submit" className="rounded-md bg-stellar-blue px-3 py-2 text-sm font-medium text-white">
+          Snooze alerts
+        </button>
+      </form>
 
       <form onSubmit={handleOverrideSubmit} className="space-y-3 rounded-lg border border-stellar-border p-4">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-stellar-text-primary">

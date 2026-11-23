@@ -8,10 +8,13 @@ import {
 } from "../services/api";
 import type { DeviceType, SessionDeviceRecord } from "../types";
 
+const CURRENT_DEVICE_FINGERPRINT = "fp-macbook-pro-m2";
+
 export default function SessionDeviceManagement() {
   const [devices, setDevices] = useState<SessionDeviceRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [revokeOthersCandidate, setRevokeOthersCandidate] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     deviceFingerprint: "fp-macbook-pro-m2",
@@ -200,6 +203,11 @@ export default function SessionDeviceManagement() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <h3 className="font-bold text-white text-base">{d.deviceName}</h3>
+                    {d.deviceFingerprint === CURRENT_DEVICE_FINGERPRINT && (
+                      <span className="rounded-full border border-stellar-blue/40 bg-stellar-blue/15 px-3 py-0.5 text-xs font-semibold text-stellar-blue">
+                        Current Device
+                      </span>
+                    )}
                     <span
                       className={`rounded-full px-3 py-0.5 text-xs font-semibold ${
                         d.isActive
@@ -225,6 +233,7 @@ export default function SessionDeviceManagement() {
                         {d.isTrusted ? "Untrust" : "Trust"}
                       </button>
                       <button
+                        aria-label="Terminate Session"
                         onClick={() => void handleRevoke(d.id)}
                         className="rounded-full bg-red-500/20 px-3 py-1 text-xs text-red-300 hover:bg-red-500 hover:text-white transition"
                       >
@@ -244,7 +253,8 @@ export default function SessionDeviceManagement() {
                 {d.isActive && (
                   <div className="pt-2 border-t border-stellar-border/40 text-right">
                     <button
-                      onClick={() => void handleRevokeOthers(d.id)}
+                      aria-label="Terminate All Other Sessions"
+                      onClick={() => setRevokeOthersCandidate(d.id)}
                       className="text-xs text-amber-400 hover:underline"
                     >
                       Revoke all other device sessions
@@ -256,6 +266,28 @@ export default function SessionDeviceManagement() {
           </div>
         </div>
       </section>
+
+      {revokeOthersCandidate && (
+        <div role="dialog" aria-modal="true" aria-labelledby="terminate-others-heading"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-2xl border border-stellar-border bg-stellar-card p-6 text-white">
+            <h2 id="terminate-others-heading" className="text-xl font-semibold">Terminate all other sessions?</h2>
+            <p>All other active device sessions will be signed out. This device stays signed in.</p>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setRevokeOthersCandidate(null)}
+                className="rounded-full border border-stellar-border px-4 py-2">Cancel</button>
+              <button type="button"
+                onClick={() => {
+                  void handleRevokeOthers(revokeOthersCandidate);
+                  setRevokeOthersCandidate(null);
+                }}
+                className="rounded-full bg-amber-600 px-4 py-2 disabled:opacity-60" disabled={loading}>
+                Confirm terminate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

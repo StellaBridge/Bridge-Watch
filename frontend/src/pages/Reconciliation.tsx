@@ -249,6 +249,7 @@ function SummaryRow({
         <SeverityBadge severity={summary.severity} />
       </td>
       <td className="px-4 py-3 text-white">{formatMismatch(latest.mismatchPercentage)}</td>
+      <td className="px-4 py-3 text-white">{formatFullSupply(latest.discrepancyAbs)} {summary.assetCode}</td>
       <td className="px-4 py-3 text-stellar-text-secondary">{trendLabel[summary.trendDirection]}</td>
       <td className={`px-4 py-3 ${triageClass[latest.triageStatus]}`}>
         {titleCase(latest.triageStatus)}
@@ -269,6 +270,9 @@ export default function Reconciliation() {
   const [triageStatus, setTriageStatus] = useState<ReconciliationTriageStatus>("open");
   const [triageOwner, setTriageOwner] = useState("");
   const [triageNote, setTriageNote] = useState("");
+  const [triageError, setTriageError] = useState<string | null>(null);
+  const [triageFilter, setTriageFilter] = useState<"all" | "open" | "investigating" | "resolved">("all");
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const summaryQuery = useQuery({
     queryKey: ["reconciliation-drift", filters],
@@ -281,18 +285,28 @@ export default function Reconciliation() {
   });
 
   const summaries = summaryQuery.data?.summaries ?? [];
-  const selectedSummary = summaries.find((summary) => summary.latestRun.id === selectedMismatchId) ?? summaries[0] ?? null;
+  const visibleSummaries = useMemo(() => {
+    if (triageFilter === "all") return summaries;
+    if (triageFilter === "investigating") {
+      return summaries.filter((summary) =>
+        summary.latestRun.triageStatus === "investigating" || summary.latestRun.triageStatus === "acknowledged"
+      );
+    }
+    return summaries.filter((summary) => summary.latestRun.triageStatus === triageFilter);
+  }, [summaries, triageFilter]);
+  const selectedSummary = visibleSummaries.find((summary) => summary.latestRun.id === selectedMismatchId)
+    ?? visibleSummaries[0] ?? null;
 
   useEffect(() => {
-    if (summaries.length === 0) {
+    if (visibleSummaries.length === 0) {
       if (selectedMismatchId !== null) setSelectedMismatchId(null);
       return;
     }
 
-    if (!summaries.some((summary) => summary.latestRun.id === selectedMismatchId)) {
-      setSelectedMismatchId(summaries[0].latestRun.id);
+    if (!visibleSummaries.some((summary) => summary.latestRun.id === selectedMismatchId)) {
+      setSelectedMismatchId(visibleSummaries[0].latestRun.id);
     }
-  }, [selectedMismatchId, summaries]);
+  }, [selectedMismatchId, visibleSummaries]);
 
   const detailQuery = useQuery({
     queryKey: ["reconciliation-mismatch", selectedMismatchId, filters.range],
@@ -373,7 +387,12 @@ export default function Reconciliation() {
   const handleTriageSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selectedRun) return;
+    if (triageStatus === "resolved" && !triageNote.trim()) {
+      setTriageError("An audit note is required when marking a discrepancy as resolved.");
+      return;
+    }
 
+    setTriageError(null);
     triageMutation.mutate({
       id: selectedRun.id,
       status: triageStatus,
@@ -416,7 +435,7 @@ export default function Reconciliation() {
 
       <section className="rounded-lg border border-stellar-border bg-stellar-card p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-3">
             <label className="block text-sm">
               <span className="text-stellar-text-secondary">Asset</span>
               <select
@@ -441,6 +460,19 @@ export default function Reconciliation() {
                 {(summaryQuery.data?.availableFilters.bridges ?? []).map((bridge) => (
                   <option key={bridge} value={bridge}>{bridge}</option>
                 ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-stellar-text-secondary">Status</span>
+              <select
+                value={triageFilter}
+                onChange={(event) => setTriageFilter(event.target.value as typeof triageFilter)}
+                className="mt-1 w-full rounded-md border border-stellar-border bg-stellar-dark px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
+              >
+                <option value="all">All statuses</option>
+                <option value="open">Open</option>
+                <option value="investigating">Under Investigation</option>
+                <option value="resolved">Resolved</option>
               </select>
             </label>
           </div>
@@ -469,12 +501,12 @@ export default function Reconciliation() {
           <div className="flex items-center justify-between border-b border-stellar-border px-4 py-3">
             <h2 className="text-lg font-semibold text-white">Drift Queue</h2>
             <span className="text-sm text-stellar-text-secondary">
-              {summaryQuery.isFetching ? "Updating" : `${summaries.length} rows`}
+              {summaryQuery.isFetching ? "Updating" : `${visibleSummaries.length} rows`}
             </span>
           </div>
           <div className="overflow-x-auto">
             {summaryQuery.isLoading ? (
-              <SkeletonTable rows={5} columns={6} ariaLabel="Loading reconciliation drift" />
+              <SkeletonTable rows={5} columns={7} ariaLabel="Loading reconciliation drift" />
             ) : (
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
@@ -482,14 +514,15 @@ export default function Reconciliation() {
                     <th scope="col" className="px-4 py-3 font-medium">Pair</th>
                     <th scope="col" className="px-4 py-3 font-medium">Severity</th>
                     <th scope="col" className="px-4 py-3 font-medium">Mismatch</th>
+                    <th scope="col" className="px-4 py-3 font-medium">Delta</th>
                     <th scope="col" className="px-4 py-3 font-medium">Trend</th>
                     <th scope="col" className="px-4 py-3 font-medium">Triage</th>
                     <th scope="col" className="px-4 py-3 font-medium">Last seen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stellar-border">
-                  {summaries.length > 0 ? (
-                    summaries.map((summary) => (
+                  {visibleSummaries.length > 0 ? (
+                    visibleSummaries.map((summary) => (
                       <SummaryRow
                         key={summary.id}
                         summary={summary}
@@ -499,7 +532,7 @@ export default function Reconciliation() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-stellar-text-secondary">
+                      <td colSpan={7} className="px-4 py-8 text-center text-stellar-text-secondary">
                         No reconciliation drift found for the selected filters.
                       </td>
                     </tr>
@@ -520,16 +553,27 @@ export default function Reconciliation() {
                 </p>
               )}
             </div>
-            {selectedRun && <SeverityBadge severity={selectedRun.severity} />}
+            <div className="flex items-center gap-2">
+              {selectedRun && (
+                <button type="button" onClick={() => setDetailOpen(true)}
+                  className="rounded-md border border-stellar-border px-3 py-1.5 text-xs text-stellar-text-primary hover:border-stellar-blue">
+                  View details
+                </button>
+              )}
+              {selectedRun && <SeverityBadge severity={selectedRun.severity} />}
+            </div>
           </div>
 
           {selectedRun ? (
-            <form onSubmit={handleTriageSubmit} className="mt-5 space-y-4">
+            <form onSubmit={handleTriageSubmit} aria-label="Reconciliation triage" className="mt-5 space-y-4">
               <label className="block text-sm">
                 <span className="text-stellar-text-secondary">Status</span>
                 <select
                   value={triageStatus}
-                  onChange={(event) => setTriageStatus(event.target.value as ReconciliationTriageStatus)}
+                  onChange={(event) => {
+                    setTriageStatus(event.target.value as ReconciliationTriageStatus);
+                    setTriageError(null);
+                  }}
                   className="mt-1 w-full rounded-md border border-stellar-border bg-stellar-dark px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-stellar-blue"
                 >
                   {triageOptions.map((option) => (
@@ -562,6 +606,9 @@ export default function Reconciliation() {
               >
                 {triageMutation.isPending ? "Saving" : "Save triage"}
               </button>
+              {triageError && (
+                <p className="text-sm text-red-300" role="alert">{triageError}</p>
+              )}
               {triageMutation.isError && (
                 <p className="text-sm text-red-300" role="alert">Triage update failed.</p>
               )}
@@ -763,6 +810,53 @@ export default function Reconciliation() {
             </table>
           </div>
         </section>
+      )}
+
+      {detailOpen && selectedRun && (
+        <div role="dialog" aria-modal="true" aria-labelledby="reconciliation-detail-heading"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="w-full max-w-2xl space-y-4 rounded-2xl border border-stellar-border bg-stellar-card p-6 text-white">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="reconciliation-detail-heading" className="text-xl font-semibold">Reconciliation detail</h2>
+                <p className="mt-1 text-sm text-stellar-text-secondary">
+                  {selectedRun.assetCode} on {selectedRun.bridgeName} — {formatMismatch(selectedRun.mismatchPercentage)} mismatch
+                </p>
+              </div>
+              <button type="button" onClick={() => setDetailOpen(false)}
+                className="rounded-full border border-stellar-border px-3 py-1 text-xs text-stellar-text-primary">
+                Close
+              </button>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold">Transaction events</h3>
+              <ul className="mt-2 space-y-2 text-sm">
+                {detailQuery.data?.reserveCommitment?.txHash && (
+                  <li>
+                    <a href={`https://stellar.expert/explorer/public/tx/${detailQuery.data.reserveCommitment.txHash}`}
+                      target="_blank" rel="noreferrer" className="text-stellar-blue hover:underline">
+                      Reserve commitment transaction ({detailQuery.data.reserveCommitment.txHash.slice(0, 10)}...)
+                    </a>
+                  </li>
+                )}
+                {(detailQuery.data?.sourceData ?? selectedRun.sourceData)
+                  .filter((datum) => Boolean(datum.reference))
+                  .map((datum) => (
+                    <li key={datum.id}>
+                      <a href={`https://stellar.expert/explorer/public/tx/${datum.reference}`}
+                        target="_blank" rel="noreferrer" className="text-stellar-blue hover:underline">
+                        {datum.label} event ({datum.reference!.slice(0, 10)}...)
+                      </a>
+                    </li>
+                  ))}
+              </ul>
+              {!detailQuery.data?.reserveCommitment?.txHash
+                && !(detailQuery.data?.sourceData ?? selectedRun.sourceData).some((datum) => datum.reference) && (
+                <p className="mt-2 text-sm text-stellar-text-secondary">No transaction events available.</p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* #1241 — Mount orphaned DataCorrections panel */}
