@@ -1,0 +1,70 @@
+name: Schema Documentation Check
+
+on:
+  pull_request:
+    paths:
+      - 'backend/src/database/migrations/**'
+      - 'docs/database-schema.md'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/src/database/migrations/**'
+
+jobs:
+  check-schema-docs:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bridge_watch
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run database migrations
+        run: npm run build:backend && cd backend && npm run migrate:latest
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: bridge_watch
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          NODE_ENV: test
+      
+      - name: Generate schema documentation
+        run: npm run docs:schema
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: bridge_watch
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+      
+      - name: Check if schema docs are up to date
+        run: |
+          if ! git diff --exit-code docs/database-schema.md; then
+            echo "❌ Database schema documentation is out of date"
+            echo "Please run 'npm run docs:schema' and commit the changes"
+            exit 1
+          fi
+          echo "✓ Schema documentation is up to date"

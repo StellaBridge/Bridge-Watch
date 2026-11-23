@@ -30,6 +30,7 @@
     "test:e2e:report": "playwright show-report",
     "check:api-contract": "node scripts/check-api-contract.mjs",
     "generate:api-contract": "node scripts/check-api-contract.mjs --write",
+    "docs:schema": "node scripts/generate-schema-docs.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "setup": "bash scripts/setup.sh",
     "setup:quick": "bash scripts/setup.sh --skip-contracts --skip-ide -y",
