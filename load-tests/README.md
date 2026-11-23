@@ -144,6 +144,52 @@ k6 run --env BASE_URL=https://bridge-watch.example.com \
 - Ensure backend has sufficient memory (monitor `/metrics` for event loop lag)
 - Disable client rate limiting during test to isolate backend bottlenecks
 
+### 6. Ingestion 10k Spike (`scenarios/ingestion-10k-spike.js`)
+Stress test simulating 10,000 transactions per second batch ingestion spike - **Closes #1733**
+
+This scenario validates the backend ingestion pipeline can buffer and process sudden market volatility spikes without dropping events:
+- Ramps from 100 req/s to 10,000 req/s in 1 minute
+- Sustains 10,000 req/s for 2 minutes
+- Each request contains 500 transaction records
+- Measures queue backlog, Redis memory usage, and PostgreSQL insertion latency
+
+#### Metrics Collected
+- `ingestion_success_rate` - Percentage of batches accepted (> 99.9%)
+- `ingestion_error_rate` - Percentage of batches rejected (< 0.1%)
+- `batch_processing_time_ms` - End-to-end batch processing time (p95 < 5s, p99 < 10s)
+- `queue_backlog_estimate` - Number of jobs waiting in queue
+- `redis_memory_mb` - Redis memory usage during spike
+- `db_insertion_latency_ms` - PostgreSQL insertion time (p95 tracked)
+
+#### Performance Thresholds
+- **Success rate:** > 99.9%
+- **Error rate:** < 0.1%
+- **p95 processing time:** < 5000ms
+- **p99 processing time:** < 10000ms
+- **HTTP request failure rate:** < 0.1%
+
+#### Test Execution
+```bash
+# Run against local backend
+k6 run load-tests/scenarios/ingestion-10k-spike.js
+
+# Run with custom API key
+k6 run --env BASE_URL=http://localhost:3001 \
+  --env API_KEY=your-ingestion-key \
+  load-tests/scenarios/ingestion-10k-spike.js
+```
+
+**Prerequisites:**
+- Ensure Redis has sufficient memory (monitor `redis_memory_mb` metric)
+- PostgreSQL connection pool sized for high write throughput
+- Background workers running to process ingestion queue
+- Disable rate limiting for ingestion endpoint during test
+
+**Hardware Requirements:**
+- Backend: 4+ CPU cores, 8GB+ RAM
+- PostgreSQL: Tuned for write-heavy workload (increased `shared_buffers`, `work_mem`)
+- Redis: 2GB+ available memory for queue buffering
+
 ## Quick Start
 
 1. Start the backend service:

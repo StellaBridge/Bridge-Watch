@@ -23,6 +23,8 @@ import { processIncidentSlaBreach } from "./incidentSlaBreach.job.js";
 import { processProviderCredentialRotation } from "./providerCredentialRotation.job.js";
 import { processApiContractMonitor } from "./apiContractMonitor.job.js";
 import { scheduleEvmReserveAttestations } from "./evmReserveAttestation.worker.js";
+import { initWebhookPruningWorker, shutdownWebhookPruningWorker } from "./webhookPruning.worker.js";
+import { initWebhookPruningJob, shutdownWebhookPruningJob } from "../jobs/webhookPruning.job.js";
 
 export async function initJobSystem() {
   const jobQueue = JobQueue.getInstance();
@@ -103,6 +105,10 @@ export async function initJobSystem() {
 
   // Initialize supply verification job system (dedicated queue and worker)
   await initSupplyVerificationJob();
+
+  // Initialize webhook pruning worker and schedule job
+  await initWebhookPruningWorker();
+  await initWebhookPruningJob();
 
   // Schedule repeatable jobs
   // price-collection: every 30 seconds
@@ -234,6 +240,11 @@ export async function initJobSystem() {
         timeoutPromise,
       ]);
       logger.info("Job queue closed gracefully");
+
+      // Close webhook pruning worker and job scheduler
+      await shutdownWebhookPruningWorker();
+      await shutdownWebhookPruningJob();
+      logger.info("Webhook pruning system closed gracefully");
     } catch (error) {
       logger.error({ error }, "Error during graceful shutdown, forcing exit");
       process.exit(1);
