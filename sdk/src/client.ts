@@ -327,11 +327,13 @@ export class BridgeWatchContractSdk {
    * Submits a signed transaction to the Soroban network via RPC.
    *
    * @param signedTransaction - Fully signed Stellar transaction.
+   * @param idempotencyKey - Optional idempotency key for request deduplication.
    * @returns Promise resolving to the transaction submission response.
    * @throws {BridgeWatchTransactionError} If the submission fails or results in an error status.
    */
   async sendTransaction(
-    signedTransaction: ReturnType<StellarSdk.TransactionBuilder["build"]>
+    signedTransaction: ReturnType<StellarSdk.TransactionBuilder["build"]>,
+    idempotencyKey?: string
   ): Promise<StellarSdk.rpc.Api.SendTransactionResponse> {
     const result = await this.server.sendTransaction(signedTransaction);
 
@@ -345,7 +347,7 @@ export class BridgeWatchContractSdk {
   /**
    * Helper method that builds, simulates, signs, and sends a contract invocation transaction in one step.
    *
-   * @param params - Contract invocation parameters.
+   * @param params - Contract invocation parameters including optional idempotency key.
    * @param signerSecret - Secret key of the account used to sign the transaction.
    * @returns Promise resolving to the transaction submission response.
    * @throws {BridgeWatchTransactionError} If building, simulating, or sending the transaction fails.
@@ -361,7 +363,7 @@ export class BridgeWatchContractSdk {
     const keypair = StellarSdk.Keypair.fromSecret(signerSecret);
     assembled.sign(keypair);
 
-    return this.sendTransaction(assembled);
+    return this.sendTransaction(assembled, params.idempotencyKey);
   }
 
   /**
