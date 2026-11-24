@@ -1,0 +1,158 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "bridgewatch-queue-processing",
+    "title": "Bridge Watch - BullMQ Queue Processing & DLQ",
+    "tags": ["bridge-watch", "bullmq", "workers", "queues"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": { "from": "now-6h", "to": "now" },
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "label": "Datasource",
+          "query": "prometheus",
+          "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" }
+        },
+        {
+          "name": "queue_name",
+          "type": "query",
+          "label": "Queue",
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "definition": "label_values(bull_queue_waiting_jobs, queue_name)",
+          "query": { "query": "label_values(bull_queue_waiting_jobs, queue_name)", "refId": "PromQueue" },
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true,
+          "current": { "selected": true, "text": "All", "value": "$__all" }
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "type": "timeseries",
+        "title": "Queue Depth per Worker Queue (waiting / active / completed / failed)",
+        "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "tooltip": { "mode": "multi" } },
+        "targets": [
+          { "refId": "A", "expr": "sum by (queue_name) (bull_queue_waiting_jobs{queue_name=~\"$queue_name\"})", "legendFormat": "waiting - {{queue_name}}" },
+          { "refId": "B", "expr": "sum by (queue_name) (bull_queue_active_jobs{queue_name=~\"$queue_name\"})", "legendFormat": "active - {{queue_name}}" },
+          { "refId": "C", "expr": "sum by (queue_name) (bull_queue_completed_jobs{queue_name=~\"$queue_name\"})", "legendFormat": "completed - {{queue_name}}" },
+          { "refId": "D", "expr": "sum by (queue_name) (bull_queue_failed_jobs{queue_name=~\"$queue_name\"})", "legendFormat": "failed - {{queue_name}}" }
+        ]
+      },
+      {
+        "id": 2,
+        "type": "gauge",
+        "title": "DLQ Backlog (warning at 100, critical at 500 jobs)",
+        "gridPos": { "h": 9, "w": 8, "x": 0, "y": 10 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 500,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 100 },
+                { "color": "red", "value": 500 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": true, "showThresholdMarkers": true },
+        "targets": [
+          { "refId": "A", "expr": "sum(bull_queue_waiting_jobs{queue_name=~\"dead-letter|dlq|.*dlq.*\"}) or sum(bull_dlq_backlog)", "legendFormat": "DLQ backlog", "instant": true }
+        ]
+      },
+      {
+        "id": 3,
+        "type": "heatmap",
+        "title": "Job Processing Duration Heatmap",
+        "gridPos": { "h": 12, "w": 16, "x": 8, "y": 10 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "custom": { "hideFrom": { "tooltip": false, "viz": false, "legend": false }, "scaleDistribution": { "type": "linear" } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "calculate": true,
+          "calculation": { "xBuckets": { "mode": "size", "value": "1m" }, "yBuckets": { "mode": "count", "value": "20" } },
+          "cellGap": 1,
+          "color": { "mode": "scheme", "scheme": "YlOrRd", "steps": 64 },
+          "legend": { "show": true },
+          "tooltip": { "show": true, "yHistogram": true },
+          "yAxis": { "unit": "s" }
+        },
+        "targets": [
+          { "refId": "A", "expr": "sum by (le) (rate(bull_queue_job_duration_seconds_bucket{queue_name=~\"$queue_name\"}[5m]))", "format": "heatmap", "legendFormat": "{{le}}" }
+        ]
+      },
+      {
+        "id": 4,
+        "type": "timeseries",
+        "title": "Job Processing Duration Percentiles (p50 / p95 / p99)",
+        "gridPos": { "h": 9, "w": 24, "x": 0, "y": 19 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "tooltip": { "mode": "multi" } },
+        "targets": [
+          { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le, queue_name) (rate(bull_queue_job_duration_seconds_bucket{queue_name=~\"$queue_name\"}[5m])))", "legendFormat": "p50 - {{queue_name}}" },
+          { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le, queue_name) (rate(bull_queue_job_duration_seconds_bucket{queue_name=~\"$queue_name\"}[5m])))", "legendFormat": "p95 - {{queue_name}}" },
+          { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le, queue_name) (rate(bull_queue_job_duration_seconds_bucket{queue_name=~\"$queue_name\"}[5m])))", "legendFormat": "p99 - {{queue_name}}" }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

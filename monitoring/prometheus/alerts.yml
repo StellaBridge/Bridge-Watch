@@ -43,6 +43,7 @@ groups:
             The Horizon cursor {{ $labels.cursor_key }} has not advanced for more
             than 5 minutes, so bridge health data may be stale.
           runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#horizoncursorlaghigh"
+          escalation_runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/horizon-rpc-outage.md"
 
       - alert: DbPoolExhaustionWarning
         expr: (db_connections_active / clamp_min(db_connections_active + db_connections_idle, 1)) > 0.85
