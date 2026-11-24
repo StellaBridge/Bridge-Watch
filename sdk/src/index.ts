@@ -38,4 +38,5 @@ export * from "./compatibility";
 export * from "./tracecontext";
 export * from "./pagination";
 export * from "./resilience";
+export * from "./websocket";
 

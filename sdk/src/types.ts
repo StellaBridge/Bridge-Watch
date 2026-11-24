@@ -104,6 +104,11 @@ export interface InvokeContractParams {
    * Optional transaction timeout in seconds. Overrides defaultTimeoutSeconds.
    */
   timeoutSeconds?: number;
+  /**
+   * Optional idempotency key for request deduplication.
+   * Ensures the same request is not processed multiple times.
+   */
+  idempotencyKey?: string;
 }
 
 /**
