@@ -33,6 +33,12 @@ pub mod oracle_hub;
 #[cfg(test)]
 
 pub mod rate_limiter;
+// Property tests for rate_limiter live under tests/ but are compiled as an
+// in-crate module: rate_limiter is cfg(test)-only, so an external integration
+// test crate cannot import it.
+#[cfg(test)]
+#[path = "../tests/rate_limiter_property_test.rs"]
+mod rate_limiter_property_test;
 pub mod report_hash;
 #[cfg(test)]
 pub mod reputation_system;
@@ -42,6 +48,7 @@ pub mod source_blessing;
 pub mod source_priority;
 pub mod source_trust;
 pub mod state_export;
+pub mod submission_replay;
 pub mod threshold_window;
 pub mod version_migration_helper;
 pub mod zk_verifier;
