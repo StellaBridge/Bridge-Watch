@@ -42,7 +42,12 @@ path = "tests/threshold_window.test.rs"
 name = "acl_test"
 path = "tests/acl.test.rs"
 
-# tests/fee_distribution_test.rs is not built: it imports a `fee_distribution` module that is not part of the crate.
+# tests/fee_distribution_test.rs is not built: it predates the public `fee_distribution` module.
+# Its rounding coverage now lives in tests/fee_distribution_property_test.rs, which is built below.
+
+[[test]]
+name = "fee_distribution_property_test"
+path = "tests/fee_distribution_property_test.rs"
 
 # tests/mmr_accumulator.test.rs is not built: it no longer matches the module API it tests (5 compile errors).
 
