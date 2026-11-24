@@ -28,6 +28,27 @@ route:
         - alertname="BullQueueFailedGrowingRapidly"
       receiver: default-slack
 
+# Inhibition: while a critical alert is firing, suppress warnings about the same
+# instance or bridge so on-call sees the root cause, not every symptom.
+# Each rule requires the label to be present on both alerts, because
+# Alertmanager treats two missing labels as equal and would otherwise let
+# unrelated alerts silence each other.
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+      - instance=~".+"
+    target_matchers:
+      - severity="warning"
+      - instance=~".+"
+    equal: ["instance"]
+  - source_matchers:
+      - severity="critical"
+      - bridge_id=~".+"
+    target_matchers:
+      - severity="warning"
+      - bridge_id=~".+"
+    equal: ["bridge_id"]
+
 receivers:
   - name: default-slack
     slack_configs:
