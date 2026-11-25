@@ -41,7 +41,7 @@
     "@stellar/stellar-sdk": "^12.3.0",
     "@types/jsonwebtoken": "^9.0.10",
     "bullmq": "^5.13.0",
-    "csv-stringify": "^6.7.0",
+    "csv-stringify": "^6.9.0",
     "decimal.js": "^10.6.0",
     "discord.js": "^14.26.3",
     "dotenv": "^16.4.5",
