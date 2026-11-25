@@ -104,6 +104,33 @@ groups:
           description: "The rate of failed jobs in queue {{ $labels.queue_name }} is increasing rapidly."
           runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/critical-alerts.md#bullqueuefailedgrowingrapidly"
 
+  - name: bridge-watch-emergency
+    interval: 30s
+    rules:
+      - alert: HorizonRpcOutage
+        expr: probe_success{job="horizon-rpc"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: horizon
+          team: bridge
+        annotations:
+          summary: "Stellar Horizon RPC is unavailable"
+          description: "Horizon probe has failed for 2 minutes on {{ $labels.instance }}. Switch to a fallback RPC node."
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/horizon-rpc-outage.md"
+
+      - alert: DatabaseDiskFull
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.10
+        for: 5m
+        labels:
+          severity: critical
+          service: database
+          team: platform
+        annotations:
+          summary: "PostgreSQL disk is nearly full"
+          description: "Less than 10% free space on {{ $labels.instance }} ({{ $value | humanizePercentage }} free). Clean up bloat/WAL or expand the volume."
+          runbook_url: "https://github.com/StellaBridge/Bridge-Watch/blob/main/monitoring/runbooks/database-disk-full.md"
+
   - name: bridge-watch-redis
     interval: 30s
     rules:
