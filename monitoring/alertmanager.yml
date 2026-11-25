@@ -1,6 +1,16 @@
 global:
   resolve_timeout: 5m
 
+# A firing alert at a higher severity suppresses duplicate lower-severity
+# notifications for the same bridge/asset while the incident is active.
+inhibit_rules:
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity=~"warning|info"']
+    equal: ['alertname', 'service', 'team', 'bridge', 'asset']
+  - source_matchers: ['severity="warning"']
+    target_matchers: ['severity="info"']
+    equal: ['alertname', 'service', 'team', 'bridge', 'asset']
+
 route:
   receiver: default-slack
   group_by: ["alertname", "service", "team"]
@@ -11,6 +21,14 @@ route:
     - matchers:
         - severity="critical"
       receiver: pagerduty
+      continue: true
+    - matchers:
+        - severity="warning"
+      receiver: default-slack
+      continue: true
+    - matchers:
+        - severity="info"
+      receiver: default-slack
       continue: true
     # #1245 — Bridge health anomalies also dispatch to Discord and Telegram
     - matchers:
