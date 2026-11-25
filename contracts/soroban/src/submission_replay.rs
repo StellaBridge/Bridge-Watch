@@ -137,7 +137,7 @@ fn get_or_create_nonce_epoch(env: &Env) -> NonceEpoch {
     let epoch_start = (epoch_id as u64) * NONCE_EPOCH_DURATION_SECS;
     let epoch_end = epoch_start + NONCE_EPOCH_DURATION_SECS;
 
-    let mut epochs = load_nonce_epochs(env);
+    let epochs = load_nonce_epochs(env);
 
     // Check if current epoch exists
     if let Some(existing) = epochs.iter().find(|e| e.epoch_id == epoch_id) {
@@ -162,7 +162,7 @@ fn get_or_create_nonce_epoch(env: &Env) -> NonceEpoch {
     }
 
     // Add new epoch if within capacity
-    if pruned.len() < MAX_NONCE_EPOCHS as usize {
+    if pruned.len() < MAX_NONCE_EPOCHS {
         pruned.push_back(new_epoch.clone());
     }
 
@@ -181,9 +181,11 @@ fn save_nonce_epochs(env: &Env, epochs: &Vec<NonceEpoch>) {
     env.storage()
         .persistent()
         .set(&SubmissionReplayKey::NonceEpochs, epochs);
-    env.storage()
-        .persistent()
-        .extend_ttl(&SubmissionReplayKey::NonceEpochs, 17_280 * 2, 17_280 * 90);
+    env.storage().persistent().extend_ttl(
+        &SubmissionReplayKey::NonceEpochs,
+        17_280 * 2,
+        17_280 * 90,
+    );
 }
 
 // ── Core Functions ────────────────────────────────────────────────────────────
@@ -237,7 +239,7 @@ pub fn record_nonce(env: &Env, nonce_id: u32) {
     let mut found = false;
     for (i, e) in epochs.iter().enumerate() {
         if e.epoch_id == epoch.epoch_id {
-            epochs.set(i as u32, epoch);
+            epochs.set(i as u32, epoch.clone());
             found = true;
             break;
         }
@@ -337,16 +339,12 @@ fn append_entry(env: &Env, entry: ReplayEntry) {
 /// Preview submissions in a time range without applying them.
 ///
 /// Read-only. Returns entries ordered by `ordering_key` (ascending).
-pub fn preview_replay(
-    env: &Env,
-    from_timestamp: u64,
-    to_timestamp: u64,
-) -> Vec<ReplayEntry> {
+pub fn preview_replay(env: &Env, from_timestamp: u64, to_timestamp: u64) -> Vec<ReplayEntry> {
     let log = load_log(env);
     let mut result: Vec<ReplayEntry> = Vec::new(env);
 
     for entry in log.iter() {
-        if entry.timestamp >= from_timestamp && entry.timestamp <= to_timestamp {
+        if (from_timestamp..=to_timestamp).contains(&entry.timestamp) {
             result.push_back(entry);
         }
     }
@@ -393,146 +391,4 @@ pub fn execute_replay(
 /// Return the total number of entries in the replay log.
 pub fn replay_log_size(env: &Env) -> u32 {
     load_log(env).len()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::testutils::Ledger;
-    use soroban_sdk::Env;
-
-    fn setup() -> (Env, Address) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        env.storage().instance().set(&keys::ADMIN, &admin);
-        env.ledger().set_timestamp(1_000_000);
-        (env, admin)
-    }
-
-    #[test]
-    fn test_record_health_submission() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-
-        record_health_submission(&env, &admin, asset, 80, 75, 90, 85);
-
-        assert_eq!(replay_log_size(&env), 1);
-    }
-
-    #[test]
-    fn test_record_price_submission() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-        let source = String::from_str(&env, "oracle");
-
-        record_price_submission(&env, &admin, asset, 1_000_000, source);
-
-        assert_eq!(replay_log_size(&env), 1);
-    }
-
-    #[test]
-    fn test_preview_replay_time_range() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-
-        env.ledger().set_timestamp(1_000);
-        record_health_submission(&env, &admin, asset.clone(), 80, 75, 90, 85);
-
-        env.ledger().set_timestamp(2_000);
-        record_health_submission(&env, &admin, asset.clone(), 85, 80, 95, 90);
-
-        env.ledger().set_timestamp(3_000);
-        record_health_submission(&env, &admin, asset.clone(), 70, 65, 80, 75);
-
-        // Only entries from timestamp 2000-3000
-        let entries = preview_replay(&env, 2_000, 3_000);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries.get(0).unwrap().health_score, 85);
-        assert_eq!(entries.get(1).unwrap().health_score, 70);
-    }
-
-    #[test]
-    fn test_preview_replay_ordering() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-
-        env.ledger().set_timestamp(1_000);
-        record_health_submission(&env, &admin, asset.clone(), 80, 75, 90, 85);
-
-        env.ledger().set_timestamp(1_000);
-        record_health_submission(&env, &admin, asset.clone(), 90, 85, 95, 90);
-
-        let entries = preview_replay(&env, 0, u64::MAX);
-        assert_eq!(entries.len(), 2);
-        // First entry has lower ordering_key
-        assert!(
-            entries.get(0).unwrap().ordering_key
-                < entries.get(1).unwrap().ordering_key
-        );
-    }
-
-    #[test]
-    fn test_execute_replay() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-
-        env.ledger().set_timestamp(1_000);
-        record_health_submission(&env, &admin, asset.clone(), 80, 75, 90, 85);
-
-        env.ledger().set_timestamp(2_000);
-        record_health_submission(&env, &admin, asset.clone(), 90, 85, 95, 90);
-
-        env.ledger().set_timestamp(5_000);
-        let summary = execute_replay(&env, &admin, 1_000, 2_000);
-        assert_eq!(summary.entries_replayed, 2);
-        assert_eq!(summary.from_timestamp, 1_000);
-        assert_eq!(summary.to_timestamp, 2_000);
-    }
-
-    #[test]
-    fn test_execute_replay_empty_range() {
-        let (env, admin) = setup();
-        let summary = execute_replay(&env, &admin, 1_000, 2_000);
-        assert_eq!(summary.entries_replayed, 0);
-    }
-
-    #[test]
-    fn test_mixed_submissions() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-        let source = String::from_str(&env, "oracle");
-
-        env.ledger().set_timestamp(1_000);
-        record_health_submission(&env, &admin, asset.clone(), 80, 75, 90, 85);
-
-        env.ledger().set_timestamp(1_500);
-        record_price_submission(&env, &admin, asset, 1_000_000, source);
-
-        let entries = preview_replay(&env, 0, u64::MAX);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries.get(0).unwrap().submission_type, SubmissionType::Health);
-        assert_eq!(entries.get(1).unwrap().submission_type, SubmissionType::Price);
-    }
-
-    #[test]
-    #[should_panic(expected = "only admin")]
-    fn test_non_admin_cannot_execute_replay() {
-        let (env, _admin) = setup();
-        let stranger = Address::generate(&env);
-        execute_replay(&env, &stranger, 0, u64::MAX);
-    }
-
-    #[test]
-    fn test_preview_is_read_only_for_anyone() {
-        let (env, admin) = setup();
-        let asset = String::from_str(&env, "USDC");
-
-        record_health_submission(&env, &admin, asset, 80, 75, 90, 85);
-
-        // Preview does not require admin
-        let entries = preview_replay(&env, 0, u64::MAX);
-        assert_eq!(entries.len(), 1);
-    }
 }

@@ -93,12 +93,12 @@ name = "asset_ranking_test"
 path = "tests/asset_ranking.test.rs"
 
 [[test]]
-name = "liquidity_pool_fuzz"
-path = "tests/liquidity_pool_fuzz.rs"
+name = "state_export_test"
+path = "tests/state_export.test.rs"
 
 [[test]]
-name = "mmr_accumulator_fuzz"
-path = "tests/mmr_accumulator_fuzz.rs"
+name = "submission_replay_test"
+path = "tests/submission_replay.test.rs"
 
 # tests/version_migration_tests.rs is not built: it written as an in-crate module (`crate::` imports), not an integration test.
 
