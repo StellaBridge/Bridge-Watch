@@ -76,7 +76,7 @@
     "eslint": "^8.57.1",
     "ioredis-mock": "^8.13.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^2.1.9"
   }
 }
