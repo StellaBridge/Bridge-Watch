@@ -1308,6 +1308,7 @@ impl BridgeWatchContract {
         price_stability_score: u32,
         bridge_uptime_score: u32,
     ) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::HealthSubmitter);
 
         // Check if asset is locked
@@ -1365,6 +1366,7 @@ impl BridgeWatchContract {
     /// `HealthSubmitter`. Accepts up to 20 records per call, all stamped with
     /// the same ledger timestamp. A `health_up` event is emitted per asset.
     pub fn submit_health_batch(env: Env, caller: Address, records: Vec<HealthScoreBatch>) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::HealthSubmitter);
 
         if records.len() > 20 {
@@ -1432,6 +1434,7 @@ impl BridgeWatchContract {
         price: i128,
         source: String,
     ) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::PriceSubmitter);
 
         // Check if asset is locked
@@ -1682,6 +1685,7 @@ impl BridgeWatchContract {
         bridge_uptime_score: u32,
         signature: SignerSignature,
     ) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::HealthSubmitter);
 
         let message = Self::build_health_message(
@@ -1714,6 +1718,7 @@ impl BridgeWatchContract {
         source: String,
         signature: SignerSignature,
     ) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::PriceSubmitter);
 
         let mut message = Bytes::new(&env);
@@ -1736,6 +1741,7 @@ impl BridgeWatchContract {
         records: Vec<HealthScoreBatch>,
         signatures: Vec<SignerSignature>,
     ) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::HealthSubmitter);
 
         let mut batch_message = Bytes::new(&env);
@@ -6154,6 +6160,7 @@ impl BridgeWatchContract {
         bridge_uptime_score: u32,
         manual_override: Option<u32>,
     ) {
+        Self::assert_not_globally_paused(&env);
         Self::check_permission(&env, &caller, AdminRole::HealthSubmitter);
         let status = Self::load_asset_health(&env, &asset_code);
         Self::assert_asset_accepting_submissions(&status);

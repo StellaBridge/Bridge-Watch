@@ -24,6 +24,7 @@
     "coverage:combine": "node scripts/coverage.mjs",
     "test:load": "k6 run load-tests/scenarios/api-load.js -e PROFILE=smoke -e BASE_URL=http://127.0.0.1:3001",
     "test:load:ingestion-spike": "k6 run load-tests/scenarios/ingestion-10k-spike.js",
+    "test:load:search": "k6 run load-tests/scenarios/search-concurrency.js",
     "test:load:report": "node load-tests/scripts/generate-report.mjs load-tests/results/summary.json load-tests/results/report.md",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",

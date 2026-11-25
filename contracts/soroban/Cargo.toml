@@ -101,3 +101,7 @@ name = "submission_replay_test"
 path = "tests/submission_replay.test.rs"
 
 # tests/version_migration_tests.rs is not built: it written as an in-crate module (`crate::` imports), not an integration test.
+
+[[test]]
+name = "submission_pause_test"
+path = "tests/submission_pause.test.rs"

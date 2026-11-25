@@ -190,6 +190,33 @@ k6 run --env BASE_URL=http://localhost:3001 \
 - PostgreSQL: Tuned for write-heavy workload (increased `shared_buffers`, `work_mem`)
 - Redis: 2GB+ available memory for queue buffering
 
+### 7. Search Concurrency (`scenarios/search-concurrency.js`)
+Full-text search under concurrent, multi-parameter filtered traffic - **Closes #1734**
+
+Ramps from 0 to 500 VUs over 2 minutes, holds for 7 minutes, and ramps down over 1 minute (10-minute test). Each VU calls `POST /api/v1/search` with randomized `type`, `fuzzy`, `limit`, and combined `chain`, `asset`, and `status` filters. A separate VU repeats the same query and verifies Redis caching via the `x-cache` response header or a [redis_exporter](https://github.com/oliver006/redis_exporter) keyspace hit counter.
+
+#### Performance Thresholds
+- **p95 search duration:** < 150ms
+- **Server errors (5xx):** zero
+- **Cache hit rate for repeated queries:** > 95%
+- **Check success rate:** > 99%
+
+#### Test Execution
+```bash
+# Default: 500 VUs, 10 minutes
+k6 run load-tests/scenarios/search-concurrency.js
+
+# Verify Redis caching through a redis_exporter endpoint
+k6 run --env BASE_URL=http://localhost:3001 \
+  --env REDIS_EXPORTER_URL=http://localhost:9121/metrics \
+  load-tests/scenarios/search-concurrency.js
+```
+
+**Prerequisites:**
+- Disable the search route rate limit (30 req/min by default) for the test environment.
+- Set `CACHE_HEADER` if the deployment exposes cache status under a different header.
+- Redis response caching must be enabled for the repeated-query check to pass.
+
 ## Quick Start
 
 1. Start the backend service:
@@ -247,6 +274,11 @@ export const baselines = {
 | `API_KEY` | `test-key-123` | API authentication key |
 | `SUMMARY_JSON` | `load-tests/results/batch-reconciliation-summary.json` | JSON output |
 | `SUMMARY_TXT` | `load-tests/results/batch-reconciliation-summary.txt` | Text output |
+| `TARGET_VUS` | `500` | Peak concurrent search users |
+| `RAMP_UP` / `HOLD` / `RAMP_DOWN` | `2m` / `7m` / `1m` | Search scenario stages |
+| `REDIS_EXPORTER_URL` | unset | Redis exporter `/metrics` URL used to verify cache hits |
+| `CACHE_HEADER` | `x-cache` | Response header used to verify cache hits |
+| `VERIFY_CACHE` | `true` | Enable the repeated-query cache verification scenario |
 
 ## CI/CD Integration
 

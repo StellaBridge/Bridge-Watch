@@ -1,0 +1,233 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "bridgewatch-postgres-performance",
+    "title": "Bridge Watch - PostgreSQL Connection Pool & Locks",
+    "tags": ["bridge-watch", "postgresql", "database", "performance"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "30s",
+    "time": { "from": "now-6h", "to": "now" },
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "label": "Datasource",
+          "query": "prometheus",
+          "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" }
+        },
+        {
+          "name": "instance",
+          "type": "query",
+          "label": "Instance",
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "definition": "label_values(pg_stat_database_numbackends, instance)",
+          "query": { "query": "label_values(pg_stat_database_numbackends, instance)", "refId": "PromInstance" },
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true,
+          "current": { "selected": true, "text": "All", "value": "$__all" }
+        },
+        {
+          "name": "database",
+          "type": "query",
+          "label": "Database",
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "definition": "label_values(pg_stat_database_numbackends, datname)",
+          "query": { "query": "label_values(pg_stat_database_numbackends, datname)", "refId": "PromDatabase" },
+          "refresh": 1,
+          "includeAll": true,
+          "current": { "selected": true, "text": "All", "value": "$__all" }
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Pool Utilization (threshold: green < 70%, yellow 70-85%, red > 85%)",
+        "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area" },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "100 * sum by (instance) (db_connections_active{instance=~\"$instance\"}) / clamp_min(sum by (instance) (db_connections_active{instance=~\"$instance\"} + db_connections_idle{instance=~\"$instance\"}), 1)",
+            "legendFormat": "{{instance}}",
+            "instant": true
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "type": "timeseries",
+        "title": "Active vs Idle Pool Connections",
+        "gridPos": { "h": 9, "w": 12, "x": 6, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "stacking": { "mode": "normal" }, "legend": { "displayMode": "list", "placement": "bottom" } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "tooltip": { "mode": "multi" } },
+        "targets": [
+          { "refId": "A", "expr": "sum by (instance) (db_connections_active{instance=~\"$instance\"})", "legendFormat": "Active - {{instance}}" },
+          { "refId": "B", "expr": "sum by (instance) (db_connections_idle{instance=~\"$instance\"})", "legendFormat": "Idle - {{instance}}" }
+        ]
+      },
+      {
+        "id": 3,
+        "type": "timeseries",
+        "title": "Connection Waiting Queue",
+        "gridPos": { "h": 9, "w": 12, "x": 18, "y": 0 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "tooltip": { "mode": "multi" } },
+        "targets": [
+          { "refId": "A", "expr": "sum by (instance) (db_connections_waiting{instance=~\"$instance\"})", "legendFormat": "Waiting - {{instance}}" },
+          { "refId": "B", "expr": "sum by (instance) (pg_stat_database_numbackends{instance=~\"$instance\",datname=~\"$database\"})", "legendFormat": "Backends - {{instance}}" }
+        ]
+      },
+      {
+        "id": 4,
+        "type": "timeseries",
+        "title": "Transaction Rollback Rate",
+        "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "min": 0,
+            "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "tooltip": { "mode": "multi" } },
+        "targets": [
+          { "refId": "A", "expr": "sum by (datname) (rate(pg_stat_database_xact_rollback{instance=~\"$instance\",datname=~\"$database\"}[5m]))", "legendFormat": "{{datname}}" },
+          { "refId": "B", "expr": "sum by (datname) (rate(pg_stat_database_xact_commit{instance=~\"$instance\",datname=~\"$database\"}[5m]))", "legendFormat": "commits - {{datname}}" }
+        ]
+      },
+      {
+        "id": 5,
+        "type": "timeseries",
+        "title": "Lock Wait Times (seconds)",
+        "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": { "tooltip": { "mode": "multi" } },
+        "targets": [
+          { "refId": "A", "expr": "max by (datname, locktype) (pg_locks_wait_duration_seconds{instance=~\"$instance\",datname=~\"$database\"})", "legendFormat": "{{datname}} {{locktype}}" },
+          { "refId": "B", "expr": "max by (datname) (pg_stat_database_deadlocks{instance=~\"$instance\",datname=~\"$database\"})", "legendFormat": "deadlocks - {{datname}}" }
+        ]
+      },
+      {
+        "id": 6,
+        "type": "table",
+        "title": "Top 5 Longest-Running Active Queries",
+        "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+        "datasource": { "type": "prometheus", "uid": "$datasource" },
+        "fieldConfig": {
+          "defaults": {
+            "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": true },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 85 }
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Duration" },
+              "properties": [{ "id": "unit", "value": "s" }, { "id": "custom.cellOptions", "value": { "type": "color-background" } }]
+            }
+          ]
+        },
+        "options": { "showHeader": true, "cellHeight": "sm" },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "topk(5, max by (instance, datname, usename, pid, state, query) (pg_stat_activity_query_duration_seconds{instance=~\"$instance\",datname=~\"$database\",state=\"active\"}))",
+            "format": "table",
+            "instant": true,
+            "legendFormat": ""
+          }
+        ],
+        "transformations": [
+          { "id": "organize", "options": { "excludeByName": { "Time": true, "Value #A": false }, "renameByName": { "Value #A": "Duration", "datname": "Database", "usename": "User", "pid": "PID", "state": "State", "query": "Query" } } }
+        ]
+      }
+    ]
+  },
+  "overwrite": true
+}

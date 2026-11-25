@@ -182,8 +182,9 @@ export default function BridgeTransferSLATracking() {
           <h2 className="mb-4 text-lg font-semibold text-white">SLA Target Settings</h2>
           <form onSubmit={handleConfigSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-stellar-text-secondary">Default Transfer SLA Target (seconds)</label>
+              <label htmlFor="sla-target" className="block text-xs font-medium text-stellar-text-secondary">Default Transfer SLA Target (seconds)</label>
               <input
+                id="sla-target"
                 type="number"
                 value={slaTarget}
                 onChange={(e) => setSlaTarget(Number(e.target.value))}
@@ -191,8 +192,9 @@ export default function BridgeTransferSLATracking() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-stellar-text-secondary">Breach Alert Threshold (%)</label>
+              <label htmlFor="breach-alert-threshold" className="block text-xs font-medium text-stellar-text-secondary">Breach Alert Threshold (%)</label>
               <input
+                id="breach-alert-threshold"
                 type="number"
                 step="0.1"
                 value={breachAlertPct}
