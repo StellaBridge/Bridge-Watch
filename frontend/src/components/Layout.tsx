@@ -4,7 +4,6 @@ import Navbar from "./Navbar";
 import { Breadcrumb } from "./Breadcrumb";
 import { ComponentErrorBoundary } from "./ErrorBoundary";
 import ShortcutHelp from "./ShortcutHelp";
-import CommandPalette from "./CommandPalette";
 import MaintenanceBanner from "./MaintenanceBanner";
 import OfflineIndicator from "./OfflineIndicator";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -47,8 +46,6 @@ export default function Layout() {
         tabIndex={-1}
         className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 focus:outline-none transition-all duration-300 ${sidebarWidth}`}
       >
-        {/* Command Palette */}
-        <CommandPalette />
         {showBreadcrumbs && <Breadcrumb />}
         <ComponentErrorBoundary context="PageContent" severity="high">
           <Outlet />

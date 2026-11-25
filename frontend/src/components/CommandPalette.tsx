@@ -64,9 +64,33 @@ const QUICK_NAV_ITEMS: CommandAction[] = [
   { id: "nav-liquidity", title: "Go to Liquidity", href: "/liquidity", keywords: ["fragmentation", "depth"] },
 ];
 
-export default function CommandPalette() {
+export interface CommandPaletteProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onClose?: () => void;
+}
+
+export default function CommandPalette({
+  open: controlledOpen,
+  onOpenChange,
+  onClose,
+}: CommandPaletteProps = {}) {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+
+  const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof value === "function" ? value(open) : value;
+    if (!isControlled) {
+      setInternalOpen(next);
+    }
+    onOpenChange?.(next);
+    if (!next && onClose) {
+      onClose();
+    }
+  };
+
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
@@ -80,16 +104,33 @@ export default function CommandPalette() {
   });
 
   useEffect(() => {
+    // If controlled by parent (like App), parent manages the hotkey toggle
+    if (isControlled) return;
+
     const handle = (e: KeyboardEvent) => {
-      if ((e.key === "k" && (e.metaKey || e.ctrlKey)) || (e.key === "/" && !e.ctrlKey && !e.metaKey && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement))) {
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        if (isInput) return;
+        e.preventDefault();
+        setOpen((s) => !s);
+      } else if (e.key === "/" && !e.ctrlKey && !e.metaKey && !isInput) {
         e.preventDefault();
         setOpen((s) => !s);
       }
-      if (e.key === "Escape") setOpen(false);
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, []);
+  }, [isControlled, setOpen]);
 
   const allItems = useMemo(() => {
     const q = query.trim();
