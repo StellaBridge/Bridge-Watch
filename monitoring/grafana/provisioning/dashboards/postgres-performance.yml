@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: bridge-watch-postgres-performance
+    orgId: 1
+    folder: Bridge Watch - Database
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 15
+    options:
+      path: /var/lib/grafana/dashboards/bridgewatch-postgres-performance.json

@@ -18,7 +18,7 @@
 //! ## Supported Asset Pairs (Phase 1)
 //! - USDC/XLM, EURC/XLM, PYUSD/XLM, FOBXX/USDC
 
-use soroban_sdk::{contracttype, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Env, String, Vec};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -988,6 +988,240 @@ fn isqrt(n: i128) -> i128 {
         y = (x + n / x) / 2;
     }
     x
+}
+
+// ---------------------------------------------------------------------------
+// AMM Swap Math & Invariant Helpers
+// ---------------------------------------------------------------------------
+
+/// Maximum fee basis points: 10_000 = 100%
+pub const MAX_FEE_BPS: u32 = 10_000;
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum SwapError {
+    ZeroAmountIn = 100,
+    ZeroReserve = 101,
+    FeeTooHigh = 102,
+    InsufficientLiquidity = 103,
+    Overflow = 104,
+    InvariantViolated = 105,
+}
+
+/// 512-bit unsigned integer represented as 8 x 64-bit limbs (little-endian).
+/// Used for overflow-free intermediate calculations in AMM invariant verification.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct U512 {
+    pub limbs: [u64; 8],
+}
+
+impl U512 {
+    pub const ZERO: U512 = U512 { limbs: [0; 8] };
+    pub const ONE: U512 = U512 {
+        limbs: [1, 0, 0, 0, 0, 0, 0, 0],
+    };
+
+    pub const fn from_u64(v: u64) -> Self {
+        let mut limbs = [0u64; 8];
+        limbs[0] = v;
+        Self { limbs }
+    }
+
+    pub const fn from_u128(v: u128) -> Self {
+        let mut limbs = [0u64; 8];
+        limbs[0] = v as u64;
+        limbs[1] = (v >> 64) as u64;
+        Self { limbs }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.limbs == [0; 8]
+    }
+
+    pub fn cmp(&self, rhs: &Self) -> core::cmp::Ordering {
+        for i in (0..8).rev() {
+            if self.limbs[i] != rhs.limbs[i] {
+                return self.limbs[i].cmp(&rhs.limbs[i]);
+            }
+        }
+        core::cmp::Ordering::Equal
+    }
+
+    pub fn add(&self, rhs: &Self) -> Self {
+        let mut limbs = [0u64; 8];
+        let mut carry = 0u128;
+        for i in 0..8 {
+            let sum = (self.limbs[i] as u128) + (rhs.limbs[i] as u128) + carry;
+            limbs[i] = sum as u64;
+            carry = sum >> 64;
+        }
+        Self { limbs }
+    }
+
+    pub fn sub(&self, rhs: &Self) -> Self {
+        let mut limbs = [0u64; 8];
+        let mut borrow = 0u128;
+        for i in 0..8 {
+            let a = self.limbs[i] as u128;
+            let b = (rhs.limbs[i] as u128) + borrow;
+            if a >= b {
+                limbs[i] = (a - b) as u64;
+                borrow = 0;
+            } else {
+                limbs[i] = ((1u128 << 64) + a - b) as u64;
+                borrow = 1;
+            }
+        }
+        Self { limbs }
+    }
+
+    pub fn mul(&self, rhs: &Self) -> Self {
+        let mut limbs = [0u64; 8];
+        for i in 0..8 {
+            let mut carry = 0u128;
+            for j in 0..(8 - i) {
+                let cur = (limbs[i + j] as u128)
+                    + ((self.limbs[i] as u128) * (rhs.limbs[j] as u128))
+                    + carry;
+                limbs[i + j] = cur as u64;
+                carry = cur >> 64;
+            }
+        }
+        Self { limbs }
+    }
+
+    pub fn shl1(&self) -> Self {
+        let mut limbs = [0u64; 8];
+        let mut carry = 0u64;
+        for i in 0..8 {
+            limbs[i] = (self.limbs[i] << 1) | carry;
+            carry = self.limbs[i] >> 63;
+        }
+        Self { limbs }
+    }
+
+    pub fn div_rem(&self, den: &Self) -> Option<(Self, Self)> {
+        if den.is_zero() {
+            return None;
+        }
+        if self.cmp(den) == core::cmp::Ordering::Less {
+            return Some((Self::ZERO, *self));
+        }
+
+        let mut quot = Self::ZERO;
+        let mut rem = Self::ZERO;
+
+        for i in (0..512).rev() {
+            let limb_idx = i / 64;
+            let bit_idx = i % 64;
+            let bit = (self.limbs[limb_idx] >> bit_idx) & 1;
+
+            rem = rem.shl1();
+            rem.limbs[0] |= bit;
+
+            if rem.cmp(den) != core::cmp::Ordering::Less {
+                rem = rem.sub(den);
+                quot.limbs[limb_idx] |= 1u64 << bit_idx;
+            }
+        }
+
+        Some((quot, rem))
+    }
+
+    pub fn to_u128(&self) -> Option<u128> {
+        for i in 2..8 {
+            if self.limbs[i] != 0 {
+                return None;
+            }
+        }
+        Some((self.limbs[0] as u128) | ((self.limbs[1] as u128) << 64))
+    }
+}
+
+/// Helper function to multiply two u128 numbers into (high, low) u128 tuple.
+pub fn mul_u128(a: u128, b: u128) -> (u128, u128) {
+    let big = U512::from_u128(a).mul(&U512::from_u128(b));
+    let lo = (big.limbs[0] as u128) | ((big.limbs[1] as u128) << 64);
+    let hi = (big.limbs[2] as u128) | ((big.limbs[3] as u128) << 64);
+    (hi, lo)
+}
+
+/// Helper function to divide a 256-bit number (high, low) by a u128 divisor.
+pub fn div_u256_by_u128(high: u128, low: u128, divisor: u128) -> Option<u128> {
+    if divisor == 0 {
+        return None;
+    }
+    let mut num = U512::ZERO;
+    num.limbs[0] = low as u64;
+    num.limbs[1] = (low >> 64) as u64;
+    num.limbs[2] = high as u64;
+    num.limbs[3] = (high >> 64) as u64;
+
+    let den = U512::from_u128(divisor);
+    let (quot, _) = num.div_rem(&den)?;
+    quot.to_u128()
+}
+
+/// Calculate the output amount for a constant-product (x * y = k) AMM swap:
+///
+/// amount_out = floor((reserve_out * amount_in_with_fee) / (reserve_in * 10000 + amount_in_with_fee))
+/// where amount_in_with_fee = amount_in * (10000 - fee_bps).
+///
+/// Returns Ok(amount_out) on success, or SwapError on invalid input/insufficient liquidity.
+pub fn calculate_swap_amount_out(
+    reserve_in: u128,
+    reserve_out: u128,
+    amount_in: u128,
+    fee_bps: u32,
+) -> Result<u128, SwapError> {
+    if amount_in == 0 {
+        return Err(SwapError::ZeroAmountIn);
+    }
+    if reserve_in == 0 || reserve_out == 0 {
+        return Err(SwapError::ZeroReserve);
+    }
+    if fee_bps > MAX_FEE_BPS {
+        return Err(SwapError::FeeTooHigh);
+    }
+
+    let fee_multiplier = (MAX_FEE_BPS - fee_bps) as u128;
+    let u_amount_in = U512::from_u128(amount_in);
+    let u_fee_multiplier = U512::from_u128(fee_multiplier);
+    let amount_in_with_fee = u_amount_in.mul(&u_fee_multiplier);
+
+    let u_reserve_out = U512::from_u128(reserve_out);
+    let numerator = u_reserve_out.mul(&amount_in_with_fee);
+
+    let u_reserve_in = U512::from_u128(reserve_in);
+    let u_fee_base = U512::from_u128(MAX_FEE_BPS as u128);
+    let denominator = u_reserve_in.mul(&u_fee_base).add(&amount_in_with_fee);
+
+    let (quot, _) = numerator
+        .div_rem(&denominator)
+        .ok_or(SwapError::ZeroReserve)?;
+
+    let amount_out = quot.to_u128().ok_or(SwapError::Overflow)?;
+
+    if amount_out >= reserve_out {
+        return Err(SwapError::InsufficientLiquidity);
+    }
+
+    Ok(amount_out)
+}
+
+/// Checks whether the constant product invariant holds: k_after >= k_before.
+/// k_before = reserve_in_before * reserve_out_before
+/// k_after = reserve_in_after * reserve_out_after
+pub fn k_invariant_holds(
+    reserve_in_before: u128,
+    reserve_out_before: u128,
+    reserve_in_after: u128,
+    reserve_out_after: u128,
+) -> bool {
+    let k_before = U512::from_u128(reserve_in_before).mul(&U512::from_u128(reserve_out_before));
+    let k_after = U512::from_u128(reserve_in_after).mul(&U512::from_u128(reserve_out_after));
+    k_after.cmp(&k_before) != core::cmp::Ordering::Less
 }
 
 // ---------------------------------------------------------------------------

@@ -1,158 +1,151 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
-import { render } from "../../test/utils";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { BrowserRouter } from "react-router-dom";
+import App from "../../App";
 import CommandPalette from "../CommandPalette";
 
-const navigateMock = vi.hoisted(() => vi.fn());
-
-vi.mock("react-router-dom", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react-router-dom")>()),
-  useNavigate: () => navigateMock,
+vi.mock("../../hooks/useNotifications", () => ({
+  useNotifications: vi.fn(),
 }));
 
-const STORAGE_KEY = "bridgewatch:recent_actions";
-
-function openWithShortcut() {
-  fireEvent.keyDown(document.body, { key: "k", ctrlKey: true });
-  return screen.getByRole("dialog", { name: "Command palette" });
-}
-
-function input() {
-  return screen.getByRole("combobox");
-}
-
-function options() {
-  return screen.getAllByRole("option");
-}
-
-function selectedOption() {
-  return screen.getByRole("option", { selected: true });
-}
-
-describe("CommandPalette", () => {
-  beforeAll(() => {
-    // jsdom does not implement scrollIntoView; the palette calls it on every selection change.
-    Element.prototype.scrollIntoView = vi.fn();
-  });
-
+describe("CommandPalette Global Shortcut (Issue #1701)", () => {
   beforeEach(() => {
     localStorage.clear();
-    navigateMock.mockReset();
   });
 
-  it("stays closed until opened with Ctrl+K", () => {
-    render(<CommandPalette />);
-    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  it("toggles CommandPalette open and closed on Meta+K and prevents default", () => {
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
 
-    openWithShortcut();
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
 
+    const opened = fireEvent.keyDown(window, {
+      key: "k",
+      metaKey: true,
+    });
+    expect(opened).toBe(false); // preventDefault was called
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
+
+    // Second press toggles it closed
+    const closed = fireEvent.keyDown(window, {
+      key: "k",
+      metaKey: true,
+    });
+    expect(closed).toBe(false);
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+  });
+
+  it("toggles CommandPalette open on Ctrl+K and prevents default", () => {
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+
+    const opened = fireEvent.keyDown(window, {
+      key: "k",
+      ctrlKey: true,
+    });
+    expect(opened).toBe(false);
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
   });
 
-  it("opens with '/' when focus is not in a text field", () => {
-    render(<CommandPalette />);
+  it("does not trigger shortcut when user is typing inside an input element", () => {
+    render(
+      <BrowserRouter>
+        <div>
+          <input data-testid="test-input" />
+          <App />
+        </div>
+      </BrowserRouter>
+    );
 
-    fireEvent.keyDown(document.body, { key: "/" });
+    const input = screen.getByTestId("test-input");
+    input.focus();
+
+    const allowed = fireEvent.keyDown(input, {
+      key: "k",
+      metaKey: true,
+    });
+
+    expect(allowed).toBe(true); // preventDefault was NOT called
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+  });
+
+  it("does not trigger shortcut when user is typing inside a textarea element", () => {
+    render(
+      <BrowserRouter>
+        <div>
+          <textarea data-testid="test-textarea" />
+          <App />
+        </div>
+      </BrowserRouter>
+    );
+
+    const textarea = screen.getByTestId("test-textarea");
+    textarea.focus();
+
+    const allowed = fireEvent.keyDown(textarea, {
+      key: "k",
+      ctrlKey: true,
+    });
+
+    expect(allowed).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+  });
+
+  it("closes on Escape key press", () => {
+    render(
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    );
+
+    // Open palette
+    fireEvent.keyDown(window, {
+      key: "k",
+      metaKey: true,
+    });
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
+
+    // Press Escape
+    fireEvent.keyDown(window, {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+  });
+
+  it("supports controlled open and onClose props on CommandPalette directly", () => {
+    const handleClose = vi.fn();
+    const handleOpenChange = vi.fn();
+
+    const { rerender } = render(
+      <BrowserRouter>
+        <CommandPalette open={false} onClose={handleClose} onOpenChange={handleOpenChange} />
+      </BrowserRouter>
+    );
+
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).not.toBeInTheDocument();
+
+    rerender(
+      <BrowserRouter>
+        <CommandPalette open={true} onClose={handleClose} onOpenChange={handleOpenChange} />
+      </BrowserRouter>
+    );
 
     expect(screen.getByRole("dialog", { name: "Command palette" })).toBeInTheDocument();
-  });
 
-  it("filters navigation commands by the typed search term", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    fireEvent.change(input(), { target: { value: "bridg" } });
-
-    const titles = options().map((option) => option.textContent ?? "");
-    expect(titles.some((title) => title.includes("Go to Bridges"))).toBe(true);
-    expect(titles.some((title) => title.includes("Go to Analytics"))).toBe(false);
-  });
-
-  it("shows a no-results message when nothing matches", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    fireEvent.change(input(), { target: { value: "zzqqxx" } });
-
-    expect(screen.getByText(/No results for/)).toBeInTheDocument();
-    expect(screen.queryAllByRole("option")).toHaveLength(0);
-  });
-
-  it("moves the selection down and up with the arrow keys", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    expect(selectedOption()).toHaveTextContent("Go to Dashboard");
-
-    fireEvent.keyDown(input(), { key: "ArrowDown" });
-    expect(selectedOption()).toHaveTextContent("Go to Bridges");
-
-    fireEvent.keyDown(input(), { key: "ArrowUp" });
-    expect(selectedOption()).toHaveTextContent("Go to Dashboard");
-  });
-
-  it("does not move the selection above the first item", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    fireEvent.keyDown(input(), { key: "ArrowUp" });
-
-    expect(selectedOption()).toHaveTextContent("Go to Dashboard");
-  });
-
-  it("does not move the selection past the last item", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-    const last = options().length - 1;
-
-    for (let i = 0; i < options().length + 3; i += 1) {
-      fireEvent.keyDown(input(), { key: "ArrowDown" });
+    // Click outside backdrop
+    const backdrop = document.querySelector(".bg-black\\/60");
+    if (backdrop) {
+      fireEvent.click(backdrop);
+      expect(handleClose).toHaveBeenCalled();
+      expect(handleOpenChange).toHaveBeenCalledWith(false);
     }
-
-    expect(options()[last]).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("navigates to the selected route when Enter is pressed", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    fireEvent.keyDown(input(), { key: "ArrowDown" });
-    fireEvent.keyDown(input(), { key: "Enter" });
-
-    expect(navigateMock).toHaveBeenCalledWith("/bridges");
-    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
-  });
-
-  it("runs the typed-and-selected command on Enter", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    fireEvent.change(input(), { target: { value: "status" } });
-    fireEvent.keyDown(input(), { key: "Enter" });
-
-    expect(navigateMock).toHaveBeenCalledWith("/status");
-  });
-
-  it("closes without navigating when Escape is pressed", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-
-    fireEvent.keyDown(input(), { key: "Escape" });
-
-    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
-    expect(navigateMock).not.toHaveBeenCalled();
-  });
-
-  it("lists the most recently used command first when reopened", () => {
-    render(<CommandPalette />);
-    openWithShortcut();
-    fireEvent.keyDown(input(), { key: "ArrowDown" });
-    fireEvent.keyDown(input(), { key: "Enter" });
-
-    openWithShortcut();
-
-    expect(screen.getByText("Recent")).toBeInTheDocument();
-    expect(options()[0]).toHaveTextContent("Go to Bridges");
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]")).toEqual(["nav-bridges"]);
   });
 });

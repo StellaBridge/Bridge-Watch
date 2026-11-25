@@ -56,6 +56,11 @@ See:
 
 ## Runbooks
 
-Alert annotations include `runbook_url` values pointing to:
+| Alert | Runbook |
+|-------|---------|
+| `BackendDown`, `HighHTTPErrorRate`, `BridgeReserveMismatchDetected`, `DbPoolExhaustionWarning`, ... | [critical-alerts.md](runbooks/critical-alerts.md) |
+| `RedisMemoryFragmentationHigh`, `RedisKeyEvictionsOccurring` | [redis-alerts.md](runbooks/redis-alerts.md) |
+| `HorizonRpcOutage`, `HorizonCursorLagHigh` (escalation) | [horizon-rpc-outage.md](runbooks/horizon-rpc-outage.md) |
+| `DatabaseDiskFull` | [database-disk-full.md](runbooks/database-disk-full.md) |
 
-- `monitoring/runbooks/critical-alerts.md`
+Alert annotations include `runbook_url` values pointing directly to the relevant file and section.

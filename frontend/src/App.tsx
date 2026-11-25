@@ -1,6 +1,7 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
+import CommandPalette from "./components/CommandPalette";
 import { LoadingFallback } from "./components/LoadingFallback";
 import { GlobalErrorBoundary, ComponentErrorBoundary } from "./components/ErrorBoundary";
 import { NotificationProvider } from "./context/NotificationContext";
@@ -132,11 +133,43 @@ function PageBoundary({ page, children }: { page: string; children: ReactNode })
 }
 
 function App() {
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Do not interfere if user is typing inside an input or textarea
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        Boolean(target?.isContentEditable);
+
+      if (e.key === "Escape") {
+        setCommandPaletteOpen(false);
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        if (isInput) return;
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <GlobalErrorBoundary>
       <RTLProvider>
         <NotificationProvider>
           <NotificationInitializer />
+          <CommandPalette
+            open={commandPaletteOpen}
+            onClose={() => setCommandPaletteOpen(false)}
+            onOpenChange={setCommandPaletteOpen}
+          />
           <Suspense fallback={<LoadingFallback />}>
             <Routes>
             <Route path="/" element={<Landing />} />
